@@ -1,0 +1,51 @@
+/* 设置页布局：标题 / 标签栏 / 底部按钮固定，仅中间表单内容滚动 */
+.main:has(> .settings-page) { overflow: hidden; }
+.settings-page { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.settings-page .section-title { flex-shrink: 0; }
+.settings-body { flex: 1; min-height: 0; overflow-y: auto; padding-right: 8px; }
+.settings-footer { flex-shrink: 0; margin-top: 16px; padding-top: 16px; border-top: 1px solid #f0f0f0; }
+
+/* 设置页标签栏 */
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+.settings-tab { padding: 9px 18px; font-size: 14px; font-weight: 500; color: #606266; background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: all .2s; display: inline-flex; align-items: center; gap: 6px; margin-bottom: -1px; }
+.settings-tab:hover { color: #1890ff; }
+.settings-tab.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 600; }
+
+/* 测试连接按钮行 */
+.test-btn-row { display: flex; align-items: center; gap: 10px; margin: 10px 0 15px; }
+.test-hint { font-size: 12px; color: #909399; }
+.test-result { font-size: 13px; }
+.test-result.success { color: #52c41a; }
+.test-result.error { color: #ff4d4f; }
+.test-result.testing { color: #faad14; }
+
+/* 系统设置页面 */
+.settings-section { margin-bottom: 25px; }
+.settings-title { font-size: 14px; font-weight: 600; color: #303133; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #f0f0f0; }
+.settings-row { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }
+.settings-item { margin-bottom: 15px; }
+.settings-label { display: block; margin-bottom: 6px; font-size: 13px; color: #606266; font-weight: 500; }
+.settings-input { width: 100%; padding: 10px 12px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; transition: border-color 0.3s; }
+.settings-input:focus { outline: none; border-color: #1890ff; box-shadow: 0 0 0 2px rgba(24,144,255,0.2); }
+.settings-hint { font-size: 12px; color: #909399; margin-top: 4px; }
+.settings-actions { display: flex; gap: 10px; margin-top: 25px; padding-top: 20px; border-top: 1px solid #f0f0f0; }
+
+/* 设置页表单：字段自动伸展铺满整行，但不小于最小宽度，放不下时才换行 */
+.settings-page .form-row { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-start; }
+.settings-page .form-group { margin-bottom: 0; }
+.settings-page .form-input { width: 100%; box-sizing: border-box; }
+.settings-page .w-port { flex: 1 1 90px;  min-width: 90px; }   /* 端口（~5位） */
+.settings-page .w-ip   { flex: 1 1 160px; min-width: 160px; }  /* IP 地址（~15位） */
+.settings-page .w-user { flex: 1 1 150px; min-width: 150px; }  /* 用户名 */
+.settings-page .w-pass { flex: 1 1 180px; min-width: 180px; }  /* 密码 */
+.settings-page .w-key  { flex: 1 1 240px; min-width: 240px; }  /* 密钥/盐/bucket/域名 */
+.settings-page .w-url  { flex: 1 1 320px; min-width: 320px; }  /* URL/目录路径/命名空间 */
+.settings-page .w-full { flex: 1 1 100%; }                     /* 多行文本占满整行 */

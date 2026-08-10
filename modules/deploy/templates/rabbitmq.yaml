@@ -1,0 +1,75 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: rabbitmq
+  namespace: ${project_name}-${env_name}-middleware
+spec:
+  replicas: 1
+  override:
+    statefulSet:
+      spec:
+        template:
+          spec:
+            containers:
+              - name: rabbitmq
+                volumeMounts:
+                  - mountPath: /opt/rabbitmq/community-plugins
+                    name: community-plugins
+            volumes:
+              - name: community-plugins
+                emptyDir: {}
+            initContainers:
+              - command:
+                  - sh
+                  - -c
+                  - curl -L -v http://192.168.3.12:8080/rabbitmq_delayed_message_exchange-3.12.0.ez --output /community-plugins/rabbitmq_delayed_message_exchange-3.12.0.ez
+                image: hub.hzbxhd.com/middleware/curl
+                imagePullPolicy: IfNotPresent
+                name: copy-community-plugins
+                resources:
+                  limits:
+                    cpu: 100m
+                    memory: 500Mi
+                  requests:
+                    cpu: 100m
+                    memory: 500Mi
+                terminationMessagePolicy: FallbackToLogsOnError
+                volumeMounts:
+                  - mountPath: /community-plugins/
+                    name: community-plugins
+  rabbitmq:
+    additionalConfig: |
+      default_vhost = /      #配置Virtual Hosts
+      default_user = root
+      default_pass = ${mq_pass}
+    additionalPlugins:
+      - rabbitmq_delayed_message_exchange
+    envConfig: |
+      PLUGINS_DIR=/opt/rabbitmq/plugins:/opt/rabbitmq/community-plugins
+  image: hub.hzbxhd.com/middleware/rabbitmq:3.11.15-management
+  service:
+    type: ClusterIP
+  persistence:
+    storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations: {}
+  labels:
+    app.kubernetes.io/component: rabbitmq
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/part-of: rabbitmq
+    k8s.kuboard.cn/name: rabbitmq-server
+  name: rabbitmq-server
+  namespace: ${project_name}-${env_name}-middleware
+spec:
+  ports:
+    - name: rabbitmq
+      nodePort: ${middleware_port}
+      port: 15672
+      protocol: TCP
+      targetPort: 15672
+  selector:
+    app.kubernetes.io/name: rabbitmq
+  type: NodePort

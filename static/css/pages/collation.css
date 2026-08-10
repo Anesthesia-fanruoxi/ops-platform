@@ -1,0 +1,205 @@
+/* ══ MySQL 排序修正页面样式 ══ */
+.collation-page {
+    --cp-primary: #6366f1;
+    --cp-primary-hover: #4f46e5;
+    --cp-success: #10b981;
+    --cp-warning: #f59e0b;
+    --cp-danger: #ef4444;
+    --cp-bg: #f8fafc;
+    --cp-card: #ffffff;
+    --cp-border: #e2e8f0;
+    --cp-text: #1e293b;
+    --cp-text-secondary: #64748b;
+    --cp-text-muted: #94a3b8;
+    --cp-radius: 12px;
+    --cp-shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+    font-family: 'Inter', -apple-system, sans-serif;
+    color: var(--cp-text);
+}
+
+/* ── 主体布局 ── */
+.collation-page .cp-layout { display: flex; gap: 20px; height: calc(100vh - 120px); }
+.collation-page .cp-sidebar { width: 25%; min-width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; }
+.collation-page .cp-sidebar .cp-card { margin-bottom: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.collation-page .cp-sidebar-section { padding: 14px; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.collation-page .cp-content { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 16px; }
+
+/* ── 侧边栏标题 ── */
+.collation-page .cp-sidebar-title { font-size: 12px; font-weight: 600; color: var(--cp-text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+
+/* ── 实例卡片列表 ── */
+.collation-page .cp-ds-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: 8px; }
+.collation-page .cp-ds-card { border: 1px solid var(--cp-border); border-radius: 10px; cursor: pointer; transition: all .2s; overflow: hidden; flex-shrink: 0; }
+.collation-page .cp-ds-card:hover { border-color: #c7d2fe; box-shadow: 0 2px 8px rgba(99,102,241,.08); }
+.collation-page .cp-ds-card.active { border-color: var(--cp-primary); box-shadow: 0 2px 12px rgba(99,102,241,.12); }
+.collation-page .cp-ds-card.connecting { opacity: .7; pointer-events: none; }
+.collation-page .cp-ds-card-header { padding: 12px 16px; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.collation-page .cp-ds-card.active .cp-ds-card-header { background: #eef2ff; }
+.collation-page .cp-ds-dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; flex-shrink: 0; }
+.collation-page .cp-ds-dot.on { background: var(--cp-success); }
+.collation-page .cp-ds-name { font-size: 14px; font-weight: 600; }
+.collation-page .cp-ds-host { font-size: 12px; color: var(--cp-text-muted); margin-left: auto; }
+.collation-page .cp-ds-arrow { font-size: 11px; color: var(--cp-text-muted); transition: transform .2s; }
+.collation-page .cp-ds-card.active .cp-ds-arrow { transform: rotate(90deg); }
+.collation-page .cp-ds-body { border-top: 1px solid var(--cp-border); padding: 8px; }
+.collation-page .cp-ds-status { font-size: 12px; color: var(--cp-primary); padding: 10px 16px; border-top: 1px solid var(--cp-border); }
+
+/* ── 数据库行 ── */
+.collation-page .cp-db-row { display: grid; grid-template-columns: minmax(0,1.2fr) 50px minmax(0,1.3fr) auto; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; transition: all .15s; font-size: 13px; }
+.collation-page .cp-db-row:hover { background: #f1f5f9; }
+.collation-page .cp-db-row.active { background: #eef2ff; border-color: #c7d2fe; }
+.collation-page .cp-db-row .db-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collation-page .cp-db-row .db-cell { color: var(--cp-text-muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── 卡片容器 ── */
+.collation-page .cp-card { background: var(--cp-card); border: 1px solid var(--cp-border); border-radius: var(--cp-radius); overflow: hidden; }
+.collation-page .cp-card-header { padding: 16px 20px; border-bottom: 1px solid var(--cp-border); display: flex; align-items: center; justify-content: space-between; }
+.collation-page .cp-card-title { font-size: 15px; font-weight: 600; color: var(--cp-text); }
+.collation-page .cp-card-body { padding: 16px 20px; }
+.collation-page .cp-card-body.no-pad { padding: 0; }
+
+/* ── 统计卡片 ── */
+.collation-page .cp-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; flex-shrink: 0; }
+.collation-page .cp-stat-card { background: var(--cp-card); border: 1px solid var(--cp-border); border-radius: var(--cp-radius); padding: 16px; text-align: center; }
+.collation-page .cp-stat-card .icon { width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; margin-bottom: 6px; }
+.collation-page .cp-stat-card .value { font-size: 26px; font-weight: 700; line-height: 1.2; }
+.collation-page .cp-stat-card .label { font-size: 12px; color: var(--cp-text-muted); margin-top: 4px; }
+
+/* ── 标签面板 ── */
+.collation-page .cp-tab-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.collation-page .cp-panel-tabs { display: flex; gap: 0; }
+.collation-page .cp-panel-tab { padding: 6px 16px; font-size: 14px; font-weight: 500; color: var(--cp-text-secondary); cursor: pointer; border-bottom: 2px solid transparent; transition: all .2s; display: flex; align-items: center; gap: 6px; }
+.collation-page .cp-panel-tab:hover { color: var(--cp-text); }
+.collation-page .cp-panel-tab.active { color: var(--cp-primary); border-bottom-color: var(--cp-primary); }
+.collation-page .cp-tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.collation-page .cp-tab-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.collation-page .cp-tab-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* ── 搜索过滤栏 ── */
+.collation-page .cp-filter-bar { padding: 12px 16px; border-bottom: 1px solid var(--cp-border); display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.collation-page .cp-filter-count { font-size: 12px; color: var(--cp-text-muted); white-space: nowrap; }
+
+/* ── 表格 ── */
+.collation-page table { width: 100%; border-collapse: collapse; }
+.collation-page th { padding: 10px 14px; text-align: left; font-size: 12px; font-weight: 600; color: var(--cp-text-muted); text-transform: uppercase; letter-spacing: .5px; background: #f8fafc; border-bottom: 1px solid var(--cp-border); white-space: nowrap; }
+.collation-page td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid var(--cp-border); }
+.collation-page tr:last-child td { border-bottom: none; }
+.collation-page tr:hover td { background: #f8fafc; }
+.collation-page .tbl-fixed { table-layout: fixed; }
+.collation-page .tbl-fixed td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 表列表列宽（操作列预留足够空间，按钮不换行）── */
+.collation-page .tbl-tables th:nth-child(1), .collation-page .tbl-tables td:nth-child(1) { width: 20%; }
+.collation-page .tbl-tables th:nth-child(2), .collation-page .tbl-tables td:nth-child(2) { width: 14%; }
+.collation-page .tbl-tables th:nth-child(3), .collation-page .tbl-tables td:nth-child(3) { width: 8%; }
+.collation-page .tbl-tables th:nth-child(4), .collation-page .tbl-tables td:nth-child(4) { width: 16%; }
+.collation-page .tbl-tables th:nth-child(5), .collation-page .tbl-tables td:nth-child(5) { width: 8%; }
+.collation-page .tbl-tables th:nth-child(6), .collation-page .tbl-tables td:nth-child(6) { width: 9%; }
+.collation-page .tbl-tables th:nth-child(7), .collation-page .tbl-tables td:nth-child(7) { width: 25%; }
+
+/* ── 表单 ── */
+.collation-page .cp-form-row { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; }
+.collation-page .cp-form-group { display: flex; flex-direction: column; gap: 5px; }
+.collation-page .cp-form-label { font-size: 13px; font-weight: 500; color: var(--cp-text-secondary); }
+.collation-page .cp-form-input { padding: 7px 12px; border: 1px solid var(--cp-border); border-radius: 8px; font-size: 14px; outline: none; transition: border-color .2s, box-shadow .2s; font-family: inherit; }
+.collation-page .cp-form-input:focus { border-color: var(--cp-primary); box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
+
+/* ── 按钮 ── */
+.collation-page .cp-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: none; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .15s; font-family: inherit; white-space: nowrap; flex-shrink: 0; }
+.collation-page .cp-btn-primary { background: var(--cp-primary); color: white; }
+.collation-page .cp-btn-primary:hover { background: var(--cp-primary-hover); }
+.collation-page .cp-btn-success { background: var(--cp-success); color: white; }
+.collation-page .cp-btn-success:hover { background: #059669; }
+.collation-page .cp-btn-warning { background: var(--cp-warning); color: white; }
+.collation-page .cp-btn-warning:hover { background: #d97706; }
+.collation-page .cp-btn-danger { background: var(--cp-danger); color: white; }
+.collation-page .cp-btn-danger:hover { background: #dc2626; }
+.collation-page .cp-btn-outline { background: transparent; border: 1px solid var(--cp-border); color: var(--cp-text-secondary); }
+.collation-page .cp-btn-outline:hover { background: #f8fafc; border-color: #cbd5e1; }
+.collation-page .cp-btn-purple { background: #7c3aed; color: white; }
+.collation-page .cp-btn-purple:hover { background: #6d28d9; }
+.collation-page .cp-btn-sm { padding: 5px 12px; font-size: 12px; }
+.collation-page .cp-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── 标签 ── */
+.collation-page .cp-tag { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+.collation-page .cp-tag-success { background: #ecfdf5; color: #059669; }
+.collation-page .cp-tag-danger { background: #fef2f2; color: #dc2626; }
+.collation-page .cp-tag-warning { background: #fffbeb; color: #d97706; }
+.collation-page .cp-tag-info { background: #eff6ff; color: #2563eb; }
+.collation-page .cp-tag-purple { background: #f5f3ff; color: #7c3aed; }
+
+/* ── 消息 ── */
+.collation-page .cp-msg { padding: 12px 16px; border-radius: 8px; font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.collation-page .cp-msg-success { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.collation-page .cp-msg-error { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+
+/* ── 弹窗 ── */
+.collation-page .cp-modal-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,.4); z-index: 1000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+.collation-page .cp-modal-box { background: var(--cp-card); border-radius: 16px; width: 540px; max-height: 80vh; box-shadow: 0 20px 60px rgba(0,0,0,.2); display: flex; flex-direction: column; }
+.collation-page .cp-modal-header { padding: 20px 24px 12px; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+.collation-page .cp-modal-close { width: 28px; height: 28px; border: none; background: #f1f5f9; border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--cp-text-muted); display: flex; align-items: center; justify-content: center; transition: all .15s; }
+.collation-page .cp-modal-close:hover { background: #e2e8f0; color: var(--cp-text); }
+.collation-page .cp-modal-body { padding: 8px 24px 16px; overflow-y: auto; flex: 1; font-size: 14px; line-height: 1.8; }
+.collation-page .cp-modal-footer { padding: 12px 24px 20px; display: flex; justify-content: flex-end; gap: 10px; }
+.collation-page .cp-modal-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; line-height: 1.6; }
+.collation-page .cp-modal-item:last-child { border-bottom: none; }
+.collation-page .cp-modal-summary { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9; color: var(--cp-text-secondary); font-size: 13px; line-height: 1.6; }
+.collation-page .cp-modal-warning { margin-top: 14px; padding: 10px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; color: #b45309; font-size: 13px; line-height: 1.6; }
+
+/* ── 弹窗高亮文本（表名/字符集）── */
+.collation-page .cp-hl { font-family: 'JetBrains Mono', Consolas, monospace; background: #eef2ff; color: #4f46e5; padding: 2px 8px; border-radius: 6px; font-weight: 600; font-size: 13px; }
+
+/* ── 弹窗不符合字段标签列表 ── */
+.collation-page .cp-hl-cols { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.collation-page .cp-hl-col { font-family: 'JetBrains Mono', Consolas, monospace; background: #fef2f2; color: #dc2626; padding: 2px 8px; border-radius: 6px; font-size: 12px; }
+
+/* ── 字段修复预览弹窗 ── */
+.collation-page .cp-colf-group { border: 1px solid var(--cp-border); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+.collation-page .cp-colf-group-header { display: flex; align-items: center; gap: 8px; padding: 9px 14px; background: #f8fafc; user-select: none; font-size: 13px; font-weight: 600; }
+.collation-page .cp-colf-group-header .cnt { font-weight: 400; font-size: 12px; color: var(--cp-text-muted); }
+.collation-page .cp-est-rows { font-weight: 400; font-size: 12px; color: #6366f1; background: #eef2ff; padding: 1px 8px; border-radius: 6px; white-space: nowrap; }
+.collation-page .cp-colf-cols { padding: 4px 14px 8px; }
+.collation-page .cp-colf-item { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; border-bottom: 1px dashed #f1f5f9; }
+.collation-page .cp-colf-item:last-child { border-bottom: none; }
+.collation-page .cp-colf-item input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--cp-primary); cursor: pointer; }
+.collation-page .cp-colf-item .col-name { font-weight: 500; min-width: 120px; }
+.collation-page .cp-colf-item .col-type { color: var(--cp-text-muted); font-size: 12px; font-family: 'JetBrains Mono', Consolas, monospace; }
+.collation-page .cp-colf-item .col-coll { margin-left: auto; font-size: 11px; color: #d97706; background: #fffbeb; padding: 1px 8px; border-radius: 10px; }
+.collation-page .cp-colf-item.unchecked { opacity: .4; }
+.collation-page .cp-colf-item.unchecked .col-coll { text-decoration: line-through; }
+
+/* ── 字段问题明细表格 ── */
+.collation-page .cp-issue-table th { padding: 7px 12px; font-size: 11px; }
+.collation-page .cp-issue-table td { padding: 7px 12px; font-size: 12px; }
+.collation-page .cp-code { font-size: 12px; font-family: 'JetBrains Mono', Consolas, monospace; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+
+/* ── 修复实时日志弹框（SSE）── */
+.collation-page .cp-plog { background: #1e1e1e; border-radius: 10px; margin: 0 24px 8px; padding: 14px 16px; max-height: 62vh; min-height: 320px; overflow-y: auto; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 12px; line-height: 1.7; }
+.collation-page .cp-plog-line { display: flex; gap: 8px; align-items: baseline; padding: 1px 0; animation: cp-plog-in .25s ease; }
+@keyframes cp-plog-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+.collation-page .cp-plog-time { color: #6a9955; flex-shrink: 0; }
+.collation-page .cp-plog-op { color: #c586c0; flex-shrink: 0; }
+.collation-page .cp-plog-src { color: #4ec9b0; flex-shrink: 0; }
+.collation-page .cp-plog-db { color: #ce9178; flex-shrink: 0; }
+.collation-page .cp-plog-msg { color: #d4d4d4; word-break: break-all; flex: 1; }
+.collation-page .cp-plog-lvl-info { color: #569cd6; }
+.collation-page .cp-plog-lvl-ok { color: #4ec9b0; }
+.collation-page .cp-plog-lvl-warn { color: #dcdcaa; }
+.collation-page .cp-plog-lvl-error { color: #f44747; }
+.collation-page .cp-plog-lvl-done { color: #c586c0; font-weight: 700; }
+.collation-page .cp-plog-lvl-failed { color: #f44747; font-weight: 700; }
+
+/* ── 欢迎/空状态 ── */
+.collation-page .cp-welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 400px; color: var(--cp-text-muted); }
+.collation-page .cp-welcome-icon { font-size: 48px; margin-bottom: 16px; opacity: .5; }
+.collation-page .cp-welcome-text { font-size: 16px; margin-bottom: 8px; }
+.collation-page .cp-welcome-sub { font-size: 14px; }
+.collation-page .cp-empty { text-align: center; padding: 48px; color: var(--cp-text-muted); font-size: 14px; }
+.collation-page .cp-loading { text-align: center; padding: 40px; color: var(--cp-text-muted); }
+
+/* ── 面包屑 ── */
+.collation-page .cp-breadcrumb { display: flex; gap: 6px; align-items: center; font-size: 14px; }
+.collation-page .cp-breadcrumb a { color: var(--cp-primary); cursor: pointer; text-decoration: none; }
+.collation-page .cp-breadcrumb a:hover { text-decoration: underline; }
+.collation-page .cp-breadcrumb .sep { color: var(--cp-text-muted); }

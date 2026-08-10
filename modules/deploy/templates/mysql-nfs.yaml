@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: mysql-nacos
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    name: mysql-nacos
+spec:
+  replicas: 1
+  selector:
+    name: mysql-nacos
+  template:
+    metadata:
+      labels:
+        name: mysql-nacos
+    spec:
+      containers:
+      - name: mysql-nacos
+        image: ${hub_server}/middleware/nacos-mysql:5.7
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: mysql-nacos-data
+          mountPath: /var/lib/mysql
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "root"
+        - name: MYSQL_DATABASE
+          value: "nacos"
+        - name: MYSQL_USER
+          value: "nacos"
+        - name: MYSQL_PASSWORD
+          value: "nacos"
+      volumes:
+      - name: mysql-nacos-data
+        nfs:
+          server: ${nfs_server}
+          path:  ${data_mount}/datastorg/${project_name}/${env_name}/nacos
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-nacos
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    name: mysql-nacos
+spec:
+  ports:
+  - port: 3306
+    targetPort: 3306
+  selector:
+    name: mysql-nacos

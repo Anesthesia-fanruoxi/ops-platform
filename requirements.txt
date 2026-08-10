@@ -1,0 +1,12 @@
+flask>=2.3.0
+Flask-SQLAlchemy>=3.1.1
+SQLAlchemy>=2.0.30
+PyYAML>=6.0
+requests>=2.31.0
+paramiko>=3.0.0
+pymysql>=1.1.0
+redis>=5.0.0
+pycryptodome>=3.19.0
+gunicorn>=21.2.0
+urllib3>=2.0.0
+pyotp>=2.0.0

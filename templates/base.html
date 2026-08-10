@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}运维平台{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ static_asset('favicon.svg') }}">
+  <link rel="stylesheet" href="{{ static_asset('css/pages/common.css') }}">
+  <link rel="stylesheet" href="{{ static_asset('css/pages/collation.css') }}">
+  <link rel="stylesheet" href="{{ static_asset('css/pages/create.css') }}">
+  <link rel="stylesheet" href="{{ static_asset('css/pages/projects.css') }}">
+  <link rel="stylesheet" href="{{ static_asset('css/pages/manage.css') }}">
+  <link rel="stylesheet" href="{{ static_asset('css/pages/settings.css') }}">
+  <link rel="stylesheet" href="{{ static_asset('css/pages/cicd.css') }}">
+  <link rel="stylesheet" href="{{ static_asset('css/pages/detail.css') }}">
+  <link rel="stylesheet" href="{{ static_asset('css/pages/login.css') }}">
+  <link rel="stylesheet" href="{{ static_asset('vendor/solarized-dark.min.css') }}">
+  <link rel="stylesheet" href="{{ static_asset('vendor/element-plus.css') }}">
+  <script src="{{ static_asset('vendor/vue.global.prod.js') }}"></script>
+  <script src="{{ static_asset('vendor/vue-router.global.prod.js') }}"></script>
+  <script src="{{ static_asset('vendor/element-plus.full.min.js') }}"></script>
+  <script src="{{ static_asset('vendor/highlightjs/highlight.min.js') }}"></script>
+  <script src="{{ static_asset('vendor/highlightjs/languages/nginx.min.js') }}"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- 登录页：不显示侧边栏和topbar -->
+    <template v-if="!auth.isLoggedIn">
+      <router-view></router-view>
+    </template>
+
+    <!-- 登录后：正常布局 -->
+    <template v-else>
+      <div class="layout">
+        <div class="sidebar">
+          <div class="sidebar-title">运维平台</div>
+          <div class="sidebar-menu">
+            <div v-for="group in visibleMenuGroups" :key="group.key" class="menu-group">
+              <div class="menu-group-title" :class="{ open: openGroupKey === group.key }" @click="toggleGroup(group.key)">
+                <span class="menu-group-icon">[[ group.icon ]]</span> [[ group.label ]]
+                <span class="menu-group-arrow">▾</span>
+              </div>
+              <div class="menu-group-items" :class="{ open: openGroupKey === group.key }">
+                <div class="menu-group-items-inner">
+                  <router-link v-for="item in group.children" :key="item.path"
+                    :to="item.path" class="menu-item" active-class="active">
+                    [[ item.label ]]
+                  </router-link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="content">
+          <div class="topbar">
+            <div class="topbar-tabs">
+              <div v-for="tab in openedTabs" :key="tab.path" class="tab-item"
+                   :class="{ active: $route.path === tab.path }" @click="switchTab(tab)">
+                <span class="tab-label">[[ tab.title ]]</span>
+                <span v-if="openedTabs.length > 1" class="tab-close" title="关闭" @click.stop="closeTab(tab)">✕</span>
+              </div>
+            </div>
+            <div class="topbar-user">
+              <el-dropdown trigger="click" @command="handleUserCommand">
+                <span class="user-info">
+                  <span class="user-avatar">[[ (auth.nickname || auth.username) ? (auth.nickname || auth.username)[0].toUpperCase() : '?' ]]</span>
+                  <span class="user-name">[[ auth.nickname || auth.username ]]</span>
+                  <el-icon><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="12" height="12"><path fill="currentColor" d="M831.872 340.864 512 652.672 192.128 340.864a30.592 30.592 0 0 0-42.752 0 29.12 29.12 0 0 0 0 42.176L489.664 714.24a32 32 0 0 0 44.672 0l340.288-331.2a29.12 29.12 0 0 0 0-41.728 30.592 30.592 0 0 0-42.752-.448z"/></svg></el-icon>
+                </span>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="password">修改密码</el-dropdown-item>
+                    <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+          </div>
+          <div class="main">
+            <router-view v-slot="{ Component }">
+              <keep-alive :include="cachedViews">
+                <component :is="Component" :key="$route.path" />
+              </keep-alive>
+            </router-view>
+          </div>
+        </div>
+      </div>
+
+      <!-- 修改密码弹窗 -->
+      <el-dialog v-model="pwdDialogVisible" title="修改密码" width="400px" :close-on-click-modal="false">
+        <el-form label-width="80px">
+          <el-form-item label="旧密码">
+            <el-input v-model="pwdForm.old_password" type="password" show-password placeholder="请输入旧密码"></el-input>
+          </el-form-item>
+          <el-form-item label="新密码">
+            <el-input v-model="pwdForm.new_password" type="password" show-password placeholder="请输入新密码（至少6位）"></el-input>
+          </el-form-item>
+          <el-form-item label="确认密码">
+            <el-input v-model="pwdForm.confirm_password" type="password" show-password placeholder="再次输入新密码"
+              @keyup.enter="handleChangePwd"></el-input>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="pwdDialogVisible = false">取 消</el-button>
+          <el-button type="primary" :loading="pwdLoading" @click="handleChangePwd">确 定</el-button>
+        </template>
+      </el-dialog>
+    </template>
+  </div>
+
+  <script src="{{ static_asset('js/utils.js') }}"></script>
+  <script src="{{ static_asset('js/core/MessageBox.js') }}"></script>
+  <!-- system 域 -->
+  <script src="{{ static_asset('js/modules/system/LoginPage.js') }}"></script>
+  <script src="{{ static_asset('js/modules/system/UsersPage.js') }}"></script>
+  <script src="{{ static_asset('js/modules/system/RolesPage.js') }}"></script>
+  <script src="{{ static_asset('js/modules/system/SettingsPage.js') }}"></script>
+  <!-- deploy 域 -->
+  <script src="{{ static_asset('js/modules/deploy/CreateProject.js') }}"></script>
+  <script src="{{ static_asset('js/modules/deploy/CreateEnvironment.js') }}"></script>
+  <script src="{{ static_asset('js/modules/deploy/CreateService.js') }}"></script>
+  <script src="{{ static_asset('js/modules/deploy/ProjectsPage.js') }}"></script>
+  <script src="{{ static_asset('js/modules/deploy/ManagePage.js') }}"></script>
+  <!-- nginx 域 -->
+  <script src="{{ static_asset('js/modules/nginx/NginxPage.js') }}"></script>
+  <!-- collation 域 -->
+  <script src="{{ static_asset('js/modules/collation/DatasourcesPage.js') }}"></script>
+  <script src="{{ static_asset('js/modules/collation/CollationPage.js') }}"></script>
+  <!-- cicd 域 -->
+  <script src="{{ static_asset('js/modules/cicd/CicdConfigPage.js') }}"></script>
+  <script src="{{ static_asset('js/modules/cicd/SchedulePage.js') }}"></script>
+  <script src="{{ static_asset('js/app.js') }}"></script>
+</body>
+</html>

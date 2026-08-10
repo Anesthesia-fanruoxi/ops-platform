@@ -1,0 +1,244 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations: {}
+  labels:
+    k8s.kuboard.cn/name: ${app_name}
+  name: ${app_name}
+  namespace: ${project_name}-${env_name}-service
+spec:
+  progressDeadlineSeconds: 600
+  replicas: ${replicas}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: ${app_name}
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: ${app_name}
+        jmx: 'true'
+    spec:
+      initContainers:
+        - command:
+            - sh
+            - '-c'
+            - touch /data/$MY_POD_NAME
+          env:
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+          image: 'hub.hzbxhd.com/middleware/busybox:latest'
+          imagePullPolicy: IfNotPresent
+          name: server-name
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /data/
+              name: ops
+      containers:
+        - env:
+            - name: PROJECT
+              value: ${project_name}
+            - name: POD_NAME
+              value: ${app_name}
+            - name: ENVIRONMENT
+              value: ${project_name}-${env_name}
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: MY_NODE_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.hostIP
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: MY_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+          image: ${hub_server}/elfk/filebeat:8.8.1
+          imagePullPolicy: IfNotPresent
+          name: filebeat
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /app/logs
+              name: logs
+            - mountPath: /usr/share/filebeat/filebeat.yml
+              name: config
+              subPath: filebeat.yml
+        - env:
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: SERVICE_NAME
+              value: "${app_name}"
+            - name: JAVA_OPTS
+              value: "-server -Xms${xms}g -Xmx${xmx}g -XX:MetaspaceSize=256m  -XX:MaxMetaspaceSize=512m  -XX:InitialCodeCacheSize=128m  -XX:ReservedCodeCacheSize=256m  -XX:+UseZGC -XX:ZCollectionInterval=10  -XX:ZFragmentationLimit=10  -XX:+UnlockExperimentalVMOptions -XX:ConcGCThreads=4  -XX:ZUncommitDelay=5  -XX:+HeapDumpOnOutOfMemoryError  -XX:HeapDumpPath=/var/log/java_heapdump.hprof -XX:+AlwaysPreTouch -Djava.security.egd=file:/dev/./urandom -Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=*:${debug_port_internal}"
+#              value: "-server -Xms${xms}g -Xmx${xmx}g -XX:MetaspaceSize=256m -XX:MaxTenuringThreshold=5 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:ParallelGCThreads=8 -XX:ConcGCThreads=4  -XX:+HeapDumpOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom -Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=${debug_port_internal}"
+            - name: PROFILES
+              value: "pro"
+            - name: DOMAIN
+              value: "${domain}"
+            - name: NACOS_ADDR
+              value: "nacos-headless.${project_name}-${env_name}-middleware.svc.cluster.local:8848"
+            - name: NACOS_NAMESPACE
+              value: "${nacos_namespace}"
+            - name: PORT
+              value: "${service_port}"
+            - name: REDIS_ADDR
+              value: "redis.${project_name}-${env_name}-middleware.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASS
+              value: "${redis_pass}"
+            - name: REDIS_DB
+              value: "1"
+            - name: RABBITMQ_ADDR
+              value: "rabbitmq.${project_name}-${env_name}-middleware.svc.cluster.local:5672"
+            - name: RABBITMQ_USER
+              value: "root"
+            - name: RABBITMQ_PASSWORD
+              value: "${mq_pass}"
+            - name: MYSQL_ADDR
+              value: "mysql.${project_name}-${env_name}-middleware.svc.cluster.local"
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_USER
+              value: "root"
+            - name: MYSQL_PASSWORD
+              value: "${mysql_pass}"
+            - name: PUBLICURL
+              value: "${publicurl}"
+            - name: PRIVATEURL
+              value: "${privateurl}"
+            - name: OSSAK
+              value: "${ossak}"
+            - name: OSSSK
+              value: "${osssk}"
+            - name: PUBLICBUCKET
+              value: "${publicbucket}"
+            - name: PRIVATEBUCKET
+              value: "${privatebucket}"
+            - name: RISKKEY
+              value: "${riskKey}"
+            - name: ENCRYPTED
+              value: "${encrypted}"
+            - name: ESPORT
+              value: "9200"
+            - name: ESHOSTS
+              value: "elasticsearch-es-http.eck.svc.cluster.local"
+            - name: ESUSER
+              value: "elastic"
+            - name: ESPASSWORD
+              value: "${es_pass}"
+            - name: MINIOPORT
+              value: '9000'
+            - name: MINIOHOSTS
+              value: minio.hzbxhd.com
+            - name: MINIOUSER
+              value: admin
+            - name: MINIOPASSWORD
+              value: sp4LY3rh
+            - name: SEATA_NACOS_APPLICATION
+              value: seata-server
+            - name: SEATA_NACOS_SERVER_ADDR
+              value: nacos-headless.${project_name}-${env_name}-middleware.svc.cluster.local:8848
+            - name: SEATA_NACOS_GROUP
+              value: SEATA_GROUP
+            - name: SEATA_NACOS_NAMESPACE
+              value: ${seata_nacos_namespace}
+          image: ${hub_server}/${project_name}-${env_name}/${app_name}:${tag}
+          imagePullPolicy: IfNotPresent
+          name: ${app_name}
+          ports:
+            - containerPort: ${service_port}
+              name: http
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 8000m
+              memory: ${xmx}Gi
+            requests:
+              cpu: 50m
+              memory: ${xms}Gi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - name: logs
+              mountPath: /data/project/${app_name}/logs
+            - name: config
+              mountPath: /data/project/${app_name}/config
+            - name: template
+              mountPath: /data/project/${app_name}/template
+            - name: upload
+              mountPath: /data/project/${app_name}/public
+            - name: key
+              mountPath: /data/project/${app_name}/key
+            - name: yiqianbao
+              mountPath: /data/project/${app_name}/yiqianbao
+      volumes:
+        - name: logs
+          nfs:
+            path: ${logs_mount}/${project_name}-${env_name}/${project_name}-${name}
+            server: ${nfs_server}
+        - name: config
+          configMap:
+            name: public-config
+        - name: template
+          nfs:
+            server: ${nfs_server}
+            path: ${data_mount}/${project_name}/${env_name}/template
+        - name: upload
+          nfs:
+            path: ${data_mount}/${project_name}/${env_name}/upload/public
+            server: ${nfs_server}
+        - name: key
+          nfs:
+            path: ${data_mount}/${project_name}/${env_name}/key
+            server: ${nfs_server}
+        - name: yiqianbao
+          nfs:
+            path: ${data_mount}/${project_name}/${env_name}/yiqianbao
+            server: ${nfs_server}
+        - name: ops
+          nfs:
+            path: ${data_mount}/ops/${project_name}-${env_name}
+            server: ${nfs_server}
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        runAsUser: 0
+      terminationGracePeriodSeconds: 30
+
+

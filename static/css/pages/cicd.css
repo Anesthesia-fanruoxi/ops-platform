@@ -1,0 +1,327 @@
+/* CI/CD 管理页面样式 */
+.cicd-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 120px);
+}
+
+.cicd-page .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cicd-page .section-title {
+  font-size: 16px;
+  font-weight: bold;
+  color: #303133;
+}
+
+/* 让表格铺满剩余高度（直接计算，不依赖 flex 链） */
+.cicd-page .el-tab-pane > .el-table {
+  height: calc(100vh - 310px) !important;
+}
+.cicd-page .el-table .el-table__body-wrapper {
+  overflow-y: auto !important;
+}
+
+/* 构建日志弹窗 */
+.cicd-log-viewer {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 12px;
+  border-radius: 6px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  height: 55vh;
+}
+
+.cicd-log-viewer .log-line {
+  margin: 0;
+  padding: 1px 0;
+}
+
+.cicd-log-viewer .log-line.error {
+  color: #f56c6c;
+}
+
+/* 状态标签颜色 */
+.cicd-status--pending { color: #909399; }
+.cicd-status--running { color: #409eff; }
+.cicd-status--success { color: #67c23a; }
+.cicd-status--failed  { color: #f56c6c; }
+.cicd-status--cancelled { color: #e6a23c; }
+
+/* Agent 状态点 */
+.cicd-agent-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+.cicd-agent-dot.online  { background: #67c23a; }
+.cicd-agent-dot.offline { background: #909399; }
+.cicd-agent-dot.installing { background: #e6a23c; }
+
+/* ═══ 调度中心 ═══ */
+.schedule-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 120px);
+}
+.schedule-page .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.schedule-page .section-title {
+  font-size: 16px;
+  font-weight: bold;
+  color: #303133;
+}
+.schedule-body {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+.schedule-left,
+.schedule-right {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 14px;
+  overflow-y: auto;
+  height: 100%;
+  background: #fafafa;
+}
+.schedule-left {
+  width: 400px;
+  flex-shrink: 0;
+}
+.schedule-right {
+  flex: 1;
+  min-width: 0;
+}
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.agent-card .agent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.agent-card .agent-name {
+  font-size: 15px;
+  font-weight: bold;
+  color: #303133;
+}
+.agent-card .agent-meta {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 4px;
+}
+.agent-card .metric-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.agent-card .metric-label {
+  width: 48px;
+  font-size: 12px;
+  color: #606266;
+  flex-shrink: 0;
+}
+.agent-card .metric-val {
+  font-size: 12px;
+  color: #606266;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+.agent-card .cache-size {
+  font-size: 12px;
+  font-weight: bold;
+  font-family: 'Consolas', 'Monaco', monospace;
+  white-space: nowrap; /* 数字过长时不换行 */
+  flex-shrink: 0;
+}
+.agent-card .el-progress {
+  flex: 1;
+}
+.agent-card.agent-disabled {
+  opacity: 0.6;
+  border-color: #f56c6c;
+}
+.agent-card.agent-offline {
+  border-color: #f56c6c;
+  border-width: 2px;
+  background: #fef0f0;
+}
+.agent-card .agent-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #909399;
+  font-size: 18px;
+  font-weight: bold;
+  line-height: 1;
+  letter-spacing: 1px;
+  user-select: none;
+}
+.agent-card .agent-more:hover {
+  background: #f0f2f5;
+  color: #409eff;
+}
+
+/* 调度日志展开详情 */
+.schedule-log-detail {
+  padding: 8px 12px;
+}
+.schedule-log-detail pre {
+  margin: 0;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #303133;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Agent 日志抽屉（与环境部署步骤弹框同款：深青蓝护眼底） */
+.agent-log-box {
+  height: 100%;
+  overflow-y: auto;
+  background: #0a2e3c;
+  color: #a8bcc0;
+  border-radius: 6px;
+  padding: 12px;
+}
+.agent-log-box pre {
+  margin: 0;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', 'Microsoft YaHei', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #a8bcc0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.agent-log-box::-webkit-scrollbar { width: 8px; }
+.agent-log-box::-webkit-scrollbar-track { background: #0a2e3c; border-radius: 4px; }
+.agent-log-box::-webkit-scrollbar-thumb { background: #2f5a6b; border-radius: 4px; }
+.agent-log-box::-webkit-scrollbar-thumb:hover { background: #3f7a8f; }
+
+/* ═══ Agent 详情弹窗（左右分栏） ═══ */
+.detail-split {
+  display: flex;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+}
+.detail-left {
+  flex: 2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.detail-right {
+  flex: 3;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.detail-right .agent-log-box {
+  flex: 1;
+  min-height: 200px;
+}
+.detail-sysinfo {
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+.sysinfo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+}
+.sysinfo-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.sysinfo-item .si-label {
+  color: #909399;
+  flex-shrink: 0;
+  min-width: 60px;
+}
+.sysinfo-item .si-label::after {
+  content: ':';
+}
+.sysinfo-item .si-val {
+  color: #303133;
+  word-break: break-all;
+}
+/* SSH 连接：三个值一排展示，禁止换行 */
+.sysinfo-item .si-val.ssh-conn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  word-break: normal;
+}
+.sysinfo-item .si-val.ssh-conn span {
+  background: #f4f4f5;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.detail-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.chart-box {
+  width: 100%;
+  height: 150px;
+  flex-shrink: 0;
+}
+.chart-wrap {
+  position: relative;
+}
+.chart-latest {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-size: 12px;
+  font-weight: bold;
+  z-index: 2;
+  pointer-events: none;
+}
+.chart-latest span + span {
+  margin-left: 10px;
+}

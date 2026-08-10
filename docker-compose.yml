@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  ops-platform:
+    build: .
+    container_name: ops-platform
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./output:/app/output
+      - ./templates:/app/templates
+    restart: unless-stopped
+    networks:
+      - ops-network
+
+networks:
+  ops-network:
+    driver: bridge

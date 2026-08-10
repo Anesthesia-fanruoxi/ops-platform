@@ -1,0 +1,16 @@
+[Unit]
+Description=CICD Build Agent
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/cicd-agent
+EnvironmentFile=/etc/cicd-agent/agent.env
+Restart=always
+RestartSec=5
+WorkingDirectory=/var/lib/cicd-agent
+
+[Install]
+WantedBy=multi-user.target

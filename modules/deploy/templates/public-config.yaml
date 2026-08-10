@@ -1,0 +1,177 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: public-config
+  namespace: ${project_name}-${env_name}-service
+data:
+  bootstrap.yml: |
+    spring:
+      profiles:
+        active: pro
+      main:
+        #允许存在多个Feign调用相同Service的接口
+        allow-bean-definition-overriding: true
+  bootstrap-pro.yml: |
+    # Tomcat
+    server:
+      port: 8080
+      # tomcat 配置
+      max-http-header-size: 104857600
+      tomcat:
+        # 接收队列长度
+        accept-count: 2000
+        # POST请求提交大小
+        max-http-form-post-size: 50MB
+        # 最大链接数
+        max-connections: 1600
+        #编码方式
+        uri-encoding: UTF-8
+        #链接建立超时时间
+        connection-timeout: 100000
+        #最大线程数
+        threads:
+          max: 1600
+
+    # 日志配置
+    logging:
+        config: classpath:logback-spring.xml
+    # Spring
+    spring:
+      application:
+        # 应用名称
+        name: ${SERVICE_NAME:jieyihua-app}
+        logs_name: ${MY_POD_NAME:info}
+      cloud:
+        nacos:
+          discovery:
+            # 服务注册地址
+            server-addr: ${NACOS_ADDR:10.66.1.50:30280}
+            namespace: ${NACOS_NAMESPACE:7c4013be-2997-40f7-a907-ae9138c3ac4a}
+          config:
+            # 配置中心地址
+            server-addr: ${NACOS_ADDR:10.66.1.50:30280}
+            namespace: ${NACOS_NAMESPACE:7c4013be-2997-40f7-a907-ae9138c3ac4a}
+            # 配置文件格式
+            file-extension: yaml
+            # 共享配置
+            shared-configs:
+              - application.${spring.cloud.nacos.config.file-extension}
+  filebeat.yml: |
+    filebeat.inputs:
+      - type: log
+        id: ${PROJECT}-${ENVIRONMENT}-${POD_NAME}-info
+        enabled: true
+        paths: ["/app/logs/${MY_POD_NAME}*info.log"]
+        fields:
+          project_name: "${PROJECT}"
+          environment: "${ENVIRONMENT}"
+          server_name: "${MY_POD_NAME}"
+          log_type: "info"
+        fields_under_root: true
+      - type: log
+        id: ${PROJECT}-${ENVIRONMENT}-${POD_NAME}-error
+        enabled: true
+        paths: ["/app/logs/${MY_POD_NAME}*error.log"]
+        fields:
+          project_name: "${PROJECT}"
+          environment: "${ENVIRONMENT}"
+          server_name: "${MY_POD_NAME}"
+          log_type: "error"
+        fields_under_root: true
+        multiline.pattern: "^\\d{4}-\\d{2}-\\d{2}"
+        multiline.negate: true
+        multiline.match: after
+    output.logstash:
+      hosts: ["logstash.eck.svc.cluster.local:5044"]
+
+  logback-spring.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <configuration scan="true" scanPeriod="60 seconds" debug="false">
+        <!-- 日志存放路径 -->
+        <property name="log.path" value="logs"/>
+        <!-- 日志输出格式 -->
+        <property name="log.pattern" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{20} - [%method,%line] - %msg%n"/>
+
+        <!-- 控制台输出 -->
+        <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>${log.pattern}</pattern>
+            </encoder>
+        </appender>
+        <springProperty scope="context" name="logName" source="spring.application.logs_name" defaultValue="default"/>
+
+        <!-- 系统日志输出 -->
+        <appender name="file_info" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <!-- 循环政策：基于时间创建日志文件 -->
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <!-- 日志文件名格式 -->
+                <fileNamePattern>${log.path}/${logName}-%d{yyyy-MM-dd}.%i.info.log</fileNamePattern>
+                <!-- 日志最大的历史 60天 -->
+                <maxHistory>60</maxHistory>
+                 <!--每个文件的大小限制-->
+                <MaxFileSize>200MB</MaxFileSize>
+            </rollingPolicy>
+            <encoder>
+                <pattern>${log.pattern}</pattern>
+                <charset>UTF-8</charset>
+            </encoder>
+            <filter class="ch.qos.logback.classic.filter.LevelFilter">
+                <!-- 过滤的级别 -->
+                <level>INFO</level>
+                <!-- 匹配时的操作：接收（记录） -->
+                <onMatch>ACCEPT</onMatch>
+                <!-- 不匹配时的操作：拒绝（不记录） -->
+                <onMismatch>DENY</onMismatch>
+            </filter>
+        </appender>
+
+        <appender name="file_error" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <!-- 循环政策：基于时间创建日志文件 -->
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <!-- 日志文件名格式 -->
+                <fileNamePattern>${log.path}/${logName}-%d{yyyy-MM-dd}.%i.error.log</fileNamePattern>
+                <!-- 日志最大的历史 60天 -->
+                <maxHistory>60</maxHistory>
+                 <!--每个文件的大小限制-->
+                <MaxFileSize>200MB</MaxFileSize>
+            </rollingPolicy>
+            <encoder>
+                <pattern>${log.pattern}</pattern>
+                <charset>UTF-8</charset>
+            </encoder>
+            <filter class="ch.qos.logback.classic.filter.LevelFilter">
+                <!-- 过滤的级别 -->
+                <level>ERROR</level>
+                <!-- 匹配时的操作：接收（记录） -->
+                <onMatch>ACCEPT</onMatch>
+                <!-- 不匹配时的操作：拒绝（不记录） -->
+                <onMismatch>DENY</onMismatch>
+            </filter>
+        </appender>
+
+        <appender name="ASYNC" class="ch.qos.logback.classic.AsyncAppender">
+            <!-- 不丢失日志.默认的,如果队列的80%已满,则会丢弃TRACT、DEBUG、INFO级别的日志 -->
+            <discardingThreshold>0</discardingThreshold>
+            <!-- 更改默认的队列的深度,该值会影响性能.默认值为256 -->
+            <queueSize>262144</queueSize>
+            <!-- 添加附加的appender,最多只能添加一个 -->
+            <appender-ref ref="file_info"/>
+        </appender>
+
+        <!-- 系统模块日志级别控制  -->
+        <logger name="com.jieyihua" level="info"/>
+        <!-- Spring日志级别控制  -->
+        <logger name="org.springframework" level="warn"/>
+
+
+        <root level="info">
+            <appender-ref ref="console"/>
+        </root>
+
+        <!--系统操作日志-->
+        <root level="info">
+            <appender-ref ref="file_info"/>
+            <appender-ref ref="file_error"/>
+        </root>
+    </configuration>

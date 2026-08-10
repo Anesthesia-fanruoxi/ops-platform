@@ -1,0 +1,26 @@
+# ============================================================
+# 运维平台 - 启动基础连接配置（示例模板，脱敏）
+# 使用方法：复制本文件为 config/config.yaml 并填入实际值。
+# 注意：config/config.yaml 已被 .gitignore 忽略，不会提交到仓库。
+# 其余业务配置（NFS/Harbor/K8s/Nginx/中间件等）均在 MySQL
+# settings 表中维护，通过「系统设置」页面管理。
+# ============================================================
+# ── 服务端口 ────────────────────────────────────────────────
+server:
+  host: "0.0.0.0"
+  port: 8050
+# ── MySQL 数据库（业务数据唯一事实源） ─────────────────────
+mysql:
+  hostname: 127.0.0.1
+  port: 3306
+  database: ops-platform
+  username: root
+  password: "CHANGE_ME"
+
+# ── Redis（认证会话 / 设置缓存 / Agent 心跳 / 分布式锁） ────
+redis:
+  hostname: 127.0.0.1
+  port: 6379
+  db: 1
+  password: "CHANGE_ME"
+  key_prefix: "ops:platform:"

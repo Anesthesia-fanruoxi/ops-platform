@@ -1,0 +1,24 @@
+/* 详情对话框 */
+.detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #f0f0f0; }
+.detail-title { font-size: 18px; font-weight: 600; color: #1f1f1f; margin: 0; }
+.btn-close { width: 32px; height: 32px; border: none; background: #f5f5f5; border-radius: 50%; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #999; transition: all 0.2s; }
+.btn-close:hover { background: #e8e8e8; color: #333; }
+
+/* 标签页 */
+.tabs { display: flex; border-bottom: 2px solid #f0f0f0; margin-bottom: 20px; }
+.tab { padding: 12px 24px; cursor: pointer; color: #666; font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.3s; }
+.tab:hover { color: #1890ff; }
+.tab.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 600; }
+.tab-content { min-height: 200px; }
+.empty-tab { text-align: center; padding: 40px; color: #999; }
+
+/* 表格 */
+.detail-table-wrapper { height: 800px; overflow-y: auto; border: 1px solid #e8e8e8; border-radius: 6px; }
+.detail-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.detail-table th { background: #f5f7fa; padding: 12px 16px; text-align: left; font-weight: 600; color: #606266; border-bottom: 1px solid #e8e8e8; position: sticky; top: 0; z-index: 1; }
+.detail-table td { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; color: #303133; }
+.detail-table tr:hover { background: #f0f7ff; }
+.detail-table .image-cell { max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #606266; font-family: monospace; font-size: 12px; }
+.detail-table .port-cell { color: #1890ff; font-weight: 500; }
+.detail-table .tag { display: inline-block; padding: 3px 10px; background: #e6f7ff; border-radius: 12px; font-size: 11px; color: #1890ff; font-weight: 500; }
+.table-footer { padding: 10px 16px; background: #fafafa; border-top: 1px solid #e8e8e8; font-size: 12px; color: #999; text-align: right; }

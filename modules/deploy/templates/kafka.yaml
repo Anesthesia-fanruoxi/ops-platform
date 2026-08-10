@@ -1,0 +1,90 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: kafka
+spec:
+  ports:
+  - name: kafka-9092
+    port: 9092
+    protocol: TCP
+    targetPort: 9092
+  - name: kafka-19092
+    port: 19092
+    protocol: TCP
+    targetPort: 19092
+  selector:
+    app: kafka
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: ${project_name}-${env_name}-middleware
+spec:
+  selector:
+    matchLabels:
+      app: kafka
+  serviceName: kafka
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+        - env:
+            - name: KAFKA_NODE_ID
+              value: '1'
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: 'PLAINTEXT_HOST://kafka.${project_name}-${env_name}-middleware.svc.cluster.local:9092,PLAINTEXT://kafka.${project_name}-${env_name}-middleware.svc.cluster.local:19092'
+            - name: KAFKA_PROCESS_ROLES
+              value: 'broker,controller'
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: '1@127.0.0.1:29093'
+            - name: KAFKA_LISTENERS
+              value: CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092,PLAINTEXT://0.0.0.0:19092
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: PLAINTEXT
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: CONTROLLER
+            - name: CLUSTER_ID
+              value: 4L6g3nShT-eMCtK--X86sd
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: '1'
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: '0'
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: '1'
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: '1'
+            - name: KAFKA_LOG_DIRS
+              value: /tmp/kraft-combined-logs
+          name: kafka
+          image: ${hub_server}/middleware/kafka:3.7.0
+          ports:
+          - containerPort: 9092
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka
+  volumeClaimTemplates:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        annotations:
+          k8s.kuboard.cn/pvcType: Dynamic
+        creationTimestamp: null
+        name: kafka-data
+      spec:
+        accessModes:
+          - ReadWriteMany
+        resources:
+          requests:
+            storage: 20Gi
+        volumeMode: Filesystem

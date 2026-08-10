@@ -1,0 +1,70 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    name: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: redis
+  template:
+    metadata:
+      labels:
+        name: redis
+    spec:
+      containers:
+      - name: redis
+        image: ${hub_server}/middleware/redis:latest
+        volumeMounts:
+        - name: redis-config
+          mountPath: "/usr/local/etc/redis"
+        - name: redis-data
+          mountPath: "/data"
+        command:
+          - "redis-server"
+        args:
+          - "/usr/local/etc/redis/redis.conf"
+      volumes:
+      - name: redis-config
+        configMap:
+          name: redis-config
+      - name: redis-data
+        nfs:
+          path: ${data_mount}/datastorg/${project_name}/${env_name}/redis
+          server: ${nfs_server}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: ${project_name}-${env_name}-middleware
+data:
+  redis.conf: |
+    bind 0.0.0.0
+    save 900 1
+    save 300 10
+    save 60 10000
+    requirepass ${redis_pass}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+ name: redis
+ namespace: ${project_name}-${env_name}-middleware
+ labels:
+   name: redis
+spec:
+ type: NodePort   # 如果需要集群外部访问,这里改为NodePort
+ ports:
+ - port: 6379
+   protocol: TCP
+   targetPort: 6379
+   name: redis
+   nodePort: ${middleware_port}
+ selector:
+   name: redis

@@ -1,0 +1,157 @@
+package main
+
+// ─── Master 通信（注册 / 心跳 / 步骤回调 / 结果上报）──────────────
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"time"
+)
+
+func register() {
+	m := currentMetrics()
+	body := map[string]interface{}{
+		"name":          cfg.Name,
+		"host":          cfg.AdvertiseAddr,
+		"port":          cfg.LogPort,
+		"docker_ok":     checkDocker(),
+		"cpu_load":      m.CPULoad,
+		"mem_percent":   m.MemPercent,
+		"disk_read_kb":  m.DiskReadKB,
+		"disk_write_kb": m.DiskWriteKB,
+		"cpu_cores":     sysInfo.CPUCores,
+		"mem_total_gb":  sysInfo.MemTotalGB,
+		"disk_total_gb": sysInfo.DiskTotalGB,
+		"disk_used_gb":  sysInfo.DiskUsedGB,
+		// 新增动态指标
+		"load1":        m.Load1,
+		"load5":        m.Load5,
+		"load15":       m.Load15,
+		"net_rx_kb":    m.NetRxKB,
+		"net_tx_kb":    m.NetTxKB,
+		"disk_percent": m.DiskPercent,
+		"mem_used_gb":  m.MemUsedGB,
+		"mem_avail_gb": m.MemAvailGB,
+		// Docker 构建缓存大小（30s 采集一次）
+		"docker_cache_size": m.DockerCache,
+		// 静态系统信息 JSON
+		"sys_info": buildSysInfoJSON(),
+	}
+	resp := postEncrypted("/api/cicd/agent/register", body)
+	if resp != nil {
+		log.Printf("[Agent] 注册成功 agent_id=%v", resp["agent_id"])
+	} else {
+		log.Println("[Agent] 注册失败（将在心跳时重试）")
+	}
+}
+
+func heartbeatLoop(quit <-chan os.Signal) {
+	ticker := time.NewTicker(time.Duration(cfg.HeartbeatSec) * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-quit:
+			return
+		case <-ticker.C:
+			m := currentMetrics()
+			body := map[string]interface{}{
+				"name":          cfg.Name,
+				"port":          cfg.LogPort,
+				"docker_ok":     checkDocker(),
+				"cpu_load":      m.CPULoad,
+				"mem_percent":   m.MemPercent,
+				"disk_read_kb":  m.DiskReadKB,
+				"disk_write_kb": m.DiskWriteKB,
+				"cpu_cores":     sysInfo.CPUCores,
+				"mem_total_gb":  sysInfo.MemTotalGB,
+				"disk_total_gb": sysInfo.DiskTotalGB,
+				"disk_used_gb":  sysInfo.DiskUsedGB,
+				// 新增动态指标
+				"load1":        m.Load1,
+				"load5":        m.Load5,
+				"load15":       m.Load15,
+				"net_rx_kb":    m.NetRxKB,
+				"net_tx_kb":    m.NetTxKB,
+				"disk_percent": m.DiskPercent,
+				"mem_used_gb":  m.MemUsedGB,
+				"mem_avail_gb": m.MemAvailGB,
+				// Docker 构建缓存大小（30s 采集一次）
+				"docker_cache_size": m.DockerCache,
+				// 静态系统信息 JSON
+				"sys_info": buildSysInfoJSON(),
+			}
+			postEncrypted("/api/cicd/agent/heartbeat", body)
+		}
+	}
+}
+
+// buildSysInfoJSON 构建静态系统信息 JSON 字符串
+func buildSysInfoJSON() string {
+	info := map[string]interface{}{
+		"os_name":            sysInfo.OSName,
+		"kernel":             sysInfo.Kernel,
+		"arch":               sysInfo.Arch,
+		"hostname":           sysInfo.Hostname,
+		"cpu_model":          sysInfo.CPUModel,
+		"cpu_physical_cores": sysInfo.CPUPhysicalCores,
+		"docker_version":     sysInfo.DockerVersion,
+		"docker_path":        sysInfo.DockerPath,
+	}
+	data, _ := json.Marshal(info)
+	return string(data)
+}
+
+// sendStep 回调步骤状态到 Master，返回 cancel_requested
+func sendStep(buildID, stepNo int, stepKey, status, errMsg string) bool {
+	body := map[string]interface{}{
+		"name":     cfg.Name,
+		"step_no":  stepNo,
+		"step_key": stepKey,
+		"status":   status,
+		"error":    errMsg,
+	}
+	resp := postEncrypted(fmt.Sprintf("/api/cicd/agent/build/%d/step", buildID), body)
+	if resp != nil {
+		if cr, ok := resp["cancel_requested"].(bool); ok {
+			return cr
+		}
+	}
+	return false
+}
+
+func sendResult(buildID int, status, digest, errMsg string) {
+	body := map[string]interface{}{
+		"name":         cfg.Name,
+		"status":       status,
+		"image_digest": digest,
+		"error":        errMsg,
+	}
+	postEncrypted(fmt.Sprintf("/api/cicd/agent/build/%d/result", buildID), body)
+}
+
+// postEncrypted 加密请求体（AES-GCM+gzip 信封）并解密响应信封
+func postEncrypted(path string, body interface{}) map[string]interface{} {
+	payload, err := encryptEnvelope(body)
+	if err != nil {
+		log.Printf("[HTTP] 加密 %s 请求失败: %v", path, err)
+		return nil
+	}
+	resp, err := http.Post(cfg.MasterURL+path, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		log.Printf("[HTTP] POST %s 失败: %v", path, err)
+		return nil
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	if err := decryptEnvelope(data, &result); err != nil {
+		log.Printf("[HTTP] 解密 %s 响应失败: %v", path, err)
+		return nil
+	}
+	return result
+}

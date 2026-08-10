@@ -1,0 +1,30 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations: {}
+  labels:
+    app: ${app_name}
+  name: ${app_name}
+  namespace: ${project_name}-${env_name}-service
+spec:
+  ports:
+    - name: debug
+      nodePort: ${debug_port}
+      port: ${debug_port_internal}
+      protocol: TCP
+      targetPort: ${debug_port_internal}
+    - name: service
+      nodePort: ${node_port}
+      port: ${service_port}
+      protocol: TCP
+      targetPort: ${service_port}
+    - name: jmx
+      nodePort: ${jmx_port}
+      port: ${jmx_port_internal}
+      protocol: TCP
+      targetPort: ${jmx_port_internal}
+  selector:
+    app: ${app_name}
+  sessionAffinity: None
+  type: NodePort

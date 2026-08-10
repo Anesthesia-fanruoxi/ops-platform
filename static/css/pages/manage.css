@@ -1,0 +1,97 @@
+/* 环境管理页面 */
+.filter-select { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 13px; min-width: 150px; }
+.filter-select:focus { outline: none; border-color: #1890ff; }
+
+/* 标签切换 */
+.env-tabs { display: inline-flex; background: #f0f2f5; border-radius: 6px; padding: 2px; margin-right: 10px; }
+.env-tabs .env-tab { padding: 5px 16px; border-radius: 4px; font-size: 13px; cursor: pointer; color: #666; transition: all .2s; white-space: nowrap; }
+.env-tabs .env-tab:hover { color: #333; }
+.env-tabs .env-tab.active { background: #fff; color: #1890ff; font-weight: 500; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+
+/* 表格 */
+.env-table-wrapper { flex: 1; overflow-y: auto; border: 1px solid #e8e8e8; border-radius: 6px; min-height: 0; }
+.env-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.env-table th { background: #fafafa; padding: 10px 16px; text-align: left; font-weight: 600; color: #606266; border-bottom: 1px solid #e8e8e8; position: sticky; top: 0; z-index: 1; font-size: 12px; text-transform: uppercase; letter-spacing: .3px; }
+.env-table td { padding: 10px 16px; border-bottom: 1px solid #f5f5f5; }
+.env-table tr:hover { background: #f5f7fa; }
+.env-table tr:last-child td { border-bottom: none; }
+.env-table .env-name { font-weight: 600; color: #303133; }
+.env-table .deleted-row { opacity: .7; }
+.env-table .deleted-row:hover { opacity: 1; }
+
+/* 空状态 */
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: #bfbfbf; }
+.empty-state .empty-icon { font-size: 40px; margin-bottom: 12px; }
+.empty-state .empty-text { font-size: 14px; }
+
+.header-actions { display: flex; align-items: center; gap: 10px; }
+
+/* 进度弹框 */
+.progress-dialog { width: 1100px; height: 750px; max-height: none; overflow: hidden; display: flex; flex-direction: column; }
+.progress-log { flex: 1; min-height: 0; margin: 12px 16px 16px; overflow-y: auto; }
+
+/* 单击复制 */
+.copy-cell { cursor: pointer; }
+.copy-cell:hover { background: #f5f5f5; border-radius: 2px; }
+.copy-port { color: #d4a017; }
+
+/* 构建进度抽屉 - 日志区域（护眼模式：深青蓝底 + 浅灰字，VSCode 暗色风） */
+.bp-log-box {
+  background: #0a2e3c;
+  color: #a8bcc0;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', 'Microsoft YaHei', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 14px 18px;
+  border-radius: 6px;
+  height: calc(100vh - 210px);
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 构建进度抽屉 - 增强视觉显著度 */
+.bp-drawer {
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.28) !important;
+  border-left: 3px solid #409eff;
+}
+.bp-drawer .el-drawer__header {
+  background: #f0f6ff;
+  border-bottom: 1px solid #d9e6f5;
+  margin-bottom: 0;
+  padding: 14px 20px;
+}
+.bp-drawer .el-drawer__body {
+  background: #fafbfc;
+  padding: 20px;
+}
+
+/* 构建进度抽屉 - 步骤条可点击（总览 + 各步骤圈） */
+.bp-drawer .el-step__head,
+.bp-drawer .el-step__title {
+  cursor: pointer;
+}
+.bp-drawer .el-step__head:hover .el-step__icon {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px rgba(64, 158, 255, 0.15);
+}
+.bp-drawer .el-step__title:hover {
+  color: #409eff;
+}
+.bp-drawer .el-step__icon {
+  transition: transform .15s, box-shadow .15s;
+}
+/* 总览图标 */
+.bp-step-overview {
+  font-size: 16px;
+  line-height: 1;
+}
+/* 当前查看日志的步骤：蓝色框标识（与执行状态互不冲突） */
+.bp-drawer .el-step.bp-step-selected .el-step__icon {
+  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.45);
+  border-color: #409eff;
+}
+.bp-drawer .el-step.bp-step-selected .el-step__title {
+  color: #409eff;
+  font-weight: 600;
+}
