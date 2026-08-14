@@ -117,13 +117,16 @@ admin_bp.add_url_rule('/environments/<int:env_id>', 'update_environment', update
 admin_bp.add_url_rule('/environments/<int:env_id>', 'delete_environment', delete_environment, methods=['DELETE'])
 
 
-# ─── service-info 路由（服务信息：日志/Nacos配置/部署YAML）────
+# ─── service-info 路由（服务信息：日志/Nacos配置/部署YAML/SSE实时/环境变量）────
 from modules.deploy.api.service_info_api import (
     list_services, pod_log_stream, service_yaml,
     nacos_config_detail, nacos_config_publish
 )
+from modules.deploy.api.service_info_stream_api import service_info_stream, service_envs
 
 deploy_bp.add_url_rule('/service-info/list', 'service_info_list', list_services, methods=['GET'])
+deploy_bp.add_url_rule('/service-info/stream', 'service_info_stream', service_info_stream, methods=['GET'])
+deploy_bp.add_url_rule('/service-info/envs', 'service_info_envs', service_envs, methods=['GET'])
 deploy_bp.add_url_rule('/service-info/log/stream', 'service_info_log_stream', pod_log_stream, methods=['GET'])
 deploy_bp.add_url_rule('/service-info/yaml', 'service_info_yaml', service_yaml, methods=['GET'])
 deploy_bp.add_url_rule('/service-info/nacos/config', 'service_info_nacos_config', nacos_config_detail, methods=['GET'])

@@ -127,33 +127,26 @@ def _load_service_ports(base_path, service_name):
 
 @require_permission('page:service_info')
 def list_services():
-    """环境服务列表：deployment 基本信息 + k8s Pod 运行状态"""
+    """环境服务列表：优先全量 K8s 实时快照（镜像/端口/envs/副本/Pod 状态），K8s 不可用时回退 deployment YAML 文件"""
     project = request.args.get('project', '')
     env = request.args.get('env', '')
     if not project or not env:
         return error_response('缺少参数 project / env', 400)
 
-    base, err = _env_base_path(project, env)
-    if err:
-        return err
-
-    services = _parse_deployments(base)
+    ns = f'{project}-{env}-service'
     k8s_error = ''
+    services = []
     try:
-        from modules.deploy.services.kube_client import list_pods
-        for svc in services:
-            ns = svc['namespace'] or f'{project}-{env}-service'
-            try:
-                svc['pods'] = list_pods(ns, f"app={svc['name']}")
-            except Exception as e:
-                svc['pods'] = []
-                if not k8s_error:
-                    k8s_error = str(e)
+        from modules.deploy.services.kube_client import build_service_snapshot
+        services = build_service_snapshot(ns)
     except Exception as e:
-        # kubernetes 依赖/kubeconfig 未配置：列表仍返回，Pod 状态留空
         k8s_error = str(e)
-        for svc in services:
-            svc['pods'] = []
+        # 回退：deployment YAML 文件（镜像/端口/envs）+ Pod 状态留空
+        base, err = _env_base_path(project, env)
+        if not err:
+            services = _parse_deployments(base)
+            for svc in services:
+                svc['pods'] = []
 
     return success_response({'list': services, 'k8s_error': k8s_error})
 

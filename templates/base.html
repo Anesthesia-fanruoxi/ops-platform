@@ -93,10 +93,16 @@
       </div>
 
       <!-- 修改密码弹窗 -->
-      <el-dialog v-model="pwdDialogVisible" title="修改密码" width="400px" :close-on-click-modal="false">
+      <el-dialog v-model="pwdDialogVisible" title="修改密码" width="420px" :close-on-click-modal="false">
         <el-form label-width="80px">
           <el-form-item label="新密码">
-            <el-input v-model="pwdForm.new_password" type="password" show-password placeholder="请输入新密码（至少6位）"></el-input>
+            <div class="pwd-input-wrap">
+              <div class="pwd-input-row">
+                <el-input v-model="pwdForm.new_password" type="password" show-password placeholder="请输入新密码"></el-input>
+                <el-button size="small" plain type="primary" @click="genRandomPassword">随机生成</el-button>
+              </div>
+              <div class="pwd-policy-hint">密码要求：[[ pwdPolicyHint() ]]</div>
+            </div>
           </el-form-item>
           <el-form-item label="确认密码">
             <el-input v-model="pwdForm.confirm_password" type="password" show-password placeholder="再次输入新密码"

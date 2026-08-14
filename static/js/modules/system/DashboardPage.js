@@ -58,10 +58,16 @@ const DashboardPage = {
         <div class="dash-section-title" v-if="entryGroups.length">快捷入口</div>
         <div class="dash-entry-groups" v-if="entryGroups.length">
           <div v-for="g in entryGroups" :key="g.label" class="dash-entry-group">
-            <div class="dash-entry-group-title">[[ g.label ]]</div>
+            <div class="dash-entry-group-title">
+              <span class="dash-entry-group-icon">[[ g.icon ]]</span>
+              <span>[[ g.label ]]</span>
+            </div>
             <div class="dash-entry-group-items">
               <div v-for="m in g.children" :key="m.path" class="dash-entry-group-item"
-                   @click="go(m.path)">[[ m.label ]]</div>
+                   @click="go(m.path)">
+                <span class="dash-entry-item-text">[[ m.label ]]</span>
+                <span class="dash-entry-item-arrow">›</span>
+              </div>
             </div>
           </div>
         </div>
@@ -193,7 +199,7 @@ const DashboardPage = {
         const children = (g.children || []).filter(m =>
           m.path && m.label && m.permission && authState.hasPermission && authState.hasPermission(m.permission));
         if (children.length) {
-          groups.push({ label: g.label || g.key, children });
+          groups.push({ label: g.label || g.key, icon: g.icon || '', children });
         }
       });
       this.entryGroups = groups.slice(0, 5);

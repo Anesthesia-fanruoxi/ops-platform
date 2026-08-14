@@ -1,18 +1,78 @@
-version: '3.8'
-
 services:
-  ops-platform:
+  mysql:
+    image: mysql:8.0
+    container_name: ops-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ops_root_pw}
+      MYSQL_DATABASE: ops-platform
+      MYSQL_USER: ops
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ops_app_pw}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-ops_root_pw}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: ops-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-ops_redis_pw}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-ops_redis_pw}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
     build: .
     container_name: ops-platform
-    ports:
-      - "5000:5000"
-    volumes:
-      - ./output:/app/output
-      - ./templates:/app/templates
     restart: unless-stopped
-    networks:
-      - ops-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # ── 应用 ──
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "8050"
+      SECRET_KEY: ${SECRET_KEY:-please-change-me}
+      # ── MySQL（compose 服务名）──
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DB: ops-platform
+      MYSQL_USER: ops
+      MYSQL_PASS: ${MYSQL_PASSWORD:-ops_app_pw}
+      # ── Redis ──
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-ops_redis_pw}
+      REDIS_DB: "0"
+      # ── 超管（首次启动初始化，默认 admin/admin123）──
+      SUPER_ADMIN_USERNAME: ${SUPER_ADMIN_USERNAME:-admin}
+      SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:-admin123}
+      # ── 认证中心（可选，对接 authPlatform 时配置）──
+      # 注意：authPlatform 连接信息在「系统设置」页面维护（settings 表），不支持环境变量注入
+      # AUTHPLATFORM_URL: http://auth-platform:8080
+      # AUTHPLATFORM_PLATFORM_ID: ops-platform
+      # AUTHPLATFORM_SECRET: xxx
+    ports:
+      - "${APP_PORT:-8050}:8050"
+    volumes:
+      - app_logs:/app/logs
 
-networks:
-  ops-network:
-    driver: bridge
+volumes:
+  mysql_data:
+  redis_data:
+  app_logs:

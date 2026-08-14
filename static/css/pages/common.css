@@ -80,6 +80,12 @@ select.form-input { appearance: auto; }
 .tag-orange { background: #fff7e6; color: #fa8c16; }
 .tag-red { background: #fff1f0; color: #ff4d4f; }
 
+/* 修改密码弹窗：随机生成按钮 + 策略提示 */
+.pwd-input-wrap { width: 100%; }
+.pwd-input-row { display: flex; gap: 8px; width: 100%; align-items: center; }
+.pwd-input-row .el-input { flex: 1; }
+.pwd-policy-hint { font-size: 12px; color: #909399; margin-top: 6px; line-height: 1.5; }
+
 /* 链接 */
 .link { color: #1890ff; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .link:hover { color: #40a9ff; text-decoration: underline; }

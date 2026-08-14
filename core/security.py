@@ -16,6 +16,24 @@ SUPER_ADMIN_PERMS = frozenset({
 })
 
 
+def _mark_audit_permissions(perm_codes):
+    """将本次请求涉及的操作权限码(op:xxx)暂存到 g，供审计拦截器写入日志。
+
+    只在权限校验通过后调用；同一请求叠加多个装饰器时去重合并。
+    """
+    if not perm_codes:
+        return
+    codes = [p for p in perm_codes if isinstance(p, str) and p.startswith('op:')]
+    if not codes:
+        return
+    existing = getattr(g, 'audit_permissions', None) or []
+    merged = list(existing)
+    for c in codes:
+        if c not in merged:
+            merged.append(c)
+    g.audit_permissions = merged
+
+
 def require_permission(perm_code):
     """操作权限校验装饰器（全局共享）"""
     def decorator(f):
@@ -25,11 +43,13 @@ def require_permission(perm_code):
             # 超级管理员（super_admins 独立账号）：仅放行系统设置权限，其余与无权限一致 403
             if user and getattr(user, 'is_super_admin', False):
                 if perm_code in SUPER_ADMIN_PERMS:
+                    _mark_audit_permissions([perm_code])
                     return f(*args, **kwargs)
                 return error_response('无操作权限', 403)
             if user and user.role:
                 perms = user.role.permissions_list()
                 if perm_code in perms:
+                    _mark_audit_permissions([perm_code])
                     return f(*args, **kwargs)
             return error_response('无操作权限', 403)
         return wrapper
@@ -45,11 +65,13 @@ def require_any_permission(*perm_codes):
             # 超级管理员（super_admins 独立账号）：仅放行系统设置权限
             if user and getattr(user, 'is_super_admin', False):
                 if any(p in SUPER_ADMIN_PERMS for p in perm_codes):
+                    _mark_audit_permissions(perm_codes)
                     return f(*args, **kwargs)
                 return error_response('无操作权限', 403)
             if user and user.role:
                 perms = user.role.permissions_list()
                 if any(p in perms for p in perm_codes):
+                    _mark_audit_permissions(perm_codes)
                     return f(*args, **kwargs)
             return error_response('无操作权限', 403)
         return wrapper

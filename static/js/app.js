@@ -8,6 +8,8 @@ const authState = Vue.reactive({
   roleName: '',
   permissions: [],
   isSuperAdmin: false,
+  // 平台密码策略（来自 /api/auth/me，随登录/切回页面刷新）
+  passwordPolicy: { min_length: 6, require_upper: false, require_digit: false },
   hasPermission(code) {
     // 超级管理员（super_admins 独立账号，无角色权限集）：前端全权限放行（后端 require_permission 已放行）
     if (this.isSuperAdmin) return true;
@@ -127,6 +129,7 @@ function tryRestoreAuth(callback) {
         authState.roleName = res.data.role_name || '';
         authState.permissions = res.data.permissions || [];
         authState.isSuperAdmin = !!res.data.is_super_admin;
+        if (res.data.password_policy) authState.passwordPolicy = res.data.password_policy;
       }
     } else {
       localStorage.removeItem('auth_token');
@@ -156,6 +159,7 @@ function refreshPermissions() {
         authState.permissions = res.data.permissions || [];
         authState.roleName = res.data.role_name || '';
         authState.isSuperAdmin = !!res.data.is_super_admin;
+        if (res.data.password_policy) authState.passwordPolicy = res.data.password_policy;
         // 检查当前页面是否还有权限，无则跳转
         var currentPath = router.currentRoute.value.path;
         var currentMenu = flatMenuItems().find(m => m.path === currentPath);
@@ -280,8 +284,17 @@ const app = Vue.createApp({
         ElementPlus.ElMessage.warning('请填写新密码');
         return;
       }
-      if (this.pwdForm.new_password.length < 6) {
-        ElementPlus.ElMessage.warning('新密码长度不能少于6位');
+      const p = this.auth.passwordPolicy || { min_length: 6, require_upper: false, require_digit: false };
+      if (this.pwdForm.new_password.length < p.min_length) {
+        ElementPlus.ElMessage.warning('新密码长度不能少于' + p.min_length + '位');
+        return;
+      }
+      if (p.require_upper && !/[A-Z]/.test(this.pwdForm.new_password)) {
+        ElementPlus.ElMessage.warning('新密码需包含大写字母');
+        return;
+      }
+      if (p.require_digit && !/[0-9]/.test(this.pwdForm.new_password)) {
+        ElementPlus.ElMessage.warning('新密码需包含数字');
         return;
       }
       if (this.pwdForm.new_password !== this.pwdForm.confirm_password) {
@@ -307,12 +320,70 @@ const app = Vue.createApp({
         }
       });
     },
+    // 密码策略提示文案（动态取自平台设置）
+    pwdPolicyHint() {
+      const p = this.auth.passwordPolicy || { min_length: 6, require_upper: false, require_digit: false };
+      const parts = ['至少' + p.min_length + '位'];
+      if (p.require_upper) parts.push('需含大写字母');
+      if (p.require_digit) parts.push('需含数字');
+      return parts.join('，');
+    },
+    // 生成符合平台密码策略的随机密码（填充到新密码/确认密码，并复制到剪贴板）
+    genRandomPassword() {
+      const p = this.auth.passwordPolicy || { min_length: 6, require_upper: false, require_digit: false };
+      const len = Math.max(Number(p.min_length) || 6, 6);
+      const lower = 'abcdefghijkmnpqrstuvwxyz';
+      const upper = 'ABCDEFGHJKMNPQRSTUVWXYZ';
+      const digit = '23456789';
+      const all = lower + upper + digit;
+      const pick = (s) => s[Math.floor(Math.random() * s.length)];
+      let chars = [pick(lower)];
+      if (p.require_upper) chars.push(pick(upper));
+      if (p.require_digit) chars.push(pick(digit));
+      while (chars.length < len) chars.push(pick(all));
+      // Fisher-Yates 洗牌：避免固定前缀
+      for (let i = chars.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = chars[i]; chars[i] = chars[j]; chars[j] = tmp;
+      }
+      const pwd = chars.join('');
+      this.pwdForm.new_password = pwd;
+      this.pwdForm.confirm_password = pwd;
+      const copied = this._copyText(pwd);
+      ElementPlus.ElMessage.success(copied ? '已生成随机密码并复制到剪贴板' : '已生成随机密码，请手动复制');
+    },
+    // 复制文本到剪贴板：内网 http 访问无 Clipboard API，走隐藏 textarea + execCommand（兼容写法）
+    _copyText(text) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        ta.style.top = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (ok) return true;
+      } catch (e) { /* 继续尝试 Clipboard API */ }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
+        return true;
+      }
+      return false;
+    },
     // 风琴式分组：点击切换展开（同时只展开一个）
     toggleGroup(key) {
       this.openGroupKey = this.openGroupKey === key ? null : key;
     },
-    // 根据路由路径展开所属分组
+    // 根据路由路径展开所属分组；首页不展开任何分组（回到首页即收起侧边栏菜单）
     expandGroupByPath(path) {
+      if (path === '/dashboard') {
+        this.openGroupKey = null;
+        return;
+      }
       const group = this.menuItems.find(g => g.children.some(c => c.path === path));
       if (group) this.openGroupKey = group.key;
     },

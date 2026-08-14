@@ -11,16 +11,6 @@ const ServiceInfoPage = {
   compilerOptions: { delimiters: ['[[', ']]'] },
   template: `
 <div>
-  <!-- 顶部：进行中构建状态（SSE 实时，点击打开步骤日志） -->
-  <div class="svc-active-build" v-if="selectedEnv && activeBuild" @click="openProgressDrawer(activeBuild)"
-       :title="'点击查看构建步骤 ' + activeBuild.build_no">
-    <span class="svc-active-dot"></span>
-    <span class="svc-active-label">构建中（[[ activeBuild.project_type === 'frontend' ? '前端' : '后端' ]]）</span>
-    <span class="svc-active-no">[[ activeBuild.build_no ]]</span>
-    <span class="svc-active-branch">[[ activeBuild.branch || '' ]]</span>
-    <span class="svc-active-tip">点击查看步骤日志 ›</span>
-  </div>
-
   <div class="toolbar" style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
     <el-select v-model="selectedProject" placeholder="选择项目" size="default" style="width:180px;"
                @change="onProjectChange" filterable>
@@ -200,7 +190,7 @@ const ServiceInfoPage = {
       </div>
       <div class="svc-card-row">
         <span class="svc-card-label">镜像</span>
-        <span class="svc-card-value svc-card-image" :title="svc.image || ''">[[ svc.image || '-' ]]</span>
+        <span class="svc-card-value svc-card-image" :title="svcImageTitle(svc)">[[ svc.image || '-' ]]<el-tag v-if="svc.images && svc.images.length > 1" size="small" type="info" style="margin-left:4px;vertical-align:middle" :title="svc.images.join('\\n')">×[[ svc.images.length ]]</el-tag></span>
       </div>
       <div class="svc-card-row">
         <span class="svc-card-label">端口</span>
@@ -215,13 +205,13 @@ const ServiceInfoPage = {
         </span>
       </div>
       <div class="svc-card-row">
-        <span class="svc-card-label">Pod</span>
+        <span class="svc-card-label">状态</span>
         <span class="svc-card-value">
           <template v-if="svc.pods && svc.pods.length">
             <el-tag v-for="pod in svc.pods" :key="pod.name" size="small"
                     :type="podTagType(pod)" style="margin:2px 4px 2px 0;cursor:pointer;"
                     :title="pod.name + '（点击看日志）'" @click="openLog(svc, pod)">
-              [[ pod.phase ]][[ pod.reason ? '·' + pod.reason : '' ]][[ pod.restarts ? ' ⟳' + pod.restarts : '' ]]
+              [[ podStatusText(pod) ]][[ pod.restarts ? ' ⟳' + pod.restarts : '' ]]
             </el-tag>
           </template>
           <span v-else style="color:#999">-</span>
@@ -279,7 +269,7 @@ const ServiceInfoPage = {
       </el-input>
       <span style="color:#909399;font-size:12px">共 [[ envRows.length ]] 个变量[[ envSearchWord ? '，匹配 ' + filteredEnvRows.length + ' 个' : '' ]]</span>
     </div>
-    <el-table :data="filteredEnvRows" size="small" border stripe max-height="72vh" style="width:100%">
+    <el-table :data="filteredEnvRows" size="small" border stripe max-height="72vh" style="width:100%" v-loading="envLoading">
       <el-table-column type="index" label="#" width="50" align="center"></el-table-column>
       <el-table-column prop="name" label="变量名" min-width="240"></el-table-column>
       <el-table-column label="值" min-width="320">
@@ -404,6 +394,9 @@ const ServiceInfoPage = {
       services: [],
       loading: false,
       k8sError: '',
+      svcStream: null,       // 服务卡片 SSE 流（EventSource）
+      svcStreamRetry: null,  // SSE 断连重连定时器
+      envLoading: false,     // 环境变量弹窗加载中
 
       // 快捷部署弹窗（与环境信息页构建弹窗完全一致：分支/服务/类型 + 进度抽屉）
       buildDialogVisible: false,
@@ -583,8 +576,9 @@ const ServiceInfoPage = {
       });
     },
     onProjectChange() {
-      // 切换项目：立即断开上一个环境的构建状态 SSE（旧连接可能仍在推送），再重置选择
+      // 切换项目：立即断开上一个环境的构建状态 SSE 与服务卡片 SSE，再重置选择
       this.closeEnvBuildStream();
+      this.closeSvcStream();
       this.activeBuild = null;
       this.selectedEnv = '';
       this.services = [];
@@ -994,18 +988,72 @@ const ServiceInfoPage = {
       if (this.envBuildStream) { this.envBuildStream.close(); this.envBuildStream = null; }
     },
     loadServices() {
+      // 主数据源：SSE 实时流（快照 + 增量，滚动更新实时可见）；断连/出错自动回退 HTTP
       if (!this.selectedProject || !this.selectedEnv) return;
       this.syncSelectedEnvData();
-      this.loading = true;
+      this.closeSvcStream();
       this.k8sError = '';
+      this.loading = true;
+      this.connectSvcStream();
+    },
+    // 服务卡片 SSE 订阅：snapshot/update 全量替换 services；error/多次断连回退 HTTP
+    connectSvcStream() {
+      const token = localStorage.getItem('auth_token') || '';
+      const params = new URLSearchParams({
+        project: this.selectedProject,
+        env: this.selectedEnv,
+        token: token,
+      });
+      const es = new EventSource('/api/deploy/service-info/stream?' + params.toString());
+      this.svcStream = es;
+      let failCount = 0;
+      es.onmessage = (e) => {
+        try {
+          const d = JSON.parse(e.data);
+          if (d.type === 'snapshot' || d.type === 'update') {
+            this.services = d.services || [];
+            this.k8sError = '';
+            this.loading = false;
+          } else if (d.type === 'error') {
+            this.k8sError = d.error || 'SSE 不可用';
+            this.closeSvcStream();
+            this.loadServicesHttp();
+          }
+          // heartbeat 忽略（保活）
+        } catch (err) { /* 忽略非法帧 */ }
+      };
+      es.onerror = () => {
+        // 网络断连：EventSource 默认自动重连；连续失败则回退 HTTP
+        failCount++;
+        if (failCount >= 3) {
+          this.closeSvcStream();
+          this.loading = false;
+          this.k8sError = 'SSE 连接失败，已回退 HTTP';
+          this.loadServicesHttp();
+        }
+      };
+    },
+    closeSvcStream() {
+      if (this.svcStream) {
+        this.svcStream.close();
+        this.svcStream = null;
+      }
+    },
+    // HTTP 列表回退（SSE 不可用 / 后端 K8s 不可用）
+    loadServicesHttp() {
       const url = '/api/deploy/service-info/list?project=' + encodeURIComponent(this.selectedProject)
         + '&env=' + encodeURIComponent(this.selectedEnv);
       ajax('GET', url, null, (r) => {
         const d = r.data || {};
         this.services = d.list || [];
-        this.k8sError = d.k8s_error || '';
+        if (d.k8s_error) this.k8sError = d.k8s_error;
         this.loading = false;
       });
+    },
+    // 镜像标题：多镜像（滚动更新期间）时展示全部
+    svcImageTitle(svc) {
+      const imgs = (svc.images && svc.images.length) ? svc.images : (svc.image ? [svc.image] : []);
+      return imgs.join('\n');
     },
 
     podTagType(pod) {
@@ -1013,6 +1061,12 @@ const ServiceInfoPage = {
       if (pod.phase === 'Running') return 'success';
       if (pod.phase === 'Pending') return 'warning';
       return 'info';
+    },
+    // 状态标签文案：phase 中文 + 异常原因
+    podStatusText(pod) {
+      const map = { Running: '运行中', Pending: '等待中', Succeeded: '已完成', Failed: '失败', Unknown: '未知' };
+      const base = map[pod.phase] || pod.phase || 'Unknown';
+      return pod.reason ? base + '·' + pod.reason : base;
     },
     svcCardDotClass(svc) {
       if (!svc.pods || !svc.pods.length) return 'off';
@@ -1195,8 +1249,22 @@ const ServiceInfoPage = {
     },
     openEnv(svc) {
       this.envServiceName = svc.name;
-      this.envRows = (svc.envs || []).map(e => ({ name: e.name, value: e.value || '', source: e.source || '' }));
+      this.envRows = [];
+      this.envLoading = true;
       this.envVisible = true;
+      // 实时读 K8s Deployment spec（设计决策：envs 不再随列表/SSE 携带）
+      const url = '/api/deploy/service-info/envs?project=' + encodeURIComponent(this.selectedProject)
+        + '&env=' + encodeURIComponent(this.selectedEnv) + '&service=' + encodeURIComponent(svc.name);
+      ajax('GET', url, null, (r) => {
+        this.envLoading = false;
+        if (r.code === 200 && r.data) {
+          this.envRows = (r.data.envs || []).map(e => ({ name: e.name, value: e.value || '', source: e.source || '' }));
+        } else {
+          // 回退：列表/快照里已有的 envs（YAML 回退路径仍携带）
+          this.envRows = (svc.envs || []).map(e => ({ name: e.name, value: e.value || '', source: e.source || '' }));
+          ElementPlus.ElMessage.warning((r.msg || '读取环境变量失败') + '，已展示快照数据');
+        }
+      });
     },
     openYaml(row) {
       const url = '/api/deploy/service-info/yaml?project=' + encodeURIComponent(this.selectedProject)
@@ -1614,6 +1682,7 @@ const ServiceInfoPage = {
   beforeUnmount() {
     this.closeEnvBuildStream();
     this.closeLogStream();
+    this.closeSvcStream();
     if (this._cfgKeyHandler) {
       document.removeEventListener('keydown', this._cfgKeyHandler);
       this._cfgKeyHandler = null;

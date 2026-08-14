@@ -1,0 +1,24 @@
+# 排除本地开发/构建产物
+.git
+.gitignore
+logs
+node_modules
+agent
+agent/*.exe
+__pycache__
+*.pyc
+.dockerignore
+docker-compose*.yml
+Dockerfile
+*.md
+.tmp_*.py
+_dist
+.venv
+venv
+*.log
+settings_insert.sql
+.idea
+.reasonix
+workflow
+test
+recycle

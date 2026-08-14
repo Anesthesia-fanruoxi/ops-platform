@@ -337,6 +337,18 @@ def init_db(app):
         except Exception:
             pass
 
+        # 自动迁移：audit_logs 表添加 permission 列（操作权限码 op:xxx）
+        try:
+            conn = db.engine.raw_connection()
+            cursor = conn.cursor()
+            acols = _get_columns(cursor, 'audit_logs')
+            if acols and 'permission' not in acols:
+                cursor.execute(_add_col_sql('audit_logs', 'permission', "VARCHAR(128) DEFAULT ''"))
+                conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
         # 存量角色收编：系统只内置「超级管理员」「管理员」两个角色；
         # 其他角色（含此前内置的普通用户/运维人员等）统一取消内置保护，由用户自行创建/管理
         try:

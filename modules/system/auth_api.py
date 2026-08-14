@@ -262,11 +262,14 @@ def logout():
 
 
 def me():
-    """获取当前登录用户信息（含权限）"""
+    """获取当前登录用户信息（含权限 + 密码策略）"""
     user = getattr(g, 'current_user', None)
     if not user:
         return error_response('未登录', 401)
-    return success_response(user.to_dict(include_permissions=True))
+    data = user.to_dict(include_permissions=True)
+    from modules.system.settings_service import get_password_policy
+    data['password_policy'] = get_password_policy()
+    return success_response(data)
 
 
 def change_password():

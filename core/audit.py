@@ -131,13 +131,14 @@ def _request_ip():
 
 def record_audit(module='', action='', result='success', detail='', params=None,
                  diff=None, method='', path='', ip='', latency_ms=0,
-                 user_id=None, username=''):
+                 user_id=None, username='', permission=''):
     """落审计日志（异常隔离：失败只记日志，不影响业务）"""
     try:
         from core.db import db
         from modules.system.models import AuditLog
         rec = AuditLog(
             user_id=user_id, username=username or '',
+            permission=permission or '',
             module=module, action=action, result=result,
             detail=(detail or '')[:500],
             method=method, path=(path or '')[:255], ip=(ip or '')[:64],
@@ -172,10 +173,12 @@ def record_audit_diff(module, action, obj_id, old_dict, new_dict, fields=None,
     uid = None
     if not username:
         uid, username = _current_user()
+    from flask import g as _g
+    perm = ','.join(getattr(_g, 'audit_permissions', None) or [])
     record_audit(module=module, action=action, result=result,
                  detail=(detail or '') or f'{module}.{action} id={obj_id}',
                  params={'id': obj_id}, diff=diff, path='',
-                 ip=_request_ip(), user_id=uid, username=username)
+                 ip=_request_ip(), user_id=uid, username=username, permission=perm)
 
 
 # ─── 字段级 diff ──────────────────────────────────────────
@@ -230,11 +233,14 @@ def register_hooks(app):
             if not uid:
                 # 未认证请求不记录（防匿名刷库）；认证事件由 record_auth_event 显式记录
                 return resp
+            # 操作权限码：由 require_permission/require_any_permission 在放行时写入 g
+            from flask import g as _g
+            perm = ','.join(getattr(_g, 'audit_permissions', None) or [])
             module, action = _derive(path, request.method)
             record_audit(module=module, action=action, result=result,
                          params=params, method=request.method, path=path,
                          ip=_request_ip(), latency_ms=latency_ms,
-                         user_id=uid, username=username)
+                         user_id=uid, username=username, permission=perm)
         except Exception:
             logger.exception('[audit] 拦截器异常（不影响响应）')
         return resp

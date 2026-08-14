@@ -70,7 +70,7 @@ docker compose up -d     # http://localhost:5000
 
 ## 配置说明
 
-**启动连接配置**（MySQL / Redis / 服务端口）在 [config/config.yaml](config/config.yaml) 中维护，文件缺失或解析失败时启动直接报错；MySQL、Redis 各项也支持环境变量覆盖（如 `MYSQL_HOST`、`REDIS_URL`、`REDIS_ENABLED`、`REDIS_KEY_PREFIX`）。
+**启动连接配置**（MySQL / Redis / 服务端口）在 [config/config.yaml](config/config.yaml) 中维护，文件缺失或解析失败时启动直接报错；MySQL、Redis 各项支持环境变量覆盖且**环境变量优先**（如 `MYSQL_HOST`、`REDIS_URL`、`REDIS_ENABLED`、`REDIS_KEY_PREFIX`），Docker 部署即通过环境变量注入连接信息。
 
 **业务配置**（NFS / Harbor / K8s / Nginx / 中间件等）统一从 MySQL `settings` 表读取，在「系统设置」页面维护，分四个标签页：
 

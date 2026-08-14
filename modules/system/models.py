@@ -194,6 +194,7 @@ class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, nullable=True, index=True)
     username = db.Column(db.String(64), default='', index=True)  # 冗余用户名（用户删除后仍可追溯）
+    permission = db.Column(db.String(128), default='')  # 操作权限码 op:xxx（多个用逗号分隔；无 op 权限则为空）
     module = db.Column(db.String(50), default='')     # 模块：auth/user/role/credential/setting/...
     action = db.Column(db.String(50), default='')     # 动作：login/logout/create/update/delete/...
     method = db.Column(db.String(10), default='')     # HTTP 方法
@@ -218,6 +219,7 @@ class AuditLog(db.Model):
             'id': self.id,
             'user_id': self.user_id,
             'username': self.username,
+            'permission': self.permission or '',
             'module': self.module,
             'action': self.action,
             'method': self.method,

@@ -34,6 +34,9 @@ const AuditPage = {
         </el-table-column>
         <el-table-column prop="module" label="模块" width="130" align="center" />
         <el-table-column prop="action" label="动作" width="140" align="center" />
+        <el-table-column prop="permission" label="权限" width="150" show-overflow-tooltip>
+          <template #default="s">[[ s.row.permission || '-' ]]</template>
+        </el-table-column>
         <el-table-column label="结果" width="110" align="center">
           <template #default="s">
             <el-tag :type="s.row.result === 'success' ? 'success' : (s.row.result === 'denied' ? 'warning' : 'danger')">[[ s.row.result ]]</el-tag>
@@ -67,10 +70,11 @@ const AuditPage = {
         </el-descriptions-item>
         <el-descriptions-item label="模块">[[ row.module ]]</el-descriptions-item>
         <el-descriptions-item label="动作">[[ row.action ]]</el-descriptions-item>
-        <el-descriptions-item label="耗时">[[ row.latency_ms ]] ms</el-descriptions-item>
+        <el-descriptions-item label="权限">[[ row.permission || '-' ]]</el-descriptions-item>
         <el-descriptions-item label="IP" :span="2">[[ row.ip || '-' ]]</el-descriptions-item>
+        <el-descriptions-item label="耗时">[[ row.latency_ms ]] ms</el-descriptions-item>
         <el-descriptions-item label="路径">[[ row.path || '-' ]]</el-descriptions-item>
-        <el-descriptions-item label="描述" :span="3">[[ row.detail || '-' ]]</el-descriptions-item>
+        <el-descriptions-item label="描述" :span="2">[[ row.detail || '-' ]]</el-descriptions-item>
       </el-descriptions>
 
       <template v-if="row.params">
