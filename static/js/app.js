@@ -385,7 +385,18 @@ const app = Vue.createApp({
   app.component(pair[0], pair[1]);
 });
 
-app.use(ElementPlus);
+// Element Plus 中文语言包：base.html 已引入全局变量；
+// 兜底：本地调试模板缓存未刷新时该全局可能缺失，这里同步加载一次，避免界面英文或报错。
+if (!window.ElementPlusLocaleZhCn) {
+  try {
+    var _localeReq = new XMLHttpRequest();
+    _localeReq.open('GET', '/static/vendor/element-plus-zh-cn.min.js', false);
+    _localeReq.send(null);
+    if (_localeReq.status === 200) (0, eval)(_localeReq.responseText);
+  } catch (_e) { /* 加载失败则回退 Element Plus 默认英文 */ }
+}
+
+app.use(ElementPlus, { locale: window.ElementPlusLocaleZhCn });
 app.use(router);
 app.config.globalProperties.$auth = authState;
 

@@ -6,19 +6,19 @@ const AuditPage = {
     <!-- 筛选栏 -->
     <el-card shadow="never" class="audit-filter-card">
       <div class="audit-filter">
-        <el-input v-model="query.username" placeholder="操作用户" clearable size="small" style="width:140px" @keyup.enter="load(1)" />
-        <el-select v-model="query.module" placeholder="模块" clearable size="small" style="width:130px">
+        <el-input v-model="query.username" placeholder="操作用户" clearable size="small" style="width:160px" @keyup.enter="load(1)" />
+        <el-select v-model="query.module" placeholder="模块" clearable size="small" style="width:150px">
           <el-option v-for="m in modules" :key="m" :label="m" :value="m" />
         </el-select>
-        <el-input v-model="query.action" placeholder="动作" clearable size="small" style="width:110px" @keyup.enter="load(1)" />
-        <el-select v-model="query.result" placeholder="结果" clearable size="small" style="width:110px">
+        <el-input v-model="query.action" placeholder="动作" clearable size="small" style="width:130px" @keyup.enter="load(1)" />
+        <el-select v-model="query.result" placeholder="结果" clearable size="small" style="width:120px">
           <el-option label="成功" value="success" />
           <el-option label="拒绝" value="denied" />
           <el-option label="失败" value="failed" />
         </el-select>
         <el-date-picker v-model="query.timeRange" type="datetimerange" size="small"
                         range-separator="至" start-placeholder="开始时间" end-placeholder="结束时间"
-                        style="width:340px" value-format="YYYY-MM-DD HH:mm:ss" />
+                        style="width:360px" value-format="YYYY-MM-DD HH:mm:ss" />
         <el-button type="primary" size="small" @click="load(1)">查询</el-button>
         <el-button size="small" @click="reset">重置</el-button>
       </div>
@@ -26,27 +26,27 @@ const AuditPage = {
 
     <!-- 列表 -->
     <el-card shadow="never">
-      <el-table :data="list" v-loading="loading" size="small" border stripe
+      <el-table :data="list" v-loading="loading" border stripe
                 :header-cell-style="{background:'#f5f7fa',fontWeight:'bold'}">
-        <el-table-column prop="created_at" label="时间" width="150" />
-        <el-table-column prop="username" label="用户" width="110">
+        <el-table-column prop="created_at" label="时间" width="190" />
+        <el-table-column prop="username" label="用户" width="150" show-overflow-tooltip>
           <template #default="s">[[ s.row.username || '-' ]]</template>
         </el-table-column>
-        <el-table-column prop="module" label="模块" width="90" align="center" />
-        <el-table-column prop="action" label="动作" width="90" align="center" />
-        <el-table-column label="结果" width="70" align="center">
+        <el-table-column prop="module" label="模块" width="130" align="center" />
+        <el-table-column prop="action" label="动作" width="140" align="center" />
+        <el-table-column label="结果" width="110" align="center">
           <template #default="s">
-            <el-tag size="small" :type="s.row.result === 'success' ? 'success' : (s.row.result === 'denied' ? 'warning' : 'danger')">[[ s.row.result ]]</el-tag>
+            <el-tag :type="s.row.result === 'success' ? 'success' : (s.row.result === 'denied' ? 'warning' : 'danger')">[[ s.row.result ]]</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="ip" label="IP" width="110" />
-        <el-table-column prop="latency_ms" label="耗时(ms)" width="80" align="center" />
-        <el-table-column label="描述" min-width="200" show-overflow-tooltip>
+        <el-table-column prop="ip" label="IP" width="160" />
+        <el-table-column prop="latency_ms" label="耗时(ms)" width="120" align="center" />
+        <el-table-column label="描述" min-width="280" show-overflow-tooltip>
           <template #default="s">[[ s.row.detail || s.row.path || '-' ]]</template>
         </el-table-column>
-        <el-table-column label="操作" width="70" align="center">
+        <el-table-column label="操作" width="110" align="center">
           <template #default="s">
-            <el-button link type="primary" size="small" @click="showDetail(s.row)">详情</el-button>
+            <el-button link type="primary" @click="showDetail(s.row)">详情</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -172,9 +172,10 @@ const AuditPage = {
 (function () {
   const css = `
 .audit-page { padding: 4px 2px; }
-.audit-filter { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.audit-filter-card { margin-bottom: 16px; }
+.audit-filter { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 .audit-pager { margin-top: 12px; display: flex; justify-content: flex-end; }
-.audit-sec-title { font-size: 13px; font-weight: 600; color: #303133; margin: 14px 0 6px; }
+.audit-sec-title { font-size: 13px; font-weight: 600; color: #303133; margin: 16px 0 8px; }
 .audit-pre { background: #0a2e3c; color: #a8bcc0; padding: 12px; border-radius: 6px; font-size: 12px; overflow: auto; max-height: 260px; font-family: Consolas, Menlo, monospace; }
 .audit-old { color: #f56c6c; }
 .audit-new { color: #67c23a; }
