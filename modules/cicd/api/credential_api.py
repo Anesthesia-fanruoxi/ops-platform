@@ -5,17 +5,33 @@ from flask import request, g
 from core.response import success_response, error_response
 from core.security import require_permission
 from core.db import db
+from core.audit import record_audit_diff
 from modules.cicd.models import GitCredential, CicdFlowTemplate
-from modules.cicd.services.credential_service import (
-    encrypt_secret, test_git_connection
-)
+from modules.cicd.services.credential_service import encrypt_secret
 
 
 @require_permission('op:cicd_admin')
 def list_credentials():
-    """凭据列表"""
+    """凭据列表（精简字段，详情走 GET /<id>）"""
     creds = GitCredential.query.order_by(GitCredential.created_at.desc()).all()
-    return success_response([c.to_dict() for c in creds])
+    return success_response([{
+        'id': c.id,
+        'name': c.name,
+        'type': c.type,
+        'username': c.username,
+        'url': c.url or '',
+        'description': c.description,
+        'updated_at': c.updated_at.strftime('%Y-%m-%d %H:%M:%S') if c.updated_at else None,
+    } for c in creds])
+
+
+@require_permission('op:cicd_admin')
+def get_credential(cred_id):
+    """凭据详情"""
+    cred = GitCredential.query.get(cred_id)
+    if not cred:
+        return error_response('凭据不存在', 404)
+    return success_response(cred.to_dict())
 
 
 @require_permission('op:cicd_admin')
@@ -48,6 +64,7 @@ def update_credential(cred_id):
     if not cred:
         return error_response('凭据不存在', 404)
 
+    _old_snap = {k: getattr(cred, k, None) for k in ('name', 'type', 'username', 'url', 'description')}
     data = request.json
     if 'name' in data and data['name'].strip():
         exists = GitCredential.query.filter(
@@ -69,6 +86,8 @@ def update_credential(cred_id):
         cred.secret = encrypt_secret(data['secret'])
 
     db.session.commit()
+    _new_snap = {k: getattr(cred, k, None) for k in ('name', 'type', 'username', 'url', 'description')}
+    record_audit_diff('credential', 'update', cred.id, _old_snap, _new_snap)
     return success_response(cred.to_dict(), '更新成功')
 
 
@@ -84,16 +103,3 @@ def delete_credential(cred_id):
     db.session.delete(cred)
     db.session.commit()
     return success_response(msg='删除成功')
-
-
-@require_permission('op:cicd_admin')
-def test_credential(cred_id):
-    """测试凭据连通性（需传 git_url）"""
-    data = request.json or {}
-    git_url = data.get('git_url', '')
-    if not git_url:
-        return error_response('请提供 git_url 用于测试', 400)
-    ok, msg = test_git_connection(git_url, cred_id)
-    if ok:
-        return success_response(msg=msg)
-    return error_response(msg, 400)

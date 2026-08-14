@@ -23,7 +23,8 @@ const keepBuilds = 5
 type BuildTask struct {
 	BuildID         int            `json:"build_id"`
 	BuildNo         string         `json:"build_no"`
-	ProjectEnv      string         `json:"project_env"` // "{project}-{env}" 工作子目录名
+	ProjectEnv      string         `json:"project_env"` // "{project}-{env}-{type}" 工作子目录名
+	ImageNamespace  string         `json:"image_namespace"` // "{project}-{env}" 镜像命名空间（不含 type）
 	ProjectType     string         `json:"project_type"` // "frontend" | "backend"
 	Language        string         `json:"language"`
 	Branch          string         `json:"branch"`
@@ -45,6 +46,7 @@ type StepConfig struct {
 	DockerfileContent string         `json:"dockerfile_content"`
 	ImageName         string         `json:"image_name"`
 	ImageTag          string         `json:"image_tag"`
+	WebDir            string         `json:"web_dir"` // 前端发布目录：Agent 机 NFS web 挂载根 + 项目/环境/web（空=跳过发布）
 }
 
 type GitCredential struct {
@@ -73,6 +75,7 @@ func getStepsDef(projectType string) []StepDef {
 			{1, "clone", "Git Clone"},
 			{2, "build", "编译构建"},
 			{3, "collect", "产物收集"},
+			{4, "publish", "发布到Web目录"},
 		}
 	}
 	return []StepDef{
@@ -88,7 +91,12 @@ func getStepsDef(projectType string) []StepDef {
 
 func executeBuild(task *BuildTask) {
 	log.Printf("[Build#%d] 开始执行 type=%s branch=%s start_step=%d", task.BuildID, task.ProjectType, task.Branch, task.StartStep)
-	logTaskSummary(task)
+
+	// 统一输出"完成构建任务"（正常/失败/取消都打印），status 在结尾或提前 return 分支确定
+	finalStatus := "failed"
+	defer func() {
+		log.Printf("[Build#%d] 完成构建任务 项目环境=%s status=%s", task.BuildID, task.ProjectEnv, finalStatus)
+	}()
 
 	// 取消控制器：登记本次构建的 runner，收到 Master 取消推送时即时终止运行中的命令
 	runner := newBuildRunner(task.BuildID)
@@ -212,6 +220,35 @@ func executeBuild(task *BuildTask) {
 		}
 	}
 
+	// Step 4: 发布到 Web 目录（仅前端，产物 dist 拷贝到 Agent 机 NFS 挂载的 web 目录）
+	if success && task.ProjectType == "frontend" {
+		if startStep <= 4 {
+			cancelled = sendStep(task.BuildID, 4, "publish", "running", "")
+			if cancelled {
+				sendResult(task.BuildID, "failed", "", "构建已取消")
+				return
+			}
+			webDir := task.Steps.WebDir
+			if webDir == "" {
+				stepLog.log("未配置前端发布目录（web_dir 为空），跳过发布")
+				sendStep(task.BuildID, 4, "publish", "success", "")
+			} else {
+				stepLog.log(fmt.Sprintf("\n=== 发布到 Web 目录 ===\n源: %s/dist\n目标: %s\n", productDir, webDir))
+				if err := execPublishDist(stepLog, productDir, webDir); err != nil {
+					if abortIfCancelled(4, "publish") {
+						return
+					}
+					success = false
+					errMsg = "发布失败: " + err.Error()
+					stepLog.log("[ERROR] " + errMsg)
+					sendStep(task.BuildID, 4, "publish", "failed", errMsg)
+				} else {
+					sendStep(task.BuildID, 4, "publish", "success", "")
+				}
+			}
+		}
+	}
+
 	// Step 4 & 5: Docker Build + Push（仅后端）
 	if success && task.ProjectType == "backend" {
 		// 构建前清理当前项目环境的旧镜像（非致命，保留最新一个）
@@ -225,7 +262,7 @@ func executeBuild(task *BuildTask) {
 				sendResult(task.BuildID, "failed", "", "构建已取消")
 				return
 			}
-			stepLog.log(fmt.Sprintf("\n=== Docker Build ===\n命名空间: %s/%s\nTag: %s\n", task.Harbor.URL, strings.ToLower(task.ProjectEnv), task.Steps.ImageTag))
+			stepLog.log(fmt.Sprintf("\n=== Docker Build ===\n命名空间: %s/%s\nTag: %s\n", task.Harbor.URL, task.ImageNamespace, task.Steps.ImageTag))
 			var err error
 			images, err = execDockerBuild(runner, stepLog, task, productDir)
 			if err != nil {
@@ -284,8 +321,8 @@ func executeBuild(task *BuildTask) {
 	if !success {
 		status = "failed"
 	}
+	finalStatus = status
 	sendResult(task.BuildID, status, digest, errMsg)
-	log.Printf("[Build#%d] 完成 status=%s", task.BuildID, status)
 
 	// 保留最近构建目录（含本次），便于在工作目录查阅代码与产物；保留数跟随 Master 下发，未设置回退默认值
 	keep := task.KeepBuilds
@@ -307,7 +344,7 @@ func listBuiltImages(task *BuildTask, productDir string) []string {
 		if !e.IsDir() {
 			continue
 		}
-		images = append(images, fmt.Sprintf("%s/%s:%s", task.Harbor.URL, strings.ToLower(task.ProjectEnv+"/"+e.Name()), task.Steps.ImageTag))
+		images = append(images, fmt.Sprintf("%s/%s:%s", task.Harbor.URL, task.ImageNamespace+"/"+e.Name(), task.Steps.ImageTag))
 	}
 	return images
 }
@@ -353,7 +390,7 @@ func logTaskSummary(task *BuildTask) {
 	log.Printf("[Build#%d]   项目类型=%s 语言=%s 分支=%s", task.BuildID, task.ProjectType, task.Language, task.Branch)
 	log.Printf("[Build#%d]   git镜像=%s 仓库=%s 凭据=%s", task.BuildID, task.Steps.GitDockerImage, maskGitURL(task.Steps.GitURL), credType)
 	log.Printf("[Build#%d]   构建镜像=%s 构建命令=%q", task.BuildID, task.Steps.BuildDockerImage, task.Steps.BuildCommand)
-	log.Printf("[Build#%d]   服务目录=%v 产物目录=%s Dockerfile=%dB 镜像空间=%s/%s Tag=%s", task.BuildID, task.Steps.ArtifactDirs, task.Steps.ArtifactDir, len(task.Steps.DockerfileContent), task.Harbor.URL, strings.ToLower(task.ProjectEnv), task.Steps.ImageTag)
+	log.Printf("[Build#%d]   服务目录=%v 产物目录=%s Dockerfile=%dB 镜像空间=%s/%s Tag=%s", task.BuildID, task.Steps.ArtifactDirs, task.Steps.ArtifactDir, len(task.Steps.DockerfileContent), task.Harbor.URL, task.ImageNamespace, task.Steps.ImageTag)
 	log.Printf("[Build#%d]   Harbor=%s 用户=%s", task.BuildID, task.Harbor.URL, task.Harbor.User)
 }
 
@@ -545,8 +582,8 @@ func execDockerBuild(runner *buildRunner, logger *stepLogger, task *BuildTask, p
 		}
 		svcName := entry.Name()
 		svcPath := filepath.Join(productDir, svcName)
-		// 镜像名规范：{harbor}/{project}-{env}/{svcName}:{tag}（命名空间取 ProjectEnv，Docker 要求小写）
-		fullImage := fmt.Sprintf("%s/%s:%s", task.Harbor.URL, strings.ToLower(task.ProjectEnv+"/"+svcName), task.Steps.ImageTag)
+		// 镜像名规范：{harbor}/{namespace}/{svcName}:{tag}（命名空间取 ImageNamespace={project}-{env}，不含 type）
+		fullImage := fmt.Sprintf("%s/%s:%s", task.Harbor.URL, task.ImageNamespace+"/"+svcName, task.Steps.ImageTag)
 
 		wg.Add(1)
 		go func(svc, path, img string) {
@@ -792,6 +829,49 @@ func maskGitURL(u string) string {
 	return u
 }
 
+// execPublishDist 发布前端产物：先备份旧版本（web_dir → web_dir.bak），再 cp -a 复制新 dist，
+// 成功清理备份、失败自动回滚旧版本。cp -a 由系统实现，远快于逐文件 Go 拷贝。
+func execPublishDist(logger *stepLogger, productDir, webDir string) error {
+	src := filepath.Join(productDir, "dist")
+	if _, err := os.Stat(src); err != nil {
+		return fmt.Errorf("产物目录不存在: %s", src)
+	}
+	bak := webDir + ".bak"
+
+	// 1) 备份旧版本（同文件系统 rename 瞬间完成）
+	if _, err := os.Stat(webDir); err == nil {
+		if err := os.RemoveAll(bak); err != nil {
+			return fmt.Errorf("清理旧备份失败: %v", err)
+		}
+		if err := os.Rename(webDir, bak); err != nil {
+			return fmt.Errorf("备份旧版本失败: %v", err)
+		}
+		logger.log(fmt.Sprintf("  已备份旧版本: %s → %s", webDir, bak))
+	}
+
+	// 2) 创建新目录并复制（cp -a 保留权限/符号链接）
+	if err := os.MkdirAll(webDir, 0755); err != nil {
+		if _, e2 := os.Stat(bak); e2 == nil {
+			os.Rename(bak, webDir) // 回滚
+		}
+		return fmt.Errorf("创建发布目录失败: %v", err)
+	}
+	logger.log(fmt.Sprintf("  cp -a %s/. → %s/", src, webDir))
+	if out, err := exec.Command("cp", "-a", src+string(os.PathSeparator)+".", webDir+string(os.PathSeparator)).CombinedOutput(); err != nil {
+		// 3) 失败：删除新目录，回滚旧版本
+		os.RemoveAll(webDir)
+		if _, e2 := os.Stat(bak); e2 == nil {
+			os.Rename(bak, webDir)
+		}
+		return fmt.Errorf("发布失败: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	// 4) 成功：清理备份
+	os.RemoveAll(bak)
+	logger.log(fmt.Sprintf("  发布完成: %s（旧版本备份已清理）", webDir))
+	return nil
+}
+
 // copyDir 递归复制目录（带路径安全校验）
 func copyDir(src, dst string) error {
 	absDst, _ := filepath.Abs(dst)
@@ -843,7 +923,7 @@ func execCleanupImages(runner *buildRunner, logger *stepLogger, task *BuildTask)
 		return
 	}
 	// 过滤：{harbor_url}/{project_env}/*
-	imageFilter := fmt.Sprintf("%s/%s/*", task.Harbor.URL, strings.ToLower(task.ProjectEnv))
+	imageFilter := fmt.Sprintf("%s/%s/*", task.Harbor.URL, task.ImageNamespace)
 	logger.log(fmt.Sprintf("\n=== 清理旧镜像 ===\n过滤: %s\n", imageFilter))
 
 	// 获取所有匹配的镜像 ID（按创建时间排序，-q 只返回 ID）

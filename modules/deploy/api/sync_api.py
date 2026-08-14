@@ -372,7 +372,7 @@ def _run_sync_task(app, output_dir):
 
 # ─── 同步处理函数 ─────────────────────────────────────────────
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def refresh_environments():
     """异步同步：远程下载到本地 → 目录→数据库（新增）+ 数据库→目录（清理）+ 补全 deploy_config"""
     output_dir = get_output_dir()

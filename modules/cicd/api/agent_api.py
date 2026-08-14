@@ -14,6 +14,12 @@ from modules.cicd.services import agent_service
 from modules.cicd.services import install_service
 
 
+def _norm_dir(v):
+    """规范化目录输入：去首尾空白 + 去尾部斜杠（支持带/不带 / 两种写法，避免拼接时 //）"""
+    return (v or '').strip().rstrip('/')
+
+
+
 @require_any_permission('page:cicd', 'op:cicd_admin')
 def proxy_agent_log(agent_id):
     """
@@ -54,7 +60,7 @@ def proxy_agent_log(agent_id):
         return error_response(f'Agent 日志获取失败: {e}', 502)
 
 
-@require_permission('op:cicd_admin')
+@require_permission('page:cicd_schedule')  # 查看类：Agent 列表归属调度中心查看权限
 def list_agents():
     """Agent 列表（MySQL 配置 + Redis 运行时状态）"""
     agents = BuildAgent.query.order_by(BuildAgent.created_at.desc()).all()
@@ -71,7 +77,7 @@ def list_agents():
     return success_response(result)
 
 
-@require_permission('op:cicd_admin')
+@require_permission('page:cicd_schedule')  # 查看类：Agent 详情归属调度中心查看权限
 def get_agent_detail(agent_id):
     """Agent 详情（安装/重装回填用）"""
     agent = BuildAgent.query.get(agent_id)
@@ -80,7 +86,7 @@ def get_agent_detail(agent_id):
     return success_response(agent.to_detail_dict())
 
 
-@require_permission('op:cicd_admin')
+@require_permission('op:agent')
 def install_agent():
     """
     创建 Agent 记录并返回全局通讯共享密钥
@@ -103,7 +109,7 @@ def install_agent():
     }, 'Agent 创建成功')
 
 
-@require_permission('op:cicd_admin')
+@require_permission('op:agent')
 def install_agent_remote():
     """
     远程安装 Agent（POST）：创建 DB 记录 + 启动后台 SSH 安装任务
@@ -137,6 +143,9 @@ def install_agent_remote():
     agent.ssh_credential_id = credential_id
     agent.work_dir = data.get('work_dir', '/data/cicd').strip() or '/data/cicd'
     agent.keep_builds = int(data.get('keep_builds', 5) or 5)
+    agent.frontend_mount_dir = _norm_dir(data.get('frontend_mount_dir'))
+    agent.nfs_server = (data.get('nfs_server') or '').strip()
+    agent.nfs_share = _norm_dir(data.get('nfs_share'))
     db.session.commit()
 
     # Harbor：地址从表单取，账号密码从凭据取
@@ -180,6 +189,9 @@ def install_agent_remote():
         'credential_id': credential_id,
         'master_url': master_url,
         'work_dir': data.get('work_dir', '/data/cicd').strip() or '/data/cicd',
+        'frontend_mount_dir': (data.get('frontend_mount_dir') or '').strip(),
+        'nfs_server': (data.get('nfs_server') or '').strip(),
+        'nfs_share': (data.get('nfs_share') or '').strip(),
         'comm_secret': agent_service.get_comm_secret(),
         'install_docker': data.get('install_docker', False),
         'harbor_ip': harbor_ip,
@@ -193,7 +205,7 @@ def install_agent_remote():
     return success_response({'task_id': task_id, 'agent_id': agent.id}, '安装任务已启动')
 
 
-@require_permission('op:cicd_admin')
+@require_permission('op:agent')
 def install_agent_stream(task_id):
     """SSE 流式推送安装进度"""
     def generate():
@@ -233,7 +245,7 @@ def install_agent_stream(task_id):
     )
 
 
-@require_permission('op:cicd_admin')
+@require_permission('op:agent')
 def delete_agent(agent_id):
     """删除 Agent"""
     ok = agent_service.delete_agent(agent_id)
@@ -242,7 +254,7 @@ def delete_agent(agent_id):
     return success_response(msg='删除成功')
 
 
-@require_permission('op:cicd_admin')
+@require_permission('op:agent')
 def reinstall_agent(agent_id):
     """
     重新安装 Agent（POST）：对“待安装”状态的 Agent 重新执行远程安装
@@ -296,6 +308,12 @@ def reinstall_agent(agent_id):
     agent.harbor_user = harbor_user
     agent.harbor_ip = harbor_ip if harbor_type == 'private' else ''
     agent.keep_builds = int(data.get('keep_builds') or agent.keep_builds or 5)
+    if data.get('frontend_mount_dir') is not None:
+        agent.frontend_mount_dir = _norm_dir(data.get('frontend_mount_dir'))
+    if data.get('nfs_server') is not None:
+        agent.nfs_server = (data.get('nfs_server') or '').strip()
+    if data.get('nfs_share') is not None:
+        agent.nfs_share = _norm_dir(data.get('nfs_share'))
     agent.install_status = False
     db.session.commit()
 
@@ -309,6 +327,9 @@ def reinstall_agent(agent_id):
         'credential_id': credential_id,
         'master_url': master_url,
         'work_dir': agent.work_dir or '/data/cicd',
+        'frontend_mount_dir': agent.frontend_mount_dir or '',
+        'nfs_server': agent.nfs_server or '',
+        'nfs_share': agent.nfs_share or '',
         'comm_secret': agent_service.get_comm_secret(),
         'install_docker': data.get('install_docker', True),
         'harbor_ip': agent.harbor_ip or '',
@@ -322,7 +343,7 @@ def reinstall_agent(agent_id):
     return success_response({'task_id': task_id}, '安装任务已启动')
 
 
-@require_permission('op:cicd_admin')
+@require_permission('op:agent')
 def uninstall_agent_remote(agent_id):
     """
     远程卸载 Agent（POST）：清理远程 + 删除 DB 记录
@@ -330,7 +351,7 @@ def uninstall_agent_remote(agent_id):
     return _do_remote_cleanup(agent_id, delete_record=True)
 
 
-@require_permission('op:cicd_admin')
+@require_permission('op:agent')
 def reset_agent_remote(agent_id):
     """
     远程重置 Agent（POST）：清理远程，保留 DB 记录，支持重新安装
@@ -361,6 +382,8 @@ def _do_remote_cleanup(agent_id, delete_record):
         'ssh_password': '',
         'credential_id': credential_id,
         'work_dir': agent.work_dir or '/data/cicd',
+        'frontend_mount_dir': agent.frontend_mount_dir or '',
+        'remove_nfs': data.get('remove_nfs', delete_record),  # 卸载默认 True，重置由前端勾选
         'remove_docker': data.get('remove_docker', False),
         'delete_record': delete_record,
     }
@@ -370,7 +393,64 @@ def _do_remote_cleanup(agent_id, delete_record):
     return success_response({'task_id': task_id}, f'{action}任务已启动')
 
 
-@require_permission('op:cicd_admin')
+@require_permission('op:agent')
+def update_agent_config(agent_id):
+    """
+    编辑 Agent 配置（PUT）：修改名称/主机/SSH/Harbor/前端挂载目录等。
+    仅改 DB 配置，不触发重装（在线 Agent 下次心跳/任务自动感知 web_dir 变化；
+    SSH/Harbor 变更在下次安装/重装时生效）。
+    """
+    agent = BuildAgent.query.get(agent_id)
+    if not agent:
+        return error_response('Agent 不存在', 404)
+
+    data = request.json or {}
+    new_name = (data.get('name') or '').strip()
+    if new_name and new_name != agent.name:
+        dup = BuildAgent.query.filter(BuildAgent.name == new_name, BuildAgent.id != agent_id).first()
+        if dup:
+            return error_response('Agent 名称已存在', 400)
+        agent.name = new_name
+    if data.get('host') is not None:
+        agent.host = (data.get('host') or '').strip()
+    if data.get('frontend_mount_dir') is not None:
+        agent.frontend_mount_dir = _norm_dir(data.get('frontend_mount_dir'))
+    if data.get('nfs_server') is not None:
+        agent.nfs_server = (data.get('nfs_server') or '').strip()
+    if data.get('nfs_share') is not None:
+        agent.nfs_share = _norm_dir(data.get('nfs_share'))
+    if data.get('work_dir') is not None:
+        agent.work_dir = (data.get('work_dir') or '/data/cicd').strip() or '/data/cicd'
+    if data.get('keep_builds') is not None:
+        agent.keep_builds = int(data.get('keep_builds') or 5)
+    if data.get('disabled') is not None:
+        agent.disabled = bool(data.get('disabled'))
+    # SSH 连接信息（下次安装/重装生效）
+    if data.get('ssh_port') is not None:
+        agent.ssh_port = int(data.get('ssh_port') or 22)
+    if data.get('ssh_username') is not None:
+        agent.ssh_username = (data.get('ssh_username') or 'root').strip() or 'root'
+    if data.get('ssh_auth_type') is not None:
+        agent.ssh_auth_type = (data.get('ssh_auth_type') or 'credential').strip()
+    if data.get('ssh_credential_id') is not None:
+        agent.ssh_credential_id = data.get('ssh_credential_id') or None
+    if data.get('master_url') is not None:
+        agent.master_url = (data.get('master_url') or '').strip()
+    # Harbor 信息
+    if data.get('harbor_type') is not None:
+        agent.harbor_type = (data.get('harbor_type') or 'public').strip()
+    if data.get('harbor_url') is not None:
+        agent.harbor_url = (data.get('harbor_url') or '').strip()
+    if data.get('harbor_credential_id') is not None:
+        agent.harbor_credential_id = data.get('harbor_credential_id') or None
+    if data.get('harbor_ip') is not None:
+        agent.harbor_ip = (data.get('harbor_ip') or '').strip()
+
+    db.session.commit()
+    return success_response({'id': agent.id}, 'Agent 配置已更新')
+
+
+@require_permission('op:agent')
 def update_agent_remote(agent_id):
     """
     远程更新 Agent（POST）：上传新版二进制 + 重启服务。
@@ -400,7 +480,7 @@ def update_agent_remote(agent_id):
     return success_response({'task_id': task_id}, '更新任务已启动')
 
 
-@require_permission('op:cicd_admin')
+@require_permission('op:agent')
 def toggle_agent_disable(agent_id):
     """POST /<id>/toggle-disable → 禁用/启用节点"""
     agent = BuildAgent.query.get(agent_id)

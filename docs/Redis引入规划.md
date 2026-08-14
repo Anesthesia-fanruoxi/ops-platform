@@ -65,8 +65,8 @@
 | lock | `ops:platform:lock:dispatch` | 派发任务全局锁 | STRING | 30s |
 | lock | `ops:platform:lock:build:{id}` | 单构建状态迁移锁 | STRING | 60s |
 | lock | `ops:platform:lock:deploy:{project}-{env}` | 同环境自动部署串行锁 | STRING | 10min |
-| lock | `ops:platform:lock:collation:{task_key}` | 排序修正任务锁 | STRING | 10min |
-| cache | `ops:platform:cache:collation:instances` | MySQL 实例发现缓存 | STRING | 60s |
+| lock | `ops:platform:lock:database:{instance_id}` | 数据库工具任务实例锁 | STRING | 10min |
+| cache | `ops:platform:cache:database:instances` | MySQL 实例发现缓存 | STRING | 60s |
 | rate | `ops:platform:rate:api:{path}:{ip}`（可选） | 接口级限流 | STRING | 60s |
 
 ### 3.3 键值格式约定

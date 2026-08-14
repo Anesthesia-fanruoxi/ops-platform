@@ -25,60 +25,10 @@ from modules.deploy.services.deploy_tasks import (
 
 # ─── API 处理函数 ────────────────────────────────────────────
 
-@require_permission('op:deploy')
-def execute_deploy():
-    """执行部署（异步）- 立即返回，后台线程执行"""
-    data = request.json
-    action = data.get('action', 'create_env')
-
-    # 确定项目名和环境名
-    if action == 'create_project':
-        project_name = data.get('project_name', '').strip()
-        env_name = data.get('env_name', '').strip()
-    elif action == 'create_env':
-        project_id = data.get('project_id')
-        project = Project.query.get(project_id) if project_id else None
-        project_name = project.name if project else 'unknown'
-        env_name = data.get('env_name', '').strip()
-    elif action == 'create_service':
-        # 新增服务：通过 environment_id 反查项目/环境（前端只传 id）
-        environment_id = data.get('environment_id')
-        env = Environment.query.get(environment_id) if environment_id else None
-        if not env or env.is_deleted:
-            return error_response('环境不存在', 404)
-        project = env.project
-        if not project:
-            return error_response('关联项目不存在', 404)
-        svc_name = ''
-        services = data.get('services') or []
-        if services:
-            raw_svc = services[0]
-            svc_name = str(raw_svc.get('name', raw_svc.get('app_name', '')) if isinstance(raw_svc, dict) else raw_svc).strip()
-        if not svc_name:
-            return error_response('服务名称不能为空', 400)
-
-        # NodePort 上限 32767 校验：环境已有服务数决定端口偏移，超限直接拒绝
-        try:
-            _env_cfg = json.loads(env.deploy_config) if env.deploy_config else {}
-        except Exception:
-            _env_cfg = {}
-        if not isinstance(_env_cfg, dict):
-            _env_cfg = {}
-        _existing_count = len(_env_cfg.get('services', []))
-        _base_node_port = _env_cfg.get('node_port') or ((env.port_start or 30000) + 30)
-        if _base_node_port + _existing_count + 1 > 32767:
-            return error_response('端口池已满（NodePort 超过 32767），无法继续新增服务', 400)
-
-        project_name = project.name
-        env_name = env.name
-        # 回填供后台任务/日志使用
-        data['project_id'] = project.id
-        data['project_name'] = project_name
-        data['env_name'] = env_name
-    else:
-        project_name = data.get('project_name', 'unknown')
-        env_name = data.get('env_name', '').strip()
-
+def _start_deploy(action, data):
+    """部署公共流程：参数已由各包装函数解析完毕，此处负责 task_key、并发检查、日志与后台线程"""
+    project_name = data.get('project_name', 'unknown')
+    env_name = data.get('env_name', '').strip()
     if not env_name:
         return error_response('环境名称不能为空', 400)
 
@@ -113,6 +63,68 @@ def execute_deploy():
         'status': 'running',
         'log_file': log_file
     }, '部署任务已提交')
+
+
+@require_permission('op:deploy_project')
+def execute_deploy_project():
+    """新增项目部署（异步）- 立即返回，后台线程执行"""
+    data = request.json
+    data['action'] = 'create_project'
+    data['project_name'] = (data.get('project_name') or '').strip()
+    data['env_name'] = (data.get('env_name') or '').strip()
+    return _start_deploy('create_project', data)
+
+
+@require_permission('op:deploy_env')
+def execute_deploy_env():
+    """新增环境部署（异步）- 立即返回，后台线程执行"""
+    data = request.json
+    data['action'] = 'create_env'
+    project_id = data.get('project_id')
+    project = Project.query.get(project_id) if project_id else None
+    data['project_name'] = project.name if project else 'unknown'
+    data['env_name'] = (data.get('env_name') or '').strip()
+    return _start_deploy('create_env', data)
+
+
+@require_permission('op:deploy_service')
+def execute_deploy_service():
+    """新增服务部署（异步）- 立即返回，后台线程执行"""
+    data = request.json
+    data['action'] = 'create_service'
+    # 通过 environment_id 反查项目/环境（前端只传 id）
+    environment_id = data.get('environment_id')
+    env = Environment.query.get(environment_id) if environment_id else None
+    if not env or env.is_deleted:
+        return error_response('环境不存在', 404)
+    project = env.project
+    if not project:
+        return error_response('关联项目不存在', 404)
+    svc_name = ''
+    services = data.get('services') or []
+    if services:
+        raw_svc = services[0]
+        svc_name = str(raw_svc.get('name', raw_svc.get('app_name', '')) if isinstance(raw_svc, dict) else raw_svc).strip()
+    if not svc_name:
+        return error_response('服务名称不能为空', 400)
+
+    # NodePort 上限校验：集群已扩容 service-node-port-range 到 60000，环境已有服务数决定端口偏移，超限直接拒绝
+    try:
+        _env_cfg = json.loads(env.deploy_config) if env.deploy_config else {}
+    except Exception:
+        _env_cfg = {}
+    if not isinstance(_env_cfg, dict):
+        _env_cfg = {}
+    _existing_count = len(_env_cfg.get('services', []))
+    _base_node_port = _env_cfg.get('node_port') or ((env.port_start or 30000) + 30)
+    if _base_node_port + _existing_count + 1 > 60000:
+        return error_response('端口池已满（NodePort 超过 60000），无法继续新增服务', 400)
+
+    # 回填供后台任务/日志使用
+    data['project_id'] = project.id
+    data['project_name'] = project.name
+    data['env_name'] = env.name
+    return _start_deploy('create_service', data)
 
 
 def deploy_stream():

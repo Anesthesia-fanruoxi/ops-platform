@@ -29,24 +29,25 @@ template_bp.add_url_rule('/<int:template_id>', 'delete_template', delete_templat
 
 # ─── 凭据 ─────────────────────────────────────────────────────
 from modules.cicd.api.credential_api import (
-    list_credentials, create_credential, update_credential,
-    delete_credential, test_credential
+    list_credentials, get_credential, create_credential, update_credential,
+    delete_credential
 )
 
 credential_bp.add_url_rule('', 'list_credentials', list_credentials, methods=['GET'])
 credential_bp.add_url_rule('', 'create_credential', create_credential, methods=['POST'])
+credential_bp.add_url_rule('/<int:cred_id>', 'get_credential', get_credential, methods=['GET'])
 credential_bp.add_url_rule('/<int:cred_id>', 'update_credential', update_credential, methods=['PUT'])
 credential_bp.add_url_rule('/<int:cred_id>', 'delete_credential', delete_credential, methods=['DELETE'])
-credential_bp.add_url_rule('/<int:cred_id>/test', 'test_credential', test_credential, methods=['POST'])
 
 # ─── Dockerfile 模板 ──────────────────────────────────────────
 from modules.cicd.api.dockerfile_api import (
-    list_dockerfiles, create_dockerfile, update_dockerfile,
+    list_dockerfiles, get_dockerfile, create_dockerfile, update_dockerfile,
     delete_dockerfile, preview_dockerfile
 )
 
 dockerfile_bp.add_url_rule('', 'list_dockerfiles', list_dockerfiles, methods=['GET'])
 dockerfile_bp.add_url_rule('', 'create_dockerfile', create_dockerfile, methods=['POST'])
+dockerfile_bp.add_url_rule('/<int:tpl_id>', 'get_dockerfile', get_dockerfile, methods=['GET'])
 dockerfile_bp.add_url_rule('/<int:tpl_id>', 'update_dockerfile', update_dockerfile, methods=['PUT'])
 dockerfile_bp.add_url_rule('/<int:tpl_id>', 'delete_dockerfile', delete_dockerfile, methods=['DELETE'])
 dockerfile_bp.add_url_rule('/<int:tpl_id>/preview', 'preview_dockerfile', preview_dockerfile, methods=['GET'])
@@ -56,7 +57,7 @@ from modules.cicd.api.agent_api import (
     list_agents, get_agent_detail, install_agent, install_agent_remote,
     install_agent_stream, delete_agent,
     reinstall_agent, uninstall_agent_remote, reset_agent_remote,
-    update_agent_remote, toggle_agent_disable, proxy_agent_log,
+    update_agent_remote, update_agent_config, toggle_agent_disable, proxy_agent_log,
     get_agent_metrics_history,
     get_docker_cache_size
 )
@@ -73,6 +74,7 @@ agent_bp.add_url_rule('/<int:agent_id>/install', 'reinstall_agent', reinstall_ag
 agent_bp.add_url_rule('/<int:agent_id>/uninstall', 'uninstall_agent_remote', uninstall_agent_remote, methods=['POST'])
 agent_bp.add_url_rule('/<int:agent_id>/reset', 'reset_agent_remote', reset_agent_remote, methods=['POST'])
 agent_bp.add_url_rule('/<int:agent_id>/update', 'update_agent_remote', update_agent_remote, methods=['POST'])
+agent_bp.add_url_rule('/<int:agent_id>/config', 'update_agent_config', update_agent_config, methods=['PUT'])
 agent_bp.add_url_rule('/<int:agent_id>/toggle-disable', 'toggle_agent_disable', toggle_agent_disable, methods=['POST'])
 agent_bp.add_url_rule('/<int:agent_id>/docker-cache', 'get_docker_cache_size', get_docker_cache_size, methods=['GET'])
 
@@ -80,7 +82,7 @@ agent_bp.add_url_rule('/<int:agent_id>/docker-cache', 'get_docker_cache_size', g
 from modules.cicd.api.build_api import (
     list_builds, trigger_build, get_build,
     cancel_build, rerun_build, stream_build, stream_build_steps_sse,
-    proxy_build_log, env_cicd_view, list_branches, list_services
+    proxy_build_log, env_cicd_view, list_branches, list_services, env_builds_stream
 )
 
 build_bp.add_url_rule('', 'list_builds', list_builds, methods=['GET'])
@@ -94,6 +96,7 @@ build_bp.add_url_rule('/<int:build_id>/log', 'proxy_build_log', proxy_build_log,
 build_bp.add_url_rule('/branches', 'list_branches', list_branches, methods=['GET'])
 build_bp.add_url_rule('/services', 'list_services', list_services, methods=['GET'])
 build_bp.add_url_rule('/env/<int:environment_id>', 'env_cicd_view', env_cicd_view, methods=['GET'])
+build_bp.add_url_rule('/env/<int:environment_id>/stream', 'env_builds_stream', env_builds_stream, methods=['GET'])
 
 # ─── Agent 通信（白名单放行，AES-GCM 加密认证）─────────────────
 from modules.cicd.api.agent_comm_api import (

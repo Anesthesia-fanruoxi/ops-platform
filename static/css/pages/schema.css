@@ -1,0 +1,73 @@
+/* ══ MySQL 表结构对比同步页面样式（复用 collation.css 的 cp-* 基础样式） ══ */
+.schema-page {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    height: calc(100vh - 120px);
+    min-height: 0;
+}
+
+/* ── 顶部源/目标选择栏 ── */
+.schema-page .sc-select-bar { display: flex; gap: 18px; align-items: flex-end; flex-wrap: wrap; }
+.schema-page .sc-side { display: flex; flex-direction: column; gap: 6px; }
+.schema-page .sc-side-title { font-size: 12px; font-weight: 600; color: var(--cp-text-secondary); }
+.schema-page .sc-side-row { display: flex; gap: 8px; }
+.schema-page .sc-swap { margin-bottom: 2px; font-size: 16px; padding: 6px 12px; }
+.schema-page .sc-actions { margin-left: auto; margin-bottom: 2px; }
+
+/* ── 项目点选标签组 ── */
+.schema-page .sc-side-projects { flex-basis: 100%; }
+.schema-page .sc-project-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.schema-page .sc-project-chip { padding: 4px 12px; font-size: 12px; border: 1px solid var(--cp-border); border-radius: 14px; cursor: pointer; color: var(--cp-text-secondary); background: #fff; user-select: none; transition: all .15s; }
+.schema-page .sc-project-chip:hover { border-color: #2563eb; color: #2563eb; }
+.schema-page .sc-project-chip.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+
+/* ── 多目标标签页（每个目标一个页签） ── */
+.schema-page .sc-target-tabs { padding: 8px 16px 0; border-bottom: 1px solid var(--cp-border); gap: 4px; }
+
+/* ── 结果区头部（当前目标信息与摘要） ── */
+.schema-page .sc-result-header { font-size: 13px; font-weight: 600; color: var(--cp-text); margin: 10px 0 2px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.schema-page .sc-result-summary { font-size: 12px; font-weight: 400; color: var(--cp-text-muted); }
+
+/* ── 展开行明细 ── */
+.schema-page .sc-expand { padding: 14px 24px 18px 60px; background: #fafbfc; }
+.schema-page .sc-expand-title { font-size: 12px; font-weight: 600; color: var(--cp-text-secondary); margin: 10px 0 6px; text-transform: uppercase; letter-spacing: .5px; }
+.schema-page .sc-expand-section { margin-bottom: 8px; }
+.schema-page .sc-expand-note { color: var(--cp-text-muted); font-size: 13px; padding: 6px 0; }
+
+/* ── 新建/修改/删除 分组标题与列表（Navicat 风格平铺展示） ── */
+.schema-page .sc-group-title { font-size: 13px; font-weight: 600; margin: 16px 0 8px; display: flex; align-items: center; gap: 6px; }
+.schema-page .sc-group-title:first-child { margin-top: 10px; }
+.schema-page .sc-op-list { background: #fff; border: 1px solid var(--cp-border); border-radius: 8px; overflow: hidden; }
+.schema-page .sc-op-item { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 12px; border-bottom: 1px solid #f1f5f9; }
+.schema-page .sc-op-item:last-child { border-bottom: none; }
+.schema-page .sc-op-desc { font-size: 12px; color: var(--cp-text-secondary); font-family: 'JetBrains Mono', Consolas, monospace; overflow-wrap: anywhere; }
+.schema-page .sc-title-create { color: #16a34a; }
+.schema-page .sc-title-modify { color: #d97706; }
+.schema-page .sc-title-drop { color: #94a3b8; }
+
+/* ── 差异明细表 ── */
+.schema-page .sc-diff-table { width: auto; min-width: 60%; border: 1px solid var(--cp-border); border-radius: 8px; overflow: hidden; }
+.schema-page .sc-diff-table th { padding: 6px 12px; font-size: 11px; background: #f1f5f9; }
+.schema-page .sc-diff-table td { padding: 6px 12px; font-size: 12px; border-bottom: 1px solid #f1f5f9; }
+.schema-page .sc-diff-table tr:last-child td { border-bottom: none; }
+.schema-page .sc-mono { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 12px; color: var(--cp-text-secondary); }
+.schema-page .sc-val-source { color: #059669; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 12px; }
+.schema-page .sc-val-target { color: #dc2626; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 12px; text-decoration: line-through; text-decoration-color: rgba(220,38,38,.35); }
+
+/* ── SQL 预览块 ── */
+.schema-page .sc-sql { background: #1e1e1e; color: #d4d4d4; border-radius: 8px; padding: 14px 16px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 12px; line-height: 1.7; overflow-x: auto; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0; }
+.schema-page .sc-sql code { font-family: inherit; background: none; padding: 0; }
+.schema-page .sc-sql .hljs-comment { color: #6a9955; }
+.schema-page .sc-sql .hljs-keyword { color: #569cd6; font-weight: 600; }
+.schema-page .sc-sql .hljs-string { color: #ce9178; }
+.schema-page .sc-sql .hljs-number { color: #b5cea8; }
+
+/* ── 摘要 chips / 标签组 ── */
+.schema-page .sc-summary-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.schema-page .sc-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ── 同步确认列表 ── */
+.schema-page .sc-sync-group { font-size: 13px; font-weight: 600; color: var(--cp-text); margin: 10px 0 6px; }
+.schema-page .sc-sync-list { max-height: 36vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.schema-page .sc-sync-item { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border: 1px solid var(--cp-border); border-radius: 8px; background: #fafbfc; }

@@ -14,12 +14,15 @@ admin_bp = Blueprint('admin', __name__)
 
 # ─── deploy 路由 ─────────────────────────────────────────────
 from modules.deploy.api.deploy_api import (
-    execute_deploy, deploy_stream, deploy_status,
+    execute_deploy_project, execute_deploy_env, execute_deploy_service,
+    deploy_stream, deploy_status,
     recycle_async, restore_async, permanent_delete_async,
     batch_permanent_delete_async, batch_recycle_async, batch_restore_async
 )
 
-deploy_bp.add_url_rule('/execute', 'execute_deploy', execute_deploy, methods=['POST'])
+deploy_bp.add_url_rule('/execute/project', 'execute_deploy_project', execute_deploy_project, methods=['POST'])
+deploy_bp.add_url_rule('/execute/env', 'execute_deploy_env', execute_deploy_env, methods=['POST'])
+deploy_bp.add_url_rule('/execute/service', 'execute_deploy_service', execute_deploy_service, methods=['POST'])
 deploy_bp.add_url_rule('/stream', 'deploy_stream', deploy_stream, methods=['GET'])
 deploy_bp.add_url_rule('/status', 'deploy_status', deploy_status, methods=['GET'])
 deploy_bp.add_url_rule('/recycle', 'recycle_async', recycle_async, methods=['POST'])
@@ -112,6 +115,19 @@ admin_bp.add_url_rule('/projects/<int:project_id>/environments', 'list_environme
 admin_bp.add_url_rule('/environments/<int:env_id>', 'get_environment', get_environment, methods=['GET'])
 admin_bp.add_url_rule('/environments/<int:env_id>', 'update_environment', update_environment, methods=['PUT'])
 admin_bp.add_url_rule('/environments/<int:env_id>', 'delete_environment', delete_environment, methods=['DELETE'])
+
+
+# ─── service-info 路由（服务信息：日志/Nacos配置/部署YAML）────
+from modules.deploy.api.service_info_api import (
+    list_services, pod_log_stream, service_yaml,
+    nacos_config_detail, nacos_config_publish
+)
+
+deploy_bp.add_url_rule('/service-info/list', 'service_info_list', list_services, methods=['GET'])
+deploy_bp.add_url_rule('/service-info/log/stream', 'service_info_log_stream', pod_log_stream, methods=['GET'])
+deploy_bp.add_url_rule('/service-info/yaml', 'service_info_yaml', service_yaml, methods=['GET'])
+deploy_bp.add_url_rule('/service-info/nacos/config', 'service_info_nacos_config', nacos_config_detail, methods=['GET'])
+deploy_bp.add_url_rule('/service-info/nacos/config', 'service_info_nacos_publish', nacos_config_publish, methods=['POST'])
 
 
 def register(app):

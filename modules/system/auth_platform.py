@@ -53,13 +53,34 @@ def _request(cfg, method, uri, body=None):
     return resp.json()
 
 
+def _parse_verify_data(data):
+    """解析 /api/auth/verify 成功响应：单步返回 token，多步（双因子）返回 ticket"""
+    d = data.get('data') or {}
+    # 多步登录（双因子）：认证中心返回 ticket 而非 token，需第二步提交验证码
+    if 'token' not in d:
+        ticket = d.get('ticket') or ''
+        if ticket:
+            return {'ok': True, 'require_2fa': True, 'ticket': ticket}
+        return {'ok': False, 'code': 'error', 'msg': '认证服务响应异常，请稍后再试'}
+    user = d.get('user') or {}
+    return {
+        'ok': True,
+        'require_2fa': False,
+        'token': d.get('token'),
+        'expires_at': d.get('expires_at'),
+        'user': user,
+        'must_change_password': bool(user.get('must_change_password')),
+    }
+
+
 def verify_login(username, password, platform_id):
-    """登录校验（单步 username_password，兼容 authPlatform 旧格式 {username,password}）。
+    """登录校验第一步（username_password 类型，兼容 authPlatform 旧格式）。
 
     Returns:
         None: 未配置 authPlatform（调用方应回退本地校验）
-        dict 成功: {'ok': True, 'token', 'expires_at', 'user', 'must_change_password'}
-        dict 失败: {'ok': False, 'code', 'msg', 'need_change_password': bool}
+        dict 单步成功: {'ok': True, 'require_2fa': False, 'token', 'expires_at', 'user', 'must_change_password'}
+        dict 需双因子: {'ok': True, 'require_2fa': True, 'ticket'}（调用方引导第二步）
+        dict 失败: {'ok': False, 'code', 'msg'}
     """
     cfg = get_config()
     if not cfg:
@@ -68,8 +89,9 @@ def verify_login(username, password, platform_id):
     try:
         data = _request(cfg, 'POST', '/api/auth/verify', {
             'platform_id': platform_id,
-            'username': username,
-            'password': password,
+            'method': 'username_password',
+            'identifier': username,
+            'credential': password,
         })
     except Exception as e:
         # 不把异常细节透传给用户（可能含内网 URL），仅记日志
@@ -82,25 +104,93 @@ def verify_login(username, password, platform_id):
 
     code = data.get('code')
     if code == 0:
-        d = data.get('data') or {}
-        # 多步登录（返回 ticket 而非 token）：本次仅支持单步
-        if 'token' not in d:
-            return {'ok': False, 'code': 'multi_step',
-                    'msg': '该账号需要二次验证（TOTP/验证码），当前版本暂不支持，请联系管理员'}
-        user = d.get('user') or {}
-        return {
-            'ok': True,
-            'token': d.get('token'),
-            'expires_at': d.get('expires_at'),
-            'user': user,
-            'must_change_password': bool(user.get('must_change_password')),
-        }
+        return _parse_verify_data(data)
 
     # 业务错误（含 1010 强制改密、1001-1009）
     return {
         'ok': False,
         'code': 'must_change_password' if code == 1010 else code,
         'msg': data.get('msg') or f'登录失败(code={code})',
+        'user': data.get('data') or {},
+    }
+
+
+def verify_login_totp(username, code_2fa, platform_id):
+    """TOTP 双因子登录（免密码）：同一 /api/auth/verify 接口，按登录类型区分（username + code）。
+    验证码由认证中心校验（平台不存密钥、不验码），成功返回 token + user。
+
+    Returns: 与 verify_login 单步成功/失败同结构（不会再返回 require_2fa）
+    """
+    cfg = get_config()
+    if not cfg:
+        return None
+
+    try:
+        data = _request(cfg, 'POST', '/api/auth/verify', {
+            'platform_id': platform_id,
+            'method': 'username_totp',
+            'identifier': username,
+            'credential': code_2fa,
+        })
+    except Exception as e:
+        try:
+            import logging
+            logging.getLogger('authplatform').warning('authPlatform verify(totp) 调用失败: %s', e)
+        except Exception:
+            pass
+        return {'ok': False, 'code': 'error', 'msg': '认证服务调用失败，请稍后再试'}
+
+    code = data.get('code')
+    if code == 0:
+        parsed = _parse_verify_data(data)
+        if parsed.get('require_2fa'):
+            return {'ok': False, 'code': 'error', 'msg': '认证服务响应异常，请重试'}
+        return parsed
+
+    return {
+        'ok': False,
+        'code': 'must_change_password' if code == 1010 else code,
+        'msg': data.get('msg') or f'验证失败(code={code})',
+        'user': data.get('data') or {},
+    }
+
+
+def verify_login_step2(ticket, code_2fa, platform_id):
+    """登录校验第二步（双因子类型）：同一 /api/auth/verify 接口，提交第一步的 ticket + 验证码。
+    验证码由认证中心校验（平台不存密钥、不验证），成功返回 token + user。
+
+    Returns: 与 verify_login 单步成功/失败同结构（不会再返回 require_2fa）
+    """
+    cfg = get_config()
+    if not cfg:
+        return None
+
+    try:
+        data = _request(cfg, 'POST', '/api/auth/verify', {
+            'platform_id': platform_id,
+            'ticket': ticket,
+            'code': code_2fa,
+        })
+    except Exception as e:
+        try:
+            import logging
+            logging.getLogger('authplatform').warning('authPlatform verify(step2) 调用失败: %s', e)
+        except Exception:
+            pass
+        return {'ok': False, 'code': 'error', 'msg': '认证服务调用失败，请稍后再试'}
+
+    code = data.get('code')
+    if code == 0:
+        parsed = _parse_verify_data(data)
+        # 第二步不应再要求双因子；异常兜底为错误
+        if parsed.get('require_2fa'):
+            return {'ok': False, 'code': 'error', 'msg': '认证服务响应异常，请重新登录'}
+        return parsed
+
+    return {
+        'ok': False,
+        'code': 'must_change_password' if code == 1010 else code,
+        'msg': data.get('msg') or f'验证失败(code={code})',
         'user': data.get('data') or {},
     }
 
@@ -164,7 +254,7 @@ def sync_users():
     user_created = 0
     user_updated = 0
     skipped = []
-    default_role = Role.query.filter_by(name='只读用户').first()
+    default_role = Role.query.filter_by(name='普通用户').first()
 
     for item in result['users']:
         uid = (item or {}).get('uid')
@@ -172,6 +262,7 @@ def sync_users():
             continue
         username = (item.get('username') or '').strip()
         nickname = item.get('nickname') or ''
+        nickname_pinyin = item.get('nickname_pinyin') or ''  # 认证中心解析的完整拼音
         phone = item.get('phone') or ''
         email = item.get('email') or ''
         try:
@@ -186,6 +277,7 @@ def sync_users():
         if row:
             row.username = username or row.username
             row.nickname = nickname
+            row.nickname_pinyin = nickname_pinyin
             row.phone = phone
             row.email = email
             row.status = status
@@ -202,6 +294,7 @@ def sync_users():
                 uid=uid,
                 username=username,
                 nickname=nickname,
+                nickname_pinyin=nickname_pinyin,
                 phone=phone,
                 email=email,
                 status=status,
@@ -217,6 +310,7 @@ def sync_users():
             if username and username != local.username:
                 local.username = username
             local.nickname = nickname
+            local.nickname_pinyin = nickname_pinyin
             local.phone = phone
             local.email = email
             local.is_active = bool(status) and local.is_active
@@ -230,6 +324,7 @@ def sync_users():
             if clash:  # 已标记 sso 的旧账号：重绑 auth_uid
                 clash.auth_uid = uid
                 clash.nickname = nickname
+                clash.nickname_pinyin = nickname_pinyin
                 clash.phone = phone
                 clash.email = email
                 clash.is_active = bool(status) and clash.is_active
@@ -238,6 +333,7 @@ def sync_users():
                 db.session.add(User(
                     username=username,
                     nickname=nickname,
+                    nickname_pinyin=nickname_pinyin,
                     phone=phone,
                     email=email,
                     password_hash='',  # sso 用户无本地密码，登录走认证中心
@@ -334,7 +430,7 @@ def get_or_create_sso_user(user_info):
     - auth_uid 已映射 → 返回本地用户（同步昵称）
     - 本地存在同名 username 且已标记 sso 的账号 → 重绑 auth_uid（断链修复，沿用角色）
     - 本地同名原生账号（auth_source='local'）→ 拒绝自动绑定，返回 None（防止越权接管）
-    - 都没有 → 新建（默认角色：只读用户，最小权限，管理员可在平台内提权）
+    - 都没有 → 新建（默认角色：普通用户，最小权限，管理员可在平台内提权）
     """
     from core.db import db
     from modules.system.models import User, Role
@@ -350,6 +446,11 @@ def get_or_create_sso_user(user_info):
         if nickname and nickname != user.nickname:
             user.nickname = nickname
             db.session.commit()
+        # 拼音以认证中心为准，同步更新（登录映射场景）
+        pinyin = (user_info or {}).get('nickname_pinyin') or ''
+        if pinyin and pinyin != user.nickname_pinyin:
+            user.nickname_pinyin = pinyin
+            db.session.commit()
         return user
 
     # 同名本地旧账号：仅允许「已标记 sso 的账号」重绑（断链修复）；
@@ -363,10 +464,11 @@ def get_or_create_sso_user(user_info):
         db.session.commit()
         return user
 
-    role = Role.query.filter_by(name='只读用户').first()
+    role = Role.query.filter_by(name='普通用户').first()
     user = User(
         username=username,
         nickname=nickname,
+        nickname_pinyin=(user_info or {}).get('nickname_pinyin') or '',
         password_hash='',  # 无本地密码，登录统一走 authPlatform
         auth_uid=uid,
         auth_source='sso',

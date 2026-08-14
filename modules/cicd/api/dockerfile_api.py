@@ -11,9 +11,25 @@ from modules.cicd.services.dockerfile_service import render_dockerfile
 
 @require_permission('page:cicd')
 def list_dockerfiles():
-    """Dockerfile 模板列表"""
+    """Dockerfile 模板列表（精简字段，详情走 GET /<id>）"""
     tpls = DockerfileTemplate.query.order_by(DockerfileTemplate.created_at.desc()).all()
-    return success_response([t.to_dict() for t in tpls])
+    return success_response([{
+        'id': t.id,
+        'name': t.name,
+        'project_type': t.project_type,
+        'base_image': t.base_image,
+        'description': t.description,
+        'created_at': t.created_at.strftime('%Y-%m-%d %H:%M:%S') if t.created_at else None,
+    } for t in tpls])
+
+
+@require_permission('page:cicd')
+def get_dockerfile(tpl_id):
+    """Dockerfile 模板详情（含内容）"""
+    tpl = DockerfileTemplate.query.get(tpl_id)
+    if not tpl:
+        return error_response('模板不存在', 404)
+    return success_response(tpl.to_dict())
 
 
 @require_permission('op:cicd_admin')

@@ -111,24 +111,10 @@ class CicdFlowTemplate(db.Model):
 
     # Step1: 基本信息
     project_type = db.Column(db.String(20), default='backend')  # frontend | backend
-    language = db.Column(db.String(30), default='java')  # 前端: vue/react  后端: java/go/python
 
-    # Step2: Git 拉取
-    git_docker_image = db.Column(db.String(200), default='')  # 如 alpine/git:latest
-    git_url = db.Column(db.String(300), default='')
-    git_credential_id = db.Column(db.Integer, db.ForeignKey('cicd_credentials.id'), nullable=True)
-
-    # Step3: 编译
-    build_docker_image = db.Column(db.String(200), default='')  # 如 maven:3.9-eclipse-temurin-17
-    build_command = db.Column(db.Text, default='')  # 如 mvn clean package -DskipTests
-
-    # Step4: 产物收集（后端多行目录，前端默认 dist）
-    artifact_dirs = db.Column(db.Text, default='')  # 按行分割，服务目录列表
-    artifact_dir = db.Column(db.String(200), default='')  # 产物目录：各服务内统一的产物相对路径，如 target/pkg
-
-    # Step5: Docker Build（后端）
-    dockerfile_template_id = db.Column(db.Integer, db.ForeignKey('cicd_dockerfile_templates.id'), nullable=True)
-    image_name = db.Column(db.String(200), default='')
+    # 前后端双份配置（JSON：{"backend": {...}, "frontend": {...}}，唯一数据源，切换类型不丢数据）
+    # 历史顶层字段（language/git_url/build_command/artifact_dirs 等）已并入 configs，2026-08 删除
+    configs = db.Column(db.Text, default='')
 
     # 通用
     description = db.Column(db.String(200), default='')
@@ -137,38 +123,39 @@ class CicdFlowTemplate(db.Model):
 
     # 关联
     project = db.relationship('Project', backref=db.backref('cicd_template', uselist=False, lazy=True))
-    credential = db.relationship('GitCredential', lazy=True)
-    dockerfile_template = db.relationship('DockerfileTemplate', lazy=True)
-
-    def get_artifact_dir_list(self):
-        """解析产物目录列表"""
-        if self.project_type == 'frontend':
-            return ['dist']
-        dirs = [line.strip() for line in (self.artifact_dirs or '').splitlines() if line.strip()]
-        return dirs
 
     def to_dict(self):
+        """configs 为唯一数据源；language/git_url/build_docker_image 从当前类型配置派生（列表/详情展示用）"""
+        cfg = self.configs_dict()
+        cur = cfg.get(self.project_type) or {}
         return {
             'id': self.id,
             'project_id': self.project_id,
             'project_name': self.project.name if self.project else '',
             'project_type': self.project_type,
-            'language': self.language,
-            'git_docker_image': self.git_docker_image,
-            'git_url': self.git_url,
-            'git_credential_id': self.git_credential_id,
-            'git_credential_name': self.credential.name if self.credential else '',
-            'build_docker_image': self.build_docker_image,
-            'build_command': self.build_command,
-            'artifact_dirs': self.artifact_dirs,
-            'artifact_dir_list': self.get_artifact_dir_list(),
-            'artifact_dir': self.artifact_dir,
-            'dockerfile_template_id': self.dockerfile_template_id,
-            'dockerfile_template_name': self.dockerfile_template.name if self.dockerfile_template else '',
-            'image_name': self.image_name,
+            'language': cur.get('language', ''),
+            'git_url': cur.get('git_url', ''),
+            'build_docker_image': cur.get('build_docker_image', ''),
+            'configs': cfg,
             'description': self.description,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None,
+        }
+
+    def configs_dict(self):
+        """解析前后端双份配置：{"backend": {...}, "frontend": {...}}，缺省补空 + 默认值"""
+        import json as _json
+        try:
+            cfg = _json.loads(self.configs or '{}')
+        except Exception:
+            cfg = {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+        # Git Docker 镜像默认（新增字段，旧数据缺省补默认，避免表单/详情读取为空）
+        defaults = {'git_docker_image': 'alpine/git:latest'}
+        return {
+            'backend': {**defaults, **(cfg.get('backend') or {})},
+            'frontend': {**defaults, **(cfg.get('frontend') or {})},
         }
 
 
@@ -191,6 +178,9 @@ class BuildAgent(db.Model):
     ssh_credential_id = db.Column(db.Integer, nullable=True)
     work_dir = db.Column(db.String(200), default='/data/cicd')
     master_url = db.Column(db.String(200), default='')  # Master 回推地址
+    frontend_mount_dir = db.Column(db.String(255), default='')  # 前端挂载目录（Agent 机 NFS web 挂载路径，前端构建发布目标）
+    nfs_server = db.Column(db.String(100), default='')  # NFS 服务器地址（安装时自动挂载）
+    nfs_share = db.Column(db.String(200), default='')  # NFS 共享目录（安装时自动挂载到 frontend_mount_dir）
     keep_builds = db.Column(db.Integer, default=5)  # 构建记录/目录保留数（每节点独立，超出同步清理 Master 与节点目录）
     # Harbor 凭据（安装时配置，关联凭据表）
     harbor_credential_id = db.Column(db.Integer, nullable=True)
@@ -213,6 +203,9 @@ class BuildAgent(db.Model):
             'port': self.port or 9090,
             'harbor_url': self.harbor_url or '',
             'work_dir': self.work_dir or '/data/cicd',
+            'frontend_mount_dir': self.frontend_mount_dir or '',
+            'nfs_server': self.nfs_server or '',
+            'nfs_share': self.nfs_share or '',
         }
 
     def to_detail_dict(self):

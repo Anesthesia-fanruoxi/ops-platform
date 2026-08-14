@@ -12,25 +12,30 @@ from flask import request, make_response, Response, current_app
 
 from core.db import db
 from core.response import success_response, error_response
-from core.security import require_permission
-from modules.collation.models import CustomDatasource
-from modules.collation.service import (
+from core.security import require_permission, require_any_permission
+from modules.database.models import CustomDatasource, DdlSyncTask, DdlSyncLog
+from modules.database.ddl_sync import ddl_sync_manager
+from modules.database.service import (
     TARGET_COLLATION, TARGET_CHARSET, MAX_ROWS_THRESHOLD, SYSTEM_DATABASES,
     discover_mysql_instances, discover_custom_instances,
     get_connection, get_instance_by_id,
     column_needs_fix, annotate_table, fetch_column_issues,
 )
-from modules.collation.tasks import (
+from modules.database.tasks import (
     register_task, get_task, COLLATION_LOG_FILE,
     _run_fix_database_task, _run_fix_table_task,
     _run_fix_all_tables_task, _run_fix_columns_task,
+    _run_sync_structure_task,
+)
+from modules.database.schema_diff import (
+    fetch_schema_metadata, compare_schemas, build_sync_plan_sql,
 )
 from modules.deploy.services.deploy_utils import _clear_log
 
 
 # ── 实例发现（分组返回） ──
 
-@require_permission('page:collation')
+@require_any_permission('page:database', 'page:schema')
 def list_instances():
     """获取所有 MySQL 实例（分组：自动发现 + 自定义数据源）"""
     try:
@@ -135,12 +140,28 @@ def delete_datasource(source_id):
 
 @require_permission('page:datasources')
 def test_datasource_connection():
-    """测试自定义数据源连接（新增/编辑前验证可达性）"""
+    """测试数据源连接。
+
+    - 传 datasource_id：已保存数据源，后端直接查库取完整配置（host/port/user/密码），
+      前端无需也不应传密码（列表行「测试」按钮场景）
+    - 不传 id：表单校验（新建/编辑前），用前端传入的 host/port/user/password
+    """
     data = request.json
-    host = (data.get('host') or '').strip()
-    port = data.get('port', 3306)
-    user = (data.get('user') or 'root').strip()
-    password = data.get('password', '')
+    ds_id = data.get('datasource_id')
+    if ds_id:
+        from modules.database.models import CustomDatasource
+        source = CustomDatasource.query.get(ds_id)
+        if not source:
+            return error_response('数据源不存在', 404)
+        host = (source.host or '').strip()
+        port = source.port or 3306
+        user = (source.user or 'root').strip()
+        password = source.password or ''
+    else:
+        host = (data.get('host') or '').strip()
+        port = data.get('port', 3306)
+        user = (data.get('user') or 'root').strip()
+        password = data.get('password', '')
 
     if not host:
         return error_response('主机地址不能为空', 400)
@@ -161,7 +182,7 @@ def test_datasource_connection():
 
 # ── 数据库列表 ──
 
-@require_permission('page:collation')
+@require_any_permission('page:database', 'page:schema')
 def list_databases():
     """获取指定实例的数据库列表"""
     instance_id = request.args.get('instance_id', '')
@@ -185,7 +206,7 @@ def list_databases():
 
 # ── 表列表 ──
 
-@require_permission('page:collation')
+@require_any_permission('page:database', 'page:schema')
 def list_tables(database):
     """获取指定库的表列表（含排序状态标注）"""
     instance_id = request.args.get('instance_id', '')
@@ -213,7 +234,7 @@ def list_tables(database):
 
 # ── 字段详情 ──
 
-@require_permission('page:collation')
+@require_any_permission('page:database', 'page:schema')
 def list_columns(database, table):
     """获取指定表的字段详情"""
     instance_id = request.args.get('instance_id', '')
@@ -241,7 +262,7 @@ def list_columns(database, table):
 
 # ── 字段问题汇总 ──
 
-@require_permission('page:collation')
+@require_permission('page:database')
 def list_column_issues(database):
     """获取指定库的字段问题汇总"""
     instance_id = request.args.get('instance_id', '')
@@ -274,27 +295,36 @@ def list_column_issues(database):
 
 # ── 异步修复（SSE 实时日志推送） ──
 
-def _start_task(action, run_func, args):
-    """通用异步任务启动：同实例并发锁 → 生成 task_key、清空单一日志文件、注册、起后台线程。
-    返回 task_key；同实例已有任务进行中返回 None（调用方返回 409）。
+def _start_task(action, run_func, args, lock_instances=None):
+    """通用异步任务启动：实例并发锁 → 生成 task_key、清空单一日志文件、注册、起后台线程。
+    lock_instances 为需加锁的实例 id 列表（一源多目标同步时锁全部目标实例）；
+    未显式指定时默认锁 args[0]。
+    任一实例已有任务进行中则整体拒绝返回 None（调用方返回 409）。
     Redis 不可用时不做并发限制，直接运行。"""
-    task_key = f'collation-{action}-{int(time.time() * 1000)}'
-    lock_name = None
-    from core.redis_client import is_available, set_if_absent
-    instance_id = args[0] if args else None
-    if is_available() and instance_id is not None:
-        lock_name = f'lock:collation:{instance_id}'
-        if not set_if_absent(lock_name, value='1', ttl=600000):
-            return None
+    task_key = f'database-{action}-{int(time.time() * 1000)}'
+    lock_names = []
+    from core.redis_client import is_available, set_if_absent, cache_delete
+    if lock_instances is None:
+        instance_id = args[0] if args else None
+        lock_instances = [instance_id] if instance_id is not None else []
+    if is_available() and lock_instances:
+        for iid in lock_instances:
+            name = f'lock:database:{iid}'
+            if not set_if_absent(name, value='1', ttl=600000):
+                # 已占的锁回滚释放，避免部分占用
+                for got in lock_names:
+                    cache_delete(got)
+                return None
+            lock_names.append(name)
     _clear_log(COLLATION_LOG_FILE)
-    register_task(task_key, lock_name=lock_name)
+    register_task(task_key, lock_names=lock_names or None)
     app = current_app._get_current_object()
     t = threading.Thread(target=run_func, args=(app, task_key, *args), daemon=True)
     t.start()
     return task_key
 
 
-@require_permission('op:collation_fix')
+@require_permission('op:database_fix')
 def fix_database_async():
     """异步修复数据库级排序（SSE 日志推送）"""
     data = request.json
@@ -308,7 +338,7 @@ def fix_database_async():
     return success_response({'task_key': task_key, 'status': 'running'}, '修复任务已提交')
 
 
-@require_permission('op:collation_fix')
+@require_permission('op:database_fix')
 def fix_table_async():
     """异步修复单表排序（SSE 日志推送）"""
     data = request.json
@@ -323,7 +353,7 @@ def fix_table_async():
     return success_response({'task_key': task_key, 'status': 'running'}, '修复任务已提交')
 
 
-@require_permission('op:collation_fix')
+@require_permission('op:database_fix')
 def fix_all_tables_async():
     """异步一键修复所有表（SSE 日志推送，超阈值跳过）"""
     data = request.json
@@ -338,7 +368,7 @@ def fix_all_tables_async():
     return success_response({'task_key': task_key, 'status': 'running'}, '修复任务已提交')
 
 
-@require_permission('op:collation_fix')
+@require_permission('op:database_fix')
 def fix_columns_async():
     """异步修复指定字段（SSE 日志推送，单表模式无视阈值）"""
     data = request.json
@@ -355,8 +385,155 @@ def fix_columns_async():
     return success_response({'task_key': task_key, 'status': 'running'}, '修复任务已提交')
 
 
-def collation_stream():
-    """排序修正进度流 - 读取单一日志文件实时推送（已登录即可，操作权限由触发接口校验）"""
+# ── 表结构对比与同步 ──
+
+# 分类映射：创建=目标缺失，修改=结构差异，删除=目标多余
+_GROUP_BY_STATUS = {'missing': 'create', 'diff': 'modify', 'extra': 'drop'}
+
+
+def _object_brief(row):
+    """生成对象摘要描述（前端直接展示）"""
+    ops = row.get('ops') or {}
+    if row['status'] == 'missing':
+        return (ops.get('create') or [{}])[0].get('desc', '')
+    if row['status'] == 'extra':
+        return '源库不存在该对象'
+    # diff：表按字段/索引变更数汇总，视图/事件直接展示变更内容
+    if row.get('object_type') == '表':
+        c = len(ops.get('create') or [])
+        m = len(ops.get('modify') or [])
+        d = len(ops.get('drop') or [])
+        desc = f'新建 {c} · 修改 {m}'
+        if d:
+            desc += f' · 多余 {d}（不处理）'
+        return desc
+    mods = ops.get('modify') or ops.get('create') or []
+    return mods[0].get('desc', '') if mods else ''
+
+
+def _to_compare_view(result):
+    """对比结果转前端展示视图：每对象附加 group/desc，剔除完全一致的对象"""
+    tables = []
+    for row in result['tables']:
+        group = _GROUP_BY_STATUS.get(row['status'])
+        if not group:
+            continue
+        row = dict(row)
+        row['group'] = group
+        row['desc'] = _object_brief(row)
+        tables.append(row)
+    result['tables'] = tables
+    return result
+
+
+def _compare_structure_payload(data):
+    """解析对比参数并执行对比，返回 (result, error_response)；失败时 result 为 None"""
+    source_instance_id = data.get('source_instance_id')
+    target_instance_id = data.get('target_instance_id')
+    source_database = data.get('source_database')
+    target_database = data.get('target_database') or source_database
+    project = (data.get('project') or '').strip()
+    if not source_instance_id or not target_instance_id or not source_database:
+        return None, error_response('缺少参数（源/目标实例、源数据库）', 400)
+
+    src_conn = tgt_conn = None
+    try:
+        src_conn = get_connection(source_instance_id)
+        tgt_conn = (src_conn if target_instance_id == source_instance_id
+                    else get_connection(target_instance_id))
+        src_meta = fetch_schema_metadata(src_conn, source_database)
+        tgt_meta = fetch_schema_metadata(tgt_conn, target_database)
+        result = compare_schemas(src_meta, tgt_meta)
+        _to_compare_view(result)
+        result['project'] = project
+        result['source'] = {
+            'instance_id': str(source_instance_id),
+            'name': (get_instance_by_id(source_instance_id) or {}).get('name', str(source_instance_id)),
+            'database': source_database,
+        }
+        result['target'] = {
+            'instance_id': str(target_instance_id),
+            'name': (get_instance_by_id(target_instance_id) or {}).get('name', str(target_instance_id)),
+            'database': target_database,
+        }
+        return result, None
+    except ValueError as e:
+        return None, error_response(str(e), 404)
+    except Exception as e:
+        return None, error_response(f'对比失败: {e}')
+    finally:
+        if src_conn:
+            src_conn.close()
+        if tgt_conn is not None and tgt_conn is not src_conn:
+            tgt_conn.close()
+
+
+@require_permission('page:schema')
+def compare_structure():
+    """表结构对比：源库 → 目标库（表/字段/索引/表选项差异）"""
+    result, err = _compare_structure_payload(request.json or {})
+    if err:
+        return err
+    return success_response(result)
+
+
+@require_permission('page:schema')
+def sync_structure_sql():
+    """预览同步 SQL（不执行，仅生成文本）"""
+    result, err = _compare_structure_payload(request.json or {})
+    if err:
+        return err
+    sql_text = build_sync_plan_sql(result)
+    need_sync = [t['table'] for t in result['tables'] if t['status'] in ('missing', 'diff')]
+    return success_response({'sql': sql_text, 'tables': need_sync})
+
+
+@require_permission('op:structure_sync')
+def sync_structure_async():
+    """异步执行表结构同步（SSE 日志推送，一源多目标，全部目标实例加并发锁）
+
+    支持两种入参：
+    - targets: [{'instance_id':..., 'database':..., 'tables': [...]|缺省}]（多目标）
+    - target_instance_id / target_database / tables（单目标，向下兼容）
+    """
+    data = request.json or {}
+    source_instance_id = data.get('source_instance_id')
+    source_database = data.get('source_database')
+    if not source_instance_id or not source_database:
+        return error_response('缺少参数（源实例、源数据库）', 400)
+
+    targets = []
+    for t in data.get('targets') or []:
+        tid = t.get('instance_id')
+        if not tid:
+            continue
+        targets.append({
+            'instance_id': tid,
+            'database': t.get('database') or source_database,
+            'tables': t.get('tables') or None,
+        })
+    if not targets:
+        # 单目标旧参数兼容
+        target_instance_id = data.get('target_instance_id')
+        if not target_instance_id:
+            return error_response('缺少参数（目标实例）', 400)
+        targets.append({
+            'instance_id': target_instance_id,
+            'database': data.get('target_database') or source_database,
+            'tables': data.get('tables') or None,
+        })
+
+    lock_instances = [t['instance_id'] for t in targets]
+    task_key = _start_task('sync', _run_sync_structure_task,
+                           (source_instance_id, source_database, targets),
+                           lock_instances=lock_instances)
+    if not task_key:
+        return error_response('目标实例已有任务进行中，请稍后再试', 409)
+    return success_response({'task_key': task_key, 'status': 'running'}, '同步任务已提交')
+
+
+def database_stream():
+    """任务进度流 - 读取单一日志文件实时推送（已登录即可，操作权限由触发接口校验）"""
     task_key = request.args.get('task_key', '')
     if not task_key:
         return error_response('缺少 task_key 参数', 400)
@@ -426,7 +603,7 @@ def _parse_collation_log(line):
 
 # ── 导出报告 ──
 
-@require_permission('page:collation')
+@require_permission('page:database')
 def download_report(database):
     """生成并下载 HTML 校验报告"""
     instance_id = request.args.get('instance_id', '')
@@ -587,3 +764,210 @@ h2 {{ font-size: 17px; margin: 24px 0 8px; padding-bottom: 6px; border-bottom: 2
 </body>
 </html>"""
     return html
+
+
+# ── DDL 自动同步 ──
+
+def _all_sync_instances():
+    """全部可参与 DDL 同步的实例（自动发现 + 自定义数据源，统一结构）"""
+    insts = []
+    for i in discover_mysql_instances():
+        insts.append({'id': i['id'], 'name': i['name'], 'project': i['project'],
+                      'env': i['env'], 'host': i['host'], 'port': i['port'],
+                      'source_type': 'auto'})
+    for i in discover_custom_instances():
+        insts.append({'id': i['id'], 'name': i['name'], 'project': i['project'],
+                      'env': i['env'], 'host': i['host'], 'port': i['port'],
+                      'source_type': 'custom', 'description': i.get('description', '')})
+    return insts
+
+
+@require_permission('page:ddl_sync')
+def ddl_sync_projects():
+    """获取数据源中出现过的全部项目名（去重）"""
+    try:
+        projects = sorted({i['project'] for i in _all_sync_instances() if i['project']})
+        return success_response(projects)
+    except Exception as e:
+        return error_response(str(e))
+
+
+@require_permission('page:ddl_sync')
+def ddl_sync_instances():
+    """获取实例列表；不传 project 返回全量（前端名称映射用）"""
+    project = request.args.get('project', '')
+    try:
+        insts = _all_sync_instances()
+        if project:
+            insts = [i for i in insts if i['project'] == project]
+        return success_response(insts)
+    except Exception as e:
+        return error_response(str(e))
+
+
+def _task_with_runtime(task):
+    """任务字典 + 运行态（各源是否监听中、最近同步时间）"""
+    data = task.to_dict()
+    status_map = ddl_sync_manager.status_map()
+    data['listening'] = {
+        str(iid): bool(status_map.get((task.id, str(iid))))
+        for iid in task.source_list()
+    }
+    last = DdlSyncLog.query.filter_by(task_id=task.id).order_by(DdlSyncLog.created_at.desc()).first()
+    data['last_sync_at'] = last.created_at.strftime('%Y-%m-%d %H:%M:%S') if last and last.created_at else None
+    return data
+
+
+@require_permission('page:ddl_sync')
+def ddl_sync_tasks_list():
+    """任务列表（附运行状态）"""
+    tasks = DdlSyncTask.query.order_by(DdlSyncTask.id.desc()).all()
+    return success_response([_task_with_runtime(t) for t in tasks])
+
+
+def _parse_task_payload(data):
+    """解析创建/编辑任务参数，返回 (fields, error_response)；同步范围为全部库（系统库自动跳过）"""
+    name = (data.get('name') or '').strip()
+    project = (data.get('project') or '').strip()
+    sources = [str(s) for s in (data.get('sources') or [])]
+    ignored = [str(s) for s in (data.get('ignored') or [])]
+    if not name:
+        return None, error_response('任务名称不能为空', 400)
+    if len(sources) < 2:
+        return None, error_response('至少勾选 2 个数据源才能组成同步', 400)
+    if len(set(sources)) != len(sources):
+        return None, error_response('数据源不能重复勾选', 400)
+    bad = [s for s in ignored if s not in sources]
+    if bad:
+        return None, error_response('忽略同步只能应用于已勾选的数据源', 400)
+    return {'name': name, 'project': project, 'database': '',
+            'sources': json.dumps(sources, ensure_ascii=False),
+            'ignored': json.dumps(ignored, ensure_ascii=False)}, None
+
+
+@require_permission('op:ddl_sync')
+def ddl_sync_create_task():
+    """创建同步任务（以当前 binlog 位点为基线，只同步创建后的新变更）"""
+    fields, err = _parse_task_payload(request.json or {})
+    if err:
+        return err
+    task = DdlSyncTask(**fields, enabled=True)
+    db.session.add(task)
+    db.session.commit()
+    ddl_sync_manager.reload()
+    return success_response(_task_with_runtime(task), '同步任务创建成功')
+
+
+@require_permission('op:ddl_sync')
+def ddl_sync_update_task(task_id):
+    """编辑任务（随时变更勾选/忽略，配置即时生效）"""
+    task = DdlSyncTask.query.get(task_id)
+    if not task:
+        return error_response('任务不存在', 404)
+    fields, err = _parse_task_payload(request.json or {})
+    if err:
+        return err
+    for k, v in fields.items():
+        setattr(task, k, v)
+    db.session.commit()
+    ddl_sync_manager.reload()
+    return success_response(_task_with_runtime(task), '任务更新成功')
+
+
+@require_permission('op:ddl_sync')
+def ddl_sync_toggle_task(task_id):
+    """启用/暂停任务"""
+    task = DdlSyncTask.query.get(task_id)
+    if not task:
+        return error_response('任务不存在', 404)
+    task.enabled = not task.enabled
+    db.session.commit()
+    ddl_sync_manager.reload()
+    return success_response(_task_with_runtime(task), '任务已启用' if task.enabled else '任务已暂停')
+
+
+@require_permission('op:ddl_sync')
+def ddl_sync_delete_task(task_id):
+    """删除任务（停监听，同步日志保留）"""
+    task = DdlSyncTask.query.get(task_id)
+    if not task:
+        return error_response('任务不存在', 404)
+    db.session.delete(task)
+    db.session.commit()
+    ddl_sync_manager.reload()
+    return success_response(None, '任务已删除')
+
+
+@require_permission('page:ddl_sync')
+def ddl_sync_logs():
+    """同步日志（按任务过滤，时间倒序）"""
+    task_id = request.args.get('task_id', type=int)
+    limit = min(request.args.get('limit', 200, type=int) or 200, 1000)
+    q = DdlSyncLog.query
+    if task_id:
+        q = q.filter_by(task_id=task_id)
+    logs = q.order_by(DdlSyncLog.created_at.desc(), DdlSyncLog.id.desc()).limit(limit).all()
+    # 附带实例名映射，前端直接展示
+    names = {}
+    for l in logs:
+        for iid in (l.source_id, l.target_id):
+            if iid and iid not in names:
+                inst = get_instance_by_id(iid)
+                names[iid] = inst['name'] if inst else iid
+    data = [dict(l.to_dict(),
+                 source_name=names.get(l.source_id, l.source_id),
+                 target_name=names.get(l.target_id, '') if l.target_id else '')
+            for l in logs]
+    return success_response(data)
+
+
+@require_permission('page:ddl_sync')
+def ddl_sync_log_stream(task_id):
+    """SSE 实时日志流：先回放最近 100 条历史（时间正序），之后轮询增量持续推送。
+    客户端断开/任务不存在时自然结束；每 15s 发心跳注释防中间层断连。"""
+    app = current_app._get_current_object()
+    HISTORY_LIMIT = 100
+
+    def _payload(l):
+        inst = get_instance_by_id(l.source_id)
+        return dict(l.to_dict(), source_name=inst['name'] if inst else l.source_id)
+
+    def generate():
+        last_id = 0
+        try:
+            # 历史回放：最近 N 条按时间正序推送
+            with app.app_context():
+                logs = DdlSyncLog.query.filter_by(task_id=task_id) \
+                    .order_by(DdlSyncLog.id.desc()).limit(HISTORY_LIMIT).all()
+                logs = list(reversed(logs))
+                payloads = [_payload(l) for l in logs]
+                last_id = logs[-1].id if logs else 0
+            for p in payloads:
+                yield f'data: {json.dumps(p, ensure_ascii=False)}\n\n'
+
+            idle_sec = 0
+            while True:
+                time.sleep(1)
+                # 增量轮询：id 大于已推送的最大 id
+                with app.app_context():
+                    new_logs = DdlSyncLog.query.filter(
+                        DdlSyncLog.task_id == task_id, DdlSyncLog.id > last_id,
+                    ).order_by(DdlSyncLog.id.asc()).limit(200).all()
+                    payloads = [_payload(l) for l in new_logs]
+                    if new_logs:
+                        last_id = new_logs[-1].id
+                if payloads:
+                    idle_sec = 0
+                    for p in payloads:
+                        yield f'data: {json.dumps(p, ensure_ascii=False)}\n\n'
+                else:
+                    idle_sec += 1
+                    if idle_sec % 15 == 0:
+                        yield ': ping\n\n'  # 心跳保活
+        except GeneratorExit:
+            return
+        except Exception:
+            return
+
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})

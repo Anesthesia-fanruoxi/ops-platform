@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 )
 
@@ -41,6 +42,8 @@ func register() {
 		"docker_cache_size": m.DockerCache,
 		// 静态系统信息 JSON
 		"sys_info": buildSysInfoJSON(),
+		// 当前运行任务数（Master 并发依据，Agent 自行上报）
+		"running_count": atomic.LoadInt32(&runningCount),
 	}
 	resp := postEncrypted("/api/cicd/agent/register", body)
 	if resp != nil {
@@ -84,6 +87,8 @@ func heartbeatLoop(quit <-chan os.Signal) {
 				"docker_cache_size": m.DockerCache,
 				// 静态系统信息 JSON
 				"sys_info": buildSysInfoJSON(),
+				// 当前运行任务数（Master 并发依据，Agent 自行上报）
+				"running_count": atomic.LoadInt32(&runningCount),
 			}
 			postEncrypted("/api/cicd/agent/heartbeat", body)
 		}

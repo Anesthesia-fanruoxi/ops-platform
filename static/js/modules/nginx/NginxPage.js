@@ -107,7 +107,10 @@ const NginxPage = {
             <col style="width:46px"><col><col style="width:46px"><col>
           </colgroup>
           <tbody>
-            <tr v-for="(row, i) in diffRows" :key="i" :class="'diff-row diff-' + row.type">
+            <tr v-for="(row, i) in diffRows" v-if="row.type === 'fold'" :key="'f'+i" class="diff-row diff-fold">
+              <td colspan="4" style="text-align:center;color:#909399;background:#fafafa;font-size:12px;padding:3px 0">…… 中间 [[ row.count ]] 行无变化已折叠 ……</td>
+            </tr>
+            <tr v-for="(row, i) in diffRows" v-else :key="i" :class="'diff-row diff-' + row.type">
               <td class="diff-ln">[[ row.oldLn ]]</td>
               <td class="diff-cell diff-cell-old"><pre>[[ row.oldText ]]</pre></td>
               <td class="diff-ln">[[ row.newLn ]]</td>
@@ -536,94 +539,103 @@ const NginxPage = {
     },
     // ─── 修改对比 ───────────────────────────
     _computeDiff(oldLines, newLines) {
-      // LCS-based line diff
+      // LCS-based line diff（优化版：先裁公共前后缀，只对中间变化区 LCS；>1500 行走简化算法）
+      var start = 0;
+      var minLen = Math.min(oldLines.length, newLines.length);
+      while (start < minLen && oldLines[start] === newLines[start]) start++;
+      var oldEnd = oldLines.length, newEnd = newLines.length;
+      while (oldEnd > start && newEnd > start && oldLines[oldEnd - 1] === newLines[newEnd - 1]) { oldEnd--; newEnd--; }
+
+      var stats = { added: 0, removed: 0, modified: 0 };
+      var rows = [];
+      for (var i = 0; i < start; i++) {
+        rows.push({ type: 'same', oldText: oldLines[i], newText: newLines[i], oldLn: i + 1, newLn: i + 1 });
+      }
+      var midOld = oldLines.slice(start, oldEnd);
+      var midNew = newLines.slice(start, newEnd);
+      var mid = Math.max(midOld.length, midNew.length) > 1500
+        ? this._simpleDiff(midOld, midNew)
+        : this._lcsDiff(midOld, midNew);
+      stats.added += mid.stats.added;
+      stats.removed += mid.stats.removed;
+      stats.modified += mid.stats.modified;
+      mid.rows.forEach(function (r) {
+        if (r.oldLn !== '') r.oldLn += start;
+        if (r.newLn !== '') r.newLn += start;
+        rows.push(r);
+      });
+      for (var i2 = oldEnd; i2 < oldLines.length; i2++) {
+        var j2 = i2 - oldEnd + newEnd;
+        rows.push({ type: 'same', oldText: oldLines[i2], newText: newLines[j2], oldLn: i2 + 1, newLn: j2 + 1 });
+      }
+      return { rows: this._collapseSameRows(rows), stats: stats };
+    },
+
+    _collapseSameRows(rows, ctx) {
+      ctx = ctx || 3;
+      var keep = new Array(rows.length).fill(false);
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].type !== 'same') {
+          var lo = Math.max(0, i - ctx);
+          var hi = Math.min(rows.length - 1, i + ctx);
+          for (var j = lo; j <= hi; j++) keep[j] = true;
+        }
+      }
+      var out = [];
+      var k = 0;
+      while (k < rows.length) {
+        if (keep[k]) { out.push(rows[k]); k++; continue; }
+        var k2 = k;
+        while (k2 < rows.length && !keep[k2]) k2++;
+        out.push({ type: 'fold', count: k2 - k });
+        k = k2;
+      }
+      return out;
+    },
+
+    // LCS 行级 diff（仅用于中间变化区；>1500 行由 _computeDiff 走 _simpleDiff）
+    _lcsDiff(oldLines, newLines) {
       var m = oldLines.length, n = newLines.length;
-      // 优化：对于超大文件，使用简化算法
-      var maxLen = Math.max(m, n);
-      if (maxLen > 5000) {
-        return this._simpleDiff(oldLines, newLines);
-      }
-      // 构建 LCS 表
       var dp = [];
-      for (var i = 0; i <= m; i++) {
-        dp[i] = new Uint16Array(n + 1);
-      }
+      for (var i = 0; i <= m; i++) dp[i] = new Uint16Array(n + 1);
       for (var i = 1; i <= m; i++) {
         for (var j = 1; j <= n; j++) {
-          dp[i][j] = oldLines[i-1] === newLines[j-1]
-            ? dp[i-1][j-1] + 1
-            : Math.max(dp[i-1][j], dp[i][j-1]);
+          dp[i][j] = oldLines[i - 1] === newLines[j - 1]
+            ? dp[i - 1][j - 1] + 1
+            : Math.max(dp[i - 1][j], dp[i][j - 1]);
         }
       }
-      // 回溯生成 diff
       var rows = [], stats = { added: 0, removed: 0, modified: 0 };
-      var oi = m, ni = n;
-      var stack = [];
-      while (oi > 0 || ni > 0) {
-        if (oi > 0 && ni > 0 && oldLines[oi-1] === newLines[ni-1]) {
-          stack.push({ type: 'same', oldText: oldLines[oi-1], newText: newLines[ni-1], oldLn: oi, newLn: ni });
+      var oi = m, ni = n, stack = [];
+      while (oi > 0 && ni > 0) {
+        if (oldLines[oi - 1] === newLines[ni - 1]) {
+          stack.push({ type: 'same', oldText: oldLines[oi - 1], newText: newLines[ni - 1], oldLn: oi, newLn: ni });
           oi--; ni--;
-        } else if (ni > 0 && (oi === 0 || dp[oi][ni-1] >= dp[oi-1][ni])) {
-          stack.push({ type: 'added', oldText: '', newText: newLines[ni-1], oldLn: '', newLn: ni });
-          stats.added++;
-          ni--;
-        } else {
-          stack.push({ type: 'removed', oldText: oldLines[oi-1], newText: '', oldLn: oi, newLn: '' });
-          stats.removed++;
+        } else if (dp[oi - 1][ni] >= dp[oi][ni - 1]) {
+          stack.push({ type: 'removed', oldText: oldLines[oi - 1], newText: '', oldLn: oi, newLn: '' });
           oi--;
+        } else {
+          stack.push({ type: 'added', oldText: '', newText: newLines[ni - 1], oldLn: '', newLn: ni });
+          ni--;
         }
       }
-      stack.reverse();
-      // 合并相邻的 removed 块 + added 块 为 modified
-      var rows = [];
-      var i = 0;
-      while (i < stack.length) {
-        // 收集连续的 removed 行
-        var removedBlock = [];
-        while (i < stack.length && stack[i].type === 'removed') {
-          removedBlock.push(stack[i]);
-          i++;
-        }
-        // 收集连续的 added 行
-        var addedBlock = [];
-        while (i < stack.length && stack[i].type === 'added') {
-          addedBlock.push(stack[i]);
-          i++;
-        }
-        // 配对 removed + added 为 modified
-        if (removedBlock.length > 0 && addedBlock.length > 0) {
-          var pairCount = Math.min(removedBlock.length, addedBlock.length);
-          for (var p = 0; p < pairCount; p++) {
-            rows.push({
-              type: 'modified',
-              oldText: removedBlock[p].oldText, newText: addedBlock[p].newText,
-              oldLn: removedBlock[p].oldLn, newLn: addedBlock[p].newLn
-            });
-            stats.modified++;
-            stats.removed--;
-            stats.added--;
-          }
-          // 多余的 removed
-          for (var p = pairCount; p < removedBlock.length; p++) {
-            rows.push(removedBlock[p]);
-          }
-          // 多余的 added
-          for (var p = pairCount; p < addedBlock.length; p++) {
-            rows.push(addedBlock[p]);
-          }
+      while (oi > 0) { stack.push({ type: 'removed', oldText: oldLines[oi - 1], newText: '', oldLn: oi, newLn: '' }); oi--; }
+      while (ni > 0) { stack.push({ type: 'added', oldText: '', newText: newLines[ni - 1], oldLn: '', newLn: ni }); ni--; }
+      // 相邻 removed+added 合并为 modified
+      for (var k = 0; k < stack.length; k++) {
+        if (stack[k].type === 'removed' && k + 1 < stack.length && stack[k + 1].type === 'added') {
+          rows.push({ type: 'modified', oldText: stack[k].oldText, newText: stack[k + 1].newText, oldLn: stack[k].oldLn, newLn: stack[k + 1].newLn });
+          stats.modified++;
+          k++;
         } else {
-          // 没有配对，直接输出
-          for (var r = 0; r < removedBlock.length; r++) rows.push(removedBlock[r]);
-          for (var a = 0; a < addedBlock.length; a++) rows.push(addedBlock[a]);
-        }
-        // 输出 same 行
-        while (i < stack.length && stack[i].type === 'same') {
-          rows.push(stack[i]);
-          i++;
+          rows.push(stack[k]);
+          if (stack[k].type === 'added') stats.added++;
+          else if (stack[k].type === 'removed') stats.removed++;
         }
       }
       return { rows: rows, stats: stats };
     },
+
     _simpleDiff(oldLines, newLines) {
       // 简化版 diff（用于超大文件）：逐行对比
       var rows = [], stats = { added: 0, removed: 0, modified: 0 };

@@ -54,6 +54,8 @@ def agent_register():
         docker_cache_size=data.get('docker_cache_size'),
         # 静态系统信息 JSON
         sys_info=data.get('sys_info'),
+        # 当前运行任务数（Agent 自行上报，Master 并发依据）
+        running_count=data.get('running_count'),
     )
     return encrypt_response({'ok': True, 'agent_id': agent.id})
 
@@ -94,6 +96,8 @@ def agent_heartbeat():
         docker_cache_size=data.get('docker_cache_size'),
         # 静态系统信息 JSON
         sys_info=data.get('sys_info'),
+        # 当前运行任务数（Agent 自行上报，Master 并发依据）
+        running_count=data.get('running_count'),
     )
     if not agent:
         return _agent_error('Agent 不存在', 403)

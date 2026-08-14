@@ -1,45 +1,119 @@
-/* 登录页样式 */
+/* 登录页样式：暗色绚丽风（极光渐变 + 粒子星空 + 玻璃拟态卡片） */
+/* 登录页自适应：去除 body 默认 margin/滚动，容器占满视口且内容垂直居中 */
+body:has(.login-wrapper) { margin: 0; overflow: hidden; }
 .login-wrapper {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background:
+    radial-gradient(ellipse at 15% 10%, rgba(30, 70, 190, 0.9) 0%, transparent 50%),
+    radial-gradient(ellipse at 85% 90%, rgba(120, 40, 200, 0.85) 0%, transparent 52%),
+    radial-gradient(ellipse at 72% 15%, rgba(0, 140, 200, 0.6) 0%, transparent 42%),
+    radial-gradient(ellipse at 30% 85%, rgba(0, 200, 220, 0.28) 0%, transparent 40%),
+    linear-gradient(180deg, #05081a 0%, #0b1026 55%, #101a3c 100%);
   position: relative;
+  overflow: hidden;
 }
-.login-wrapper::before {
-  content: '';
+/* 粒子星空画布 */
+.login-canvas {
   position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* 极光圈（漂移光斑） */
+.login-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
   pointer-events: none;
 }
+.login-orb-1 { width: 480px; height: 480px; background: #7c3aed; opacity: .4; top: -140px; left: -120px; animation: login-drift-1 14s ease-in-out infinite alternate; }
+.login-orb-2 { width: 420px; height: 420px; background: #0891b2; opacity: .35; bottom: -120px; right: -100px; animation: login-drift-2 18s ease-in-out infinite alternate; }
+.login-orb-3 { width: 300px; height: 300px; background: #db2777; opacity: .22; top: 55%; left: 12%; animation: login-drift-3 16s ease-in-out infinite alternate; }
+@keyframes login-drift-1 { to { transform: translate(120px, 80px) scale(1.15); } }
+@keyframes login-drift-2 { to { transform: translate(-140px, -60px) scale(1.1); } }
+@keyframes login-drift-3 { to { transform: translate(80px, -100px) scale(1.25); } }
+
+/* 玻璃拟态卡片 */
 .login-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 40px;
-  width: 380px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  width: 400px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 42px 40px 28px;
   position: relative;
   z-index: 1;
+  background: rgba(15, 20, 45, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  animation: login-card-in 0.7s cubic-bezier(0.22, 1, 0.36, 1);
 }
+@keyframes login-card-in {
+  from { opacity: 0; transform: translateY(28px) scale(0.96); }
+}
+/* 卡片顶部流动光条 */
+.login-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 10%; right: 10%;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, #22d3ee, #a78bfa, #f472b6, transparent);
+  background-size: 200% 100%;
+  animation: login-beam 3.5s linear infinite;
+}
+@keyframes login-beam {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* 标题：渐变流光大字 + 英文副标 */
 .login-card .login-title {
   text-align: center;
-  margin-bottom: 8px;
-  font-size: 22px;
-  font-weight: bold;
-  color: #303133;
+  margin-bottom: 6px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  background: linear-gradient(90deg, #7dd3fc, #a78bfa, #f472b6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.login-card .login-title-en {
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 5px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-bottom: 26px;
+  text-transform: uppercase;
 }
 .login-card .login-subtitle {
   text-align: center;
-  color: #909399;
+  color: rgba(255, 255, 255, 0.45);
   font-size: 13px;
-  margin-bottom: 32px;
+  margin-bottom: 26px;
 }
-/* 登录方式标签切换（用户登录 / 管理员登录） */
+/* 双因子步骤：返回重新登录 */
+.login-card .login-back {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.login-card .login-back:hover {
+  color: #a78bfa;
+}
+
+/* 登录方式标签切换（用户登录 / 双因子登录 / 管理员登录） */
 .login-tabs {
   display: flex;
-  border-bottom: 1px solid #ebeef5;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   margin-bottom: 24px;
 }
 .login-tab {
@@ -50,49 +124,165 @@
   border-bottom: 2px solid transparent;
   cursor: pointer;
   font-size: 14px;
-  color: #909399;
-  transition: all 0.2s;
+  color: rgba(255, 255, 255, 0.5);
+  transition: all 0.25s;
 }
 .login-tab:hover {
-  color: #722ed1;
+  color: #c4b5fd;
 }
 .login-tab.active {
-  color: #722ed1;
-  border-bottom-color: #722ed1;
+  color: #c4b5fd;
+  border-bottom-color: #a78bfa;
   font-weight: 600;
+  text-shadow: 0 0 12px rgba(167, 139, 250, 0.6);
 }
+
+/* 表单：暗色半透明输入框 */
 .login-card .el-form-item {
   margin-bottom: 20px;
 }
-.login-card .el-input__wrapper {
-  padding: 4px 12px;
+.login-card .el-form-item__label {
+  color: rgba(255, 255, 255, 0.75);
 }
 .login-card .el-input {
-  height: 42px;
+  height: 44px;
 }
+.login-card .el-input__wrapper {
+  padding: 4px 14px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset;
+  transition: all 0.25s;
+}
+.login-card .el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.45) inset;
+}
+.login-card .el-input__wrapper.is-focus {
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 0 0 1px #a78bfa inset, 0 0 16px rgba(167, 139, 250, 0.25);
+}
+.login-card .el-input__inner {
+  color: #e5e7eb;
+}
+.login-card .el-input__inner::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+/* 浏览器自动填充：覆盖 Chrome 自动填充的白色底，保持暗色主题 */
+.login-card .el-input__inner:-webkit-autofill,
+.login-card .el-input__inner:-webkit-autofill:hover,
+.login-card .el-input__inner:-webkit-autofill:focus,
+.login-card .el-input__inner:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #151b36 inset !important;
+  box-shadow: 0 0 0 1000px #151b36 inset !important;
+  -webkit-text-fill-color: #e5e7eb !important;
+  caret-color: #e5e7eb;
+  transition: background-color 9999s ease-in-out 0s;
+}
+.login-card .el-input__prefix .el-icon,
+.login-card .el-input__suffix .el-icon {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* TOTP 六位验证码数字框 */
+.totp-boxes {
+  display: flex;
+  gap: 8px;
+}
+.totp-box {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
+  height: 48px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 600;
+  color: #e6ecff;
+  caret-color: #64dcff;
+  background: rgba(4, 7, 18, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  outline: none;
+  transition: all 0.2s;
+}
+.totp-box.filled {
+  border-color: rgba(64, 220, 255, 0.45);
+}
+.totp-box:focus {
+  background: rgba(4, 7, 18, 0.96);
+  border-color: #64dcff;
+  box-shadow: 0 0 0 1px rgba(64, 220, 255, 0.7) inset, 0 0 12px rgba(64, 220, 255, 0.15);
+}
+
+/* 登录按钮：流动渐变 + 悬浮发光 */
 .login-btn {
   width: 100%;
-  height: 44px;
+  height: 46px;
   font-size: 15px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #9254de, #722ed1);
+  border-radius: 10px;
   border: none;
   color: #fff;
   cursor: pointer;
-  transition: all 0.3s;
-  letter-spacing: 2px;
+  letter-spacing: 3px;
+  background: linear-gradient(120deg, #7c3aed, #4f46e5, #0891b2, #7c3aed);
+  background-size: 300% 100%;
+  animation: login-btn-flow 5s linear infinite;
+  box-shadow: 0 6px 24px rgba(99, 60, 237, 0.45);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+@keyframes login-btn-flow {
+  0% { background-position: 0% 0; }
+  100% { background-position: 300% 0; }
 }
 .login-btn:hover {
-  background: linear-gradient(135deg, #b37feb, #9254de);
-  box-shadow: 0 4px 16px rgba(114, 46, 209, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 32px rgba(99, 60, 237, 0.6);
 }
 .login-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
+  transform: none;
 }
 .login-footer {
   text-align: center;
-  margin-top: 24px;
-  color: #c0c4cc;
+  margin-top: 26px;
+  color: rgba(255, 255, 255, 0.3);
   font-size: 12px;
+  letter-spacing: 1px;
+}
+
+/* 登录页：输入框纯深黑背景，点击/悬浮不变浅（含浏览器自动填充背景修正） */
+.login-card .el-input__wrapper,
+.login-card .el-input__wrapper:hover,
+.login-card .el-input__wrapper.is-focus {
+  background: rgba(4, 7, 18, 0.96) !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset;
+  border-radius: 8px;
+  transition: box-shadow .2s;
+}
+.login-card .el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.26) inset;
+}
+.login-card .el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px rgba(64, 220, 255, 0.75) inset, 0 0 12px rgba(64, 220, 255, 0.12);
+}
+.login-card .el-input__inner {
+  color: #e6ecff;
+  caret-color: #64dcff;
+}
+.login-card .el-input__inner::placeholder {
+  color: rgba(180, 200, 255, 0.45);
+}
+.login-card .el-input__prefix-inner,
+.login-card .el-input__icon {
+  color: rgba(150, 190, 255, 0.65);
+}
+/* 浏览器自动填充：背景与深色输入框一致，文字亮白 */
+.login-card .el-input__wrapper input:-webkit-autofill,
+.login-card .el-input__wrapper input:-webkit-autofill:hover,
+.login-card .el-input__wrapper input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #040712 inset !important;
+  -webkit-text-fill-color: #e6ecff !important;
+  transition: background-color 9999s ease-out 0s;
+}
+.login-card .el-input__wrapper input {
+  background-color: transparent !important;
 }

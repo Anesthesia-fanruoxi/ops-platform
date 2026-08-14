@@ -39,7 +39,7 @@ const CollationPage = {
                   <span class="db-name">[[ db.SCHEMA_NAME ]]</span>
                   <span class="db-cell">[[ db.DEFAULT_CHARACTER_SET_NAME ]]</span>
                   <span class="db-cell">[[ db.DEFAULT_COLLATION_NAME ]]</span>
-                  <button v-if="!dbOk(db)" class="cp-btn cp-btn-warning" style="font-size:10px;padding:2px 8px" @click.stop="fixSingleDatabase(db.SCHEMA_NAME)">修复</button>
+                  <button v-if="!dbOk(db) && fixAllowed" class="cp-btn cp-btn-warning" style="font-size:10px;padding:2px 8px" @click.stop="fixSingleDatabase(db.SCHEMA_NAME)">修复</button>
                   <span v-else class="cp-tag cp-tag-success" style="font-size:10px;padding:1px 6px">符合</span>
                 </div>
               </div>
@@ -91,8 +91,8 @@ const CollationPage = {
                 <span class="cp-form-label">行数阈值</span>
                 <input class="cp-form-input" type="number" v-model.number="threshold" style="width:120px" />
               </div>
-              <button class="cp-btn cp-btn-warning cp-btn-sm" @click="confirmFixAllTables" :disabled="!stats.needFix">一键修复所有表</button>
-              <button class="cp-btn cp-btn-primary cp-btn-sm" @click="fixDatabase" :disabled="dbLevelOk">修复库排序</button>
+              <button class="cp-btn cp-btn-warning cp-btn-sm" @click="confirmFixAllTables" :disabled="!stats.needFix" v-if="fixAllowed">一键修复所有表</button>
+              <button class="cp-btn cp-btn-primary cp-btn-sm" @click="fixDatabase" :disabled="dbLevelOk" v-if="fixAllowed">修复库排序</button>
               <a class="cp-btn cp-btn-outline cp-btn-sm" :href="reportUrl" target="_blank" style="text-decoration:none">导出报告</a>
               <button v-if="fixLogs.length && !fixLogVisible" class="cp-btn cp-btn-outline cp-btn-sm" @click="reopenFixLog">查看日志</button>
             </div>
@@ -136,7 +136,7 @@ const CollationPage = {
                       <td>
                         <div style="display:flex;gap:6px;align-items:center;white-space:nowrap">
                           <button class="cp-btn cp-btn-outline cp-btn-sm" @click="switchToColumns">查看列</button>
-                          <button v-if="t.table_need_fix" class="cp-btn cp-btn-warning cp-btn-sm" @click="confirmFixTable(t)">修复表</button>
+                          <button v-if="t.table_need_fix && fixAllowed" class="cp-btn cp-btn-warning cp-btn-sm" @click="confirmFixTable(t)">修复表</button>
                           <span v-else class="cp-tag cp-tag-success">符合表</span>
                         </div>
                       </td>
@@ -162,7 +162,7 @@ const CollationPage = {
                       <span>[[ group.table ]]</span>
                       <span class="cnt">[[ group.columns.length ]] 个字段</span>
                       <span class="cp-est-rows">≈ [[ (group.row_count || 0).toLocaleString() ]] 行</span>
-                      <button class="cp-btn cp-btn-purple cp-btn-sm" style="margin-left:auto" @click="fixTableColumns({TABLE_NAME: group.table, COLUMN_ISSUE_COUNT: group.columns.length})">修复该表全部字段</button>
+                      <button class="cp-btn cp-btn-purple cp-btn-sm" style="margin-left:auto" @click="fixTableColumns({TABLE_NAME: group.table, COLUMN_ISSUE_COUNT: group.columns.length})" v-if="fixAllowed">修复该表全部字段</button>
                     </div>
                     <div class="cp-colf-cols">
                       <table class="cp-issue-table">
@@ -352,6 +352,10 @@ const CollationPage = {
   },
 
   computed: {
+    // 修复操作权限（op:database_fix）：无权限隐藏所有修复按钮（后端仍 403 兜底）
+    fixAllowed() {
+      return !!(this.$auth && this.$auth.hasPermission('op:database_fix'));
+    },
     // 项目列表（去重，排除无项目标识的实例）
     projects() {
       const set = new Set();
@@ -400,7 +404,7 @@ const CollationPage = {
     reportUrl() {
       if (!this.activeInstance || !this.activeDb) return '#';
       const token = localStorage.getItem('auth_token') || '';
-      return `/api/collation/report/${this.activeDb}?instance_id=${this.activeInstance.id}&token=${token}`;
+      return `/api/database/report/${this.activeDb}?instance_id=${this.activeInstance.id}&token=${token}`;
     },
     colFixTotalChecked() {
       let count = 0;
@@ -419,7 +423,7 @@ const CollationPage = {
     // ── 加载实例 ──
     loadInstances() {
       this.loadingInstances = true;
-      ajax('GET', '/api/collation/instances', null, (res) => {
+      ajax('GET', '/api/database/instances', null, (res) => {
         this.loadingInstances = false;
         if (res.code === 200) {
           const data = res.data || {};
@@ -454,7 +458,7 @@ const CollationPage = {
       this.databases = [];
       this.connectingId = inst.id;
       this.loadingDbs = true;
-      ajax('GET', `/api/collation/databases?instance_id=${inst.id}`, null, (res) => {
+      ajax('GET', `/api/database/databases?instance_id=${inst.id}`, null, (res) => {
         this.connectingId = null;
         this.loadingDbs = false;
         if (res.code === 200) {
@@ -479,7 +483,7 @@ const CollationPage = {
     // ── 加载表 ──
     loadTables() {
       this.loadingTables = true;
-      const url = `/api/collation/tables/${this.activeDb}?instance_id=${this.activeInstance.id}`;
+      const url = `/api/database/tables/${this.activeDb}?instance_id=${this.activeInstance.id}`;
       ajax('GET', url, null, (res) => {
         this.loadingTables = false;
         if (res.code === 200) {
@@ -502,7 +506,7 @@ const CollationPage = {
 
     loadColumnIssues() {
       this.loadingColIssues = true;
-      const url = `/api/collation/column_issues/${this.activeDb}?instance_id=${this.activeInstance.id}`;
+      const url = `/api/database/column_issues/${this.activeDb}?instance_id=${this.activeInstance.id}`;
       return new Promise((resolve) => {
         ajax('GET', url, null, (res) => {
           this.loadingColIssues = false;
@@ -541,7 +545,7 @@ const CollationPage = {
 
     doFixTable(t) {
       this.confirmModal.loading = true;
-      ajax('POST', '/api/collation/fix_table_async', {
+      ajax('POST', '/api/database/fix_table_async', {
         instance_id: this.activeInstance.id,
         database: this.activeDb,
         table: t.TABLE_NAME
@@ -573,7 +577,7 @@ const CollationPage = {
 
     doFixAllTables() {
       this.fixAllModal.loading = true;
-      ajax('POST', '/api/collation/fix_all_tables_async', {
+      ajax('POST', '/api/database/fix_all_tables_async', {
         instance_id: this.activeInstance.id,
         database: this.activeDb,
         threshold: this.threshold
@@ -603,7 +607,7 @@ const CollationPage = {
 
     doFixDatabase() {
       this.confirmModal.loading = true;
-      ajax('POST', '/api/collation/fix_database_async', {
+      ajax('POST', '/api/database/fix_database_async', {
         instance_id: this.activeInstance.id,
         database: this.activeDb
       }, (res) => {
@@ -632,7 +636,7 @@ const CollationPage = {
 
     doFixSingleDatabase(dbName) {
       this.confirmModal.loading = true;
-      ajax('POST', '/api/collation/fix_database_async', {
+      ajax('POST', '/api/database/fix_database_async', {
         instance_id: this.activeInstance.id,
         database: dbName
       }, (res) => {
@@ -649,7 +653,7 @@ const CollationPage = {
     // ── 刷新数据库列表（不重置已选库）──
     refreshDatabases() {
       if (!this.activeInstance) return;
-      ajax('GET', `/api/collation/databases?instance_id=${this.activeInstance.id}`, null, (res) => {
+      ajax('GET', `/api/database/databases?instance_id=${this.activeInstance.id}`, null, (res) => {
         if (res.code === 200) {
           this.databases = res.data || [];
         }
@@ -714,7 +718,7 @@ const CollationPage = {
       // 单表模式携带 table 参数，后端日志将记录为单表修复
       if (this.colFixModal.singleTable) body.table = this.colFixModal.singleTable;
       const logTitle = `修复字段 · ${this.colFixModal.singleTable}`;
-      ajax('POST', '/api/collation/fix_columns_async', body, (res) => {
+      ajax('POST', '/api/database/fix_columns_async', body, (res) => {
         this.colFixModal.loading = false;
         this.colFixModal.show = false;
         if (res.code === 200) {
@@ -744,7 +748,7 @@ const CollationPage = {
       const self = this;
       this.closeFixSSE();
       const token = localStorage.getItem('auth_token') || '';
-      const es = new EventSource('/api/collation/stream?task_key=' + encodeURIComponent(taskKey) + '&token=' + encodeURIComponent(token));
+      const es = new EventSource('/api/database/stream?task_key=' + encodeURIComponent(taskKey) + '&token=' + encodeURIComponent(token));
       this.fixEventSource = es;
       es.onmessage = function(e) {
         const d = JSON.parse(e.data);

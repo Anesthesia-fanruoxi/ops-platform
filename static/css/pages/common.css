@@ -4,7 +4,7 @@
 html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; }
 .layout { display: flex; height: 100vh; }
 .sidebar { width: 220px; background: linear-gradient(180deg, #001529 0%, #002140 100%); color: #fff; display: flex; flex-direction: column; box-shadow: 2px 0 8px rgba(0,0,0,.15); z-index: 10; }
-.sidebar-title { padding: 20px 24px; font-size: 17px; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,.08); letter-spacing: 1px; background: rgba(0,0,0,.1); }
+.sidebar-title { padding: 20px 24px; font-size: 17px; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,.08); letter-spacing: 1px; background: rgba(0,0,0,.1);  cursor: pointer; user-select: none; }
 .sidebar-menu { flex: 1; padding: 10px 0; overflow-y: auto; scrollbar-width: none; }
 .sidebar-menu::-webkit-scrollbar { display: none; }
 .menu-item { padding: 10px 24px; cursor: pointer; transition: all .25s ease; color: rgba(255,255,255,.6); display: flex; align-items: center; gap: 12px; text-decoration: none; font-size: 14px; position: relative; margin: 2px 8px; border-radius: 6px; }

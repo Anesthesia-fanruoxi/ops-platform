@@ -83,7 +83,7 @@ def generate_yaml():
         return error_response(str(e), 500)
 
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def generate_and_save_yaml():
     """
     生成并保存YAML配置文件到本地
@@ -146,7 +146,7 @@ def generate_and_save_yaml():
         return error_response(str(e), 500)
 
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def generate_deployment():
     """单独生成Deployment YAML"""
     try:
@@ -169,7 +169,7 @@ def generate_deployment():
         return error_response(str(e), 500)
 
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def generate_service():
     """单独生成Service YAML"""
     try:
@@ -192,7 +192,7 @@ def generate_service():
         return error_response(str(e), 500)
 
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def generate_middleware():
     """单独生成中间件YAML"""
     try:

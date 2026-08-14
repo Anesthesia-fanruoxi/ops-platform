@@ -16,7 +16,7 @@ import pymysql.cursors
 from flask import current_app
 
 from modules.deploy.models import Environment
-from modules.collation.models import CustomDatasource
+from modules.database.models import CustomDatasource
 
 # ── 目标排序规则常量 ──
 TARGET_COLLATION = 'utf8mb4_0900_ai_ci'
@@ -266,6 +266,9 @@ def build_column_definition(column):
             parts.append(f'DEFAULT {default}')
         else:
             parts.append(f"DEFAULT '{default}'")
+    elif column['IS_NULLABLE'] == 'YES':
+        # 可空字段显式补 DEFAULT NULL，避免 MODIFY 后丢失原默认值语义
+        parts.append('DEFAULT NULL')
 
     extra = column.get('EXTRA') or ''
     if extra:

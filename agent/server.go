@@ -10,8 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 )
+
+// runningCount 当前运行中的构建任务数（信号量占用即运行中），心跳上报 Master 作为并发依据
+var runningCount int32
 
 func startLogServer() {
 	mux := http.NewServeMux()
@@ -47,6 +51,7 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 	// 并发保护：无空闲槽则拒绝（Master 不应超发，此处兜底）
 	select {
 	case sem <- struct{}{}:
+		atomic.AddInt32(&runningCount, 1)
 	default:
 		log.Printf("[Task] 并发已满，拒绝构建#%d", task.BuildID)
 		writeTaskResp(w, false)
@@ -56,9 +61,10 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 	go func(t *BuildTask) {
 		defer wg.Done()
 		defer func() { <-sem }()
+		defer atomic.AddInt32(&runningCount, -1)
 		executeBuild(t)
 	}(&task)
-	log.Printf("[Task] 接受构建#%d branch=%s", task.BuildID, task.Branch)
+	log.Printf("[Task] 接受构建任务 #%d 项目环境=%s branch=%s", task.BuildID, task.ProjectEnv, task.Branch)
 	writeTaskResp(w, true)
 }
 

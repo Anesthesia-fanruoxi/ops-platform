@@ -54,7 +54,7 @@ const CreateService = {
           <tr><td>JVM</td><td>[[ form.xms ]]G/[[ form.xmx ]]G</td></tr>
           <tr><td>副本数</td><td>[[ form.replicas ]]</td></tr>
         </tbody></table>
-        <div class="bg2"><button class="btn btn-default" @click="step=1">上一步</button><button class="btn btn-success" :disabled="submitting" @click="submit">[[ submitting ? '提交中...' : '🚀 确认提交' ]]</button></div>
+        <div class="bg2"><button class="btn btn-default" @click="step=1">上一步</button><button v-if="$auth.hasPermission('op:deploy_service')" class="btn btn-success" :disabled="submitting" @click="submit">[[ submitting ? '提交中...' : '🚀 确认提交' ]]</button></div>
       </div>
 
       <!-- Step 3: 部署进度 -->
@@ -95,9 +95,9 @@ const CreateService = {
     resetForm(){this.step=1;this.form={projectId:'',envId:'',name:'',xms:2,xmx:8,replicas:1};this.svcValid=null;this.envs=[]},
     submit(){
       this.submitting=true;
-      var p={action:'create_service',project_id:this.form.projectId,environment_id:this.form.envId,services:[{name:this.form.name,xms:this.form.xms,xmx:this.form.xmx,replicas:this.form.replicas}]};
+      var p={project_id:this.form.projectId,environment_id:this.form.envId,services:[{name:this.form.name,xms:this.form.xms,xmx:this.form.xmx,replicas:this.form.replicas}]};
       var self=this;
-      ajax('POST','/api/deploy/execute',p,r=>{
+      ajax('POST','/api/deploy/execute/service',p,r=>{
         self.submitting=false;
         if(r.code===200){
           self.step=3;

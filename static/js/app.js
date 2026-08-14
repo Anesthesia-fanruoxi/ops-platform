@@ -9,6 +9,8 @@ const authState = Vue.reactive({
   permissions: [],
   isSuperAdmin: false,
   hasPermission(code) {
+    // 超级管理员（super_admins 独立账号，无角色权限集）：前端全权限放行（后端 require_permission 已放行）
+    if (this.isSuperAdmin) return true;
     return this.permissions.includes(code);
   }
 });
@@ -19,51 +21,8 @@ let authReady = false;
 // ============================================================
 // 菜单配置（二级分组，权限码关联；组内全不可见时整组隐藏）
 // ============================================================
-const menuConfig = [
-  {
-    key: 'deploy', icon: '🚀', label: '部署平台',
-    children: [
-      { path: '/create/project', label: '新增项目', permission: 'page:create' },
-      { path: '/create/env',     label: '新增环境', permission: 'page:create' },
-      { path: '/create/service', label: '新增服务', permission: 'page:create' },
-    ]
-  },
-  {
-    key: 'project', icon: '📋', label: '项目管理',
-    children: [
-      { path: '/projects', label: '项目信息', permission: 'page:projects' },
-      { path: '/manage',   label: '环境信息', permission: 'page:manage' },
-    ]
-  },
-  {
-    key: 'nginx', icon: '🌐', label: 'Nginx',
-    children: [
-      { path: '/nginx', label: 'Nginx配置', permission: 'page:nginx' },
-    ]
-  },
-  {
-    key: 'mysql', icon: '🗄️', label: 'MySQL',
-    children: [
-      { path: '/datasources', label: '数据源', permission: 'page:datasources' },
-      { path: '/collation',   label: '字符集排序修正', permission: 'page:collation' },
-    ]
-  },
-  {
-    key: 'cicd', icon: '🔧', label: 'CI/CD',
-    children: [
-      { path: '/cicd', label: 'CI/CD管理', permission: 'page:cicd' },
-      { path: '/schedule', label: '调度中心', permission: 'page:cicd' },
-    ]
-  },
-  {
-    key: 'system', icon: '⚙️', label: '系统管理',
-    children: [
-      { path: '/users',    label: '用户管理', permission: 'page:users' },
-      { path: '/roles',    label: '角色管理', permission: 'page:roles' },
-      { path: '/settings', label: '系统设置', permission: 'page:settings' },
-    ]
-  },
-];
+// 动态菜单（数据源：GET /api/menus，来自 menus 表——单一来源，不再硬编码）
+let menuConfig = [];
 
 // 扁平化所有叶子菜单项
 function flatMenuItems() {
@@ -82,21 +41,26 @@ function findFirstAllowed() {
 // ============================================================
 const routes = [
   { path: '/login',    component: LoginPage,    meta: { title: '登录', noAuth: true } },
-  { path: '/',         redirect: '/create/project' },
+  { path: '/',         redirect: '/dashboard' },
+  { path: '/dashboard', component: DashboardPage, meta: { title: '首页' } },
   { path: '/create',   redirect: '/create/project' },
   { path: '/create/project', component: CreateProject,    meta: { title: '新增项目', permission: 'page:create' } },
   { path: '/create/env',     component: CreateEnvironment, meta: { title: '新增环境', permission: 'page:create' } },
   { path: '/create/service', component: CreateService,     meta: { title: '新增服务', permission: 'page:create' } },
   { path: '/projects', component: ProjectsPage, meta: { title: '项目信息', permission: 'page:projects' } },
   { path: '/manage',   component: ManagePage,   meta: { title: '环境信息', permission: 'page:manage' } },
+  { path: '/services', component: ServiceInfoPage, meta: { title: '服务信息', permission: 'page:service_info' } },
   { path: '/nginx',    component: NginxPage,    meta: { title: 'Nginx配置', permission: 'page:nginx' } },
   { path: '/datasources', component: DatasourcesPage, meta: { title: '数据源', permission: 'page:datasources' } },
-  { path: '/collation', component: CollationPage, meta: { title: '字符集排序修正', permission: 'page:collation' } },
+  { path: '/database', component: CollationPage, meta: { title: '字符集排序修正', permission: 'page:database' } },
+  { path: '/schema',    component: SchemaComparePage, meta: { title: '表结构对比同步', permission: 'page:schema' } },
+  { path: '/ddl-sync',  component: DdlSyncPage, meta: { title: 'DDL自动同步', permission: 'page:ddl_sync' } },
   { path: '/cicd',     component: CicdConfigPage, meta: { title: 'CI/CD管理', permission: 'page:cicd' } },
-  { path: '/schedule', component: SchedulePage, meta: { title: '调度中心', permission: 'page:cicd' } },
+  { path: '/schedule', component: SchedulePage, meta: { title: '调度中心', permission: 'page:cicd_schedule' } },
   { path: '/settings', component: SettingsPage, meta: { title: '系统设置', permission: 'page:settings' } },
   { path: '/users',    component: UsersPage,    meta: { title: '用户管理', permission: 'page:users' } },
   { path: '/roles',    component: RolesPage,    meta: { title: '角色管理', permission: 'page:roles' } },
+  { path: '/audit',    component: AuditPage,    meta: { title: '审计日志', permission: 'page:audit' } },
 ];
 
 const router = VueRouter.createRouter({
@@ -117,24 +81,23 @@ router.beforeEach((to, from, next) => {
   if (to.meta.noAuth) {
     // 已登录访问登录页 → 跳转主页
     if (authState.isLoggedIn) {
-      const firstAllowed = findFirstAllowed();
-      return next(firstAllowed ? firstAllowed.path : '/create/project');
+      return next('/dashboard');
     }
     return next();
   }
 
-  // 未登录 → 跳转登录页
+  // 未登录 → 跳转登录页（带来源路径，登录成功后跳回）
   if (!authState.isLoggedIn) {
-    return next('/login');
+    return next({ path: '/login', query: { redirect: to.fullPath } });
   }
 
-  // 已登录但无权限 → 跳转第一个有权限的页面
+  // 已登录但无权限 → 跳转第一个有权限的页面；无任何权限则落首页（不再踢回登录页）
   if (to.meta.permission && !authState.hasPermission(to.meta.permission)) {
     const firstAllowed = findFirstAllowed();
     if (firstAllowed) {
       return next(firstAllowed.path);
     }
-    return next('/login');
+    return next('/dashboard');
   }
 
   next();
@@ -241,17 +204,14 @@ const app = Vue.createApp({
       openedTabs: [],
       // 修改密码弹窗
       pwdDialogVisible: false,
-      pwdForm: { old_password: '', new_password: '', confirm_password: '' },
+      pwdForm: { new_password: '', confirm_password: '' },
       pwdLoading: false,
     };
   },
   computed: {
-    // 根据权限过滤菜单（组内全不可见时整组隐藏）
+    // 可见菜单（/api/menus 已按角色权限过滤，前端直接使用；组内无子项时整组隐藏）
     visibleMenuGroups() {
-      return this.menuItems.map(group => ({
-        ...group,
-        children: group.children.filter(item => this.auth.hasPermission(item.permission))
-      })).filter(group => group.children.length > 0);
+      return this.menuItems.filter(group => group.children && group.children.length > 0);
     },
     // keep-alive 需要缓存的组件名（与已打开标签对应；关闭标签即从缓存剔除并销毁实例）
     cachedViews() {
@@ -266,6 +226,12 @@ const app = Vue.createApp({
       // 登记标签页
       this.addTab(to);
     },
+    // 登录成功后加载菜单（数据源 /api/menus，来自 menus 表）
+    // immediate：认证恢复可能在 app mount 前完成（isLoggedIn 已为 true），需立即加载一次
+    'auth.isLoggedIn': {
+      handler(val) { if (val) this.loadMenus(); },
+      immediate: true
+    },
     // 权限被实时收回时，清理无权的标签页
     'auth.permissions'() {
       this.pruneTabsByPermission();
@@ -278,6 +244,16 @@ const app = Vue.createApp({
     this.addTab(this.$route);
   },
   methods: {
+    // 加载当前用户可见菜单（后端按角色权限过滤；超管由后端返回逃生最小集）
+    loadMenus() {
+      ajax('GET', '/api/menus', null, (res) => {
+        if (res.code === 200 && Array.isArray(res.data)) {
+          // 必须通过响应式 Proxy（this.menuItems）修改数组——
+          // 直接操作原始 menuConfig 是绕过 Proxy 的原生 splice，Vue 3 不会触发视图更新
+          this.menuItems.splice(0, this.menuItems.length, ...res.data);
+        }
+      });
+    },
     handleLogout() {
       ajax('POST', '/api/auth/logout', {}, () => {});
       localStorage.removeItem('auth_token');
@@ -296,12 +272,12 @@ const app = Vue.createApp({
       else if (cmd === 'password') this.openPwdDialog();
     },
     openPwdDialog() {
-      this.pwdForm = { old_password: '', new_password: '', confirm_password: '' };
+      this.pwdForm = { new_password: '', confirm_password: '' };
       this.pwdDialogVisible = true;
     },
     handleChangePwd() {
-      if (!this.pwdForm.old_password || !this.pwdForm.new_password) {
-        ElementPlus.ElMessage.warning('请填写完整');
+      if (!this.pwdForm.new_password) {
+        ElementPlus.ElMessage.warning('请填写新密码');
         return;
       }
       if (this.pwdForm.new_password.length < 6) {
@@ -314,7 +290,6 @@ const app = Vue.createApp({
       }
       this.pwdLoading = true;
       ajax('POST', '/api/auth/change-password', {
-        old_password: this.pwdForm.old_password,
         new_password: this.pwdForm.new_password,
       }, (res) => {
         this.pwdLoading = false;
@@ -343,6 +318,7 @@ const app = Vue.createApp({
     },
     // 登记当前路由对应的标签页（同路径去重）
     addTab(to) {
+      this.ensureDashboardTab();
       if (!to.meta || !to.meta.title || to.meta.noAuth) return;
       const matched = to.matched && to.matched[0];
       const comp = matched && matched.components && matched.components.default;
@@ -352,12 +328,19 @@ const app = Vue.createApp({
         this.openedTabs.push({ path: to.path, title: to.meta.title, name });
       }
     },
+    // 首页标签固定存在且排第一（刷新后在任意页面也保留）
+    ensureDashboardTab() {
+      if (!this.openedTabs.some(t => t.path === '/dashboard')) {
+        this.openedTabs.unshift({ path: '/dashboard', title: '首页', name: 'DashboardPage' });
+      }
+    },
     // 切换标签页（组件被 keep-alive 缓存，状态原样保留）
     switchTab(tab) {
       if (this.$route.path !== tab.path) router.push(tab.path);
     },
-    // 关闭标签页：从缓存剔除使实例销毁；关闭当前页则切换到相邻标签
+    // 关闭标签页：首页标签固定不可关闭；关闭当前页则切换到相邻标签
     closeTab(tab) {
+      if (tab.path === '/dashboard') return; // 首页固定
       const idx = this.openedTabs.findIndex(t => t.path === tab.path);
       if (idx === -1) return;
       this.openedTabs.splice(idx, 1);
@@ -369,6 +352,7 @@ const app = Vue.createApp({
     // 清理已无权限的标签页（当前页无权时跳转首个有权页面）
     pruneTabsByPermission() {
       const allowed = this.openedTabs.filter(t => {
+        if (t.path === '/dashboard') return true; // 首页固定保留
         const m = flatMenuItems().find(x => x.path === t.path);
         return m && authState.hasPermission(m.permission);
       });
@@ -383,7 +367,7 @@ const app = Vue.createApp({
     // 获取第一个有权限的路径（用于默认跳转）
     getFirstAllowedPath() {
       const item = findFirstAllowed();
-      return item ? item.path : '/login';
+      return item ? item.path : '/dashboard';
     }
   }
 });
@@ -392,8 +376,9 @@ const app = Vue.createApp({
 [['CreateProject', CreateProject], ['CreateEnvironment', CreateEnvironment],
  ['CreateService', CreateService], ['ProjectsPage', ProjectsPage], ['ManagePage', ManagePage],
  ['NginxPage', NginxPage], ['DatasourcesPage', DatasourcesPage], ['CollationPage', CollationPage],
+ ['SchemaComparePage', SchemaComparePage], ['DdlSyncPage', DdlSyncPage],
  ['CicdConfigPage', CicdConfigPage], ['SchedulePage', SchedulePage],
- ['SettingsPage', SettingsPage], ['LoginPage', LoginPage],
+ ['SettingsPage', SettingsPage], ['AuditPage', AuditPage], ['DashboardPage', DashboardPage], ['LoginPage', LoginPage],
  ['UsersPage', UsersPage], ['RolesPage', RolesPage]
 ].forEach(function(pair) {
   pair[1].name = pair[1].name || pair[0];
@@ -414,7 +399,7 @@ tryRestoreAuth(() => {
     // 已登录但在登录页 → 跳转主页（防止套娃）
     if (currentPath === '/login') {
       var firstAllowed = findFirstAllowed();
-      router.replace(firstAllowed ? firstAllowed.path : '/create/project');
+      router.replace(firstAllowed ? firstAllowed.path : '/dashboard');
     }
     // 已登录且路由正常 → 无需任何操作，保留当前路由
   } else {

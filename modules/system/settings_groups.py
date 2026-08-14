@@ -14,6 +14,7 @@ SETTING_GROUPS = {
         'harbor_url', 'harbor_user', 'harbor_pass',
         'harbor_cleanup_keep_versions', 'harbor_cleanup_cron',
         'k8s_master_ip', 'k8s_cluster_ip', 'k8s_ssh_user', 'k8s_ssh_pass',
+        'k8s_kubeconfig', 'k8s_api_server',
         'k8s_yaml_remote_dir', 'k8s_yaml_remote_recycle_dir',
         'default_domain', 'default_nacos_namespace',
         'default_publicurl', 'default_privateurl', 'default_publicbucket', 'default_privatebucket',

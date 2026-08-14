@@ -1,0 +1,169 @@
+/* 首页（DashboardPage） */
+.dashboard-page { padding: 8px 4px; }
+.dash-hero {
+  background: linear-gradient(135deg, #1c4a5e 0%, #0a2e3c 100%);
+  border-radius: 12px;
+  padding: 26px 32px;
+  color: #fff;
+  margin-bottom: 22px;
+  position: relative;
+  overflow: hidden;
+}
+.dash-hero::after {
+  content: '';
+  position: absolute;
+  right: -60px; top: -60px;
+  width: 220px; height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(64, 220, 255, 0.28), transparent 70%);
+  pointer-events: none;
+}
+.dash-hello { font-size: 24px; font-weight: 600; margin-bottom: 6px; position: relative; }
+.dash-sub { font-size: 13px; color: #a8bcc0; position: relative; }
+.dash-hero-meta { font-size: 12px; color: rgba(168, 188, 192, 0.75); margin-top: 10px; position: relative; }
+
+.dash-section-title {
+  font-size: 14px; font-weight: 600; color: #303133;
+  margin: 18px 0 10px;
+  padding-left: 8px;
+  border-left: 3px solid #1c4a5e;
+}
+
+/* 平台概况统计卡 */
+.dash-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+.dash-stat {
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 10px;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transition: box-shadow .2s, transform .2s;
+}
+.dash-stat:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08); transform: translateY(-2px); }
+.dash-stat-icon {
+  width: 38px; height: 38px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 15px; font-weight: 600;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12);
+}
+.dash-t0 { background: linear-gradient(135deg, #409eff, #2b6fd8); }
+.dash-t1 { background: linear-gradient(135deg, #36cfc9, #13a8a8); }
+.dash-t2 { background: linear-gradient(135deg, #7c6cf0, #5a4bd8); }
+.dash-t3 { background: linear-gradient(135deg, #5c8dff, #3d5bd8); }
+.dash-t4 { background: linear-gradient(135deg, #f7a35c, #e8823a); }
+.dash-t5 { background: linear-gradient(135deg, #f56c6c, #d94848); }
+.dash-t6 { background: linear-gradient(135deg, #95a9f8, #6f8bd8); }
+.dash-t7 { background: linear-gradient(135deg, #4dabf7, #228be6); }
+.dash-stat-num { font-size: 26px; font-weight: 700; color: #1c4a5e; line-height: 1.1; }
+.dash-stat-label { font-size: 12px; color: #909399; }
+
+/* 双栏：最近构建 + 快捷入口 */
+.dash-two-col {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1100px) { .dash-two-col { grid-template-columns: 1fr; } }
+
+/* 最近构建 */
+.dash-builds { background: #fff; border: 1px solid #e4e7ed; border-radius: 10px; overflow: hidden; }
+.dash-build {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  border-bottom: 1px solid #f0f2f5;
+}
+.dash-build:last-child { border-bottom: none; }
+.dash-build-no { font-weight: 600; color: #303133; min-width: 120px; }
+.dash-build-branch { color: #606266; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-build-type { color: #909399; font-size: 11.5px; }
+.dash-build-status {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11.5px;
+  color: #fff;
+}
+.bs-success { background: #67c23a; }
+.bs-failed { background: #f56c6c; }
+.bs-running { background: #409eff; }
+.bs-pending { background: #909399; }
+.bs-cancelled { background: #c0c4cc; }
+.dash-build-time { color: #c0c4cc; font-size: 11.5px; min-width: 78px; text-align: right; }
+
+/* 快捷入口：5 个父菜单分组（父灰不可点，子菜单可跳转） */
+.dash-entry-groups {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+.dash-entry-group {
+  background: #fff; border: 1px solid #e4e7ed; border-radius: 8px;
+  padding: 12px 14px;
+}
+.dash-entry-group-title {
+  font-size: 12.5px; font-weight: 600; color: #909399;
+  padding-bottom: 8px; margin-bottom: 6px;
+  border-bottom: 1px solid #f0f2f5;
+  user-select: none; cursor: default;
+}
+.dash-entry-group-items {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.dash-entry-group-item {
+  font-size: 13px; color: #303133;
+  padding: 5px 8px; border-radius: 4px;
+  cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dash-entry-group-item:hover { background: #ecf5ff; color: #409eff; }
+
+/* 平台健康监控（迁移自监控信息页） */
+.dash-monitor-summary {
+  display: flex; align-items: center; gap: 10px;
+  background: #fff; border: 1px solid #e4e7ed; border-radius: 10px;
+  padding: 12px 16px; margin-bottom: 12px; font-size: 13px;
+}
+.dash-ms-healthy { border-left: 4px solid #67c23a; }
+.dash-ms-degraded { border-left: 4px solid #e6a23c; }
+.dash-ms-unhealthy { border-left: 4px solid #f56c6c; }
+.dash-ms-loading { border-left: 4px solid #909399; }
+.dash-monitor-status-text { font-weight: 600; color: #303133; }
+.dash-monitor-count { color: #606266; margin-left: 4px; }
+.dash-monitor-time { margin-left: auto; color: #c0c4cc; font-size: 12px; }
+
+.dash-dot-lg { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.dash-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.dot-ok, .dot-healthy { background: #67c23a; box-shadow: 0 0 6px rgba(103, 194, 58, .5); }
+.dot-warning, .dot-degraded { background: #e6a23c; box-shadow: 0 0 6px rgba(230, 162, 60, .5); }
+.dot-danger, .dot-failed, .dot-unhealthy { background: #f56c6c; box-shadow: 0 0 6px rgba(245, 108, 108, .5); }
+.dot-unknown, .dot-loading { background: #909399; }
+.dot-skip { background: #c0c4cc; }
+
+.dash-monitor-grid {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px;
+}
+.dash-monitor-card {
+  background: #fff; border: 1px solid #e4e7ed; border-radius: 10px; padding: 10px 10px; min-width: 0;
+}
+.dash-mc-ok, .dash-mc-healthy { border-top: 3px solid #67c23a; }
+.dash-mc-warning, .dash-mc-degraded { border-top: 3px solid #e6a23c; }
+.dash-mc-danger, .dash-mc-failed, .dash-mc-unhealthy { border-top: 3px solid #f56c6c; }
+.dash-monitor-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.dash-monitor-card-title { font-size: 13.5px; font-weight: 600; color: #303133; }
+.dash-monitor-card-status { margin-left: auto; font-size: 11.5px; color: #909399; }
+.dash-monitor-card-detail { font-size: 11.5px; color: #606266; margin-bottom: 6px; min-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-monitor-card-metrics { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.dash-monitor-metric-k { font-size: 11px; color: #909399; margin-right: 3px; }
+.dash-monitor-metric-v { font-size: 12px; color: #303133; font-weight: 500; }
+.dash-build-pname { color: #303133; font-weight: 500; min-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-build-env { color: #909399; font-size: 12px; min-width: 50px; }

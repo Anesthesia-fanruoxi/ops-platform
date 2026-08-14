@@ -26,7 +26,7 @@ def get_harbor_client():
     )
 
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def create_project():
     """
     创建Harbor项目并设置清理策略
@@ -136,7 +136,7 @@ def get_project(project_name):
         return error_response(str(e), 500)
 
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def delete_project(project_name):
     """删除项目"""
     try:
@@ -182,7 +182,7 @@ def list_artifacts(project_name, repository_name):
         return error_response(str(e), 500)
 
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def setup_cleanup():
     """
     为现有项目设置清理策略

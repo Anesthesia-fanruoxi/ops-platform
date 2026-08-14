@@ -5,16 +5,55 @@
 from flask import request, g
 from werkzeug.security import generate_password_hash
 from core.db import db
+from core.audit import record_audit_diff
 from modules.system.models import User, Role
 from core.response import success_response, error_response
 from core.security import require_permission
 
 
+def _is_subsequence(pattern, text):
+    """子序列匹配（大小写不敏感）：pattern 的字符按顺序出现在 text 中即命中。
+
+    用于用户名/昵称/拼音首拼的模糊搜索，如 "zhj" 命中 "zhaohongjie"、"zs" 命中 "张三"。
+    """
+    pattern = (pattern or '').strip().lower()
+    text = (text or '').lower()
+    if not pattern:
+        return True  # 空关键词命中一切（由调用方决定是否放行）
+    i = 0
+    n = len(pattern)
+    for ch in text:
+        if i < n and ch == pattern[i]:
+            i += 1
+            if i == n:
+                return True
+    return i == n
+
+
 @require_permission('op:users')
 def list_users():
-    """获取所有用户列表（超级管理员为内置逃生账号，不展示）"""
+    """获取所有用户列表（超级管理员为内置逃生账号，不展示）。
+
+    支持 ?keyword= 子序列模糊搜索（大小写不敏感）：
+      - username 子序列匹配（如 "zhj" 命中 "zhaohongjie"）
+      - nickname 子序列匹配
+      - 昵称完整拼音子序列匹配（认证中心预计算字段 nickname_pinyin，如 "ce"/"csh" 命中"测试"）
+    任一命中即返回；keyword 为空返回全量。
+    """
+    keyword = (request.args.get('keyword') or '').strip()
     users = User.query.order_by(User.id.asc()).all()
     visible = [u.to_dict() for u in users if not u.is_super_admin]
+
+    if keyword:
+        matched = []
+        for u in visible:
+            if _is_subsequence(keyword, u.get('username')) or _is_subsequence(keyword, u.get('nickname')):
+                matched.append(u)
+                continue
+            # 昵称完整拼音（认证中心预计算，同步写入）：输入 ce/csh/cs 均可命中"测试"
+            if _is_subsequence(keyword, u.get('nickname_pinyin')):
+                matched.append(u)
+        visible = matched
     return success_response(visible)
 
 
@@ -38,6 +77,8 @@ def update_user(user_id):
 
     current_user = getattr(g, 'current_user', None)
     current_id = current_user.id if current_user else None
+
+    _old_snap = {k: getattr(user, k, None) for k in ('username', 'nickname', 'role_id', 'is_active')}
 
     data = request.json or {}
     username = data.get('username', '').strip()
@@ -89,6 +130,8 @@ def update_user(user_id):
     if active_changed:
         from modules.system.session_cache import delete_user_sessions
         delete_user_sessions(user.id)
+    _new_snap = {k: getattr(user, k, None) for k in ('username', 'nickname', 'role_id', 'is_active')}
+    record_audit_diff('user', 'update', user.id, _old_snap, _new_snap)
     return success_response(user.to_dict(), '用户更新成功')
 
 
@@ -176,6 +219,10 @@ def update_profile_from_auth(user_id):
 
     # 认证中心落库成功：同步一次用户表，更新本地副本
     sync_users()
+    # 密码/双因子变更：删除该用户本地全部会话（强制重新登录）；仅资料变更不清会话
+    if password or totp_secret is not None:
+        from modules.system.session_cache import delete_user_sessions
+        delete_user_sessions(user.id)
     return success_response(msg='资料已更新（认证中心）')
 
 

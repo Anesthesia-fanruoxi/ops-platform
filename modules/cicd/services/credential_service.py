@@ -68,31 +68,6 @@ def test_git_credential(credential_id):
     return True, '凭据格式有效（解密成功）'
 
 
-def test_git_connection(git_url, credential_id):
-    """用 git ls-remote 测试实际连通性"""
-    cred = GitCredential.query.get(credential_id) if credential_id else None
-    remote_url, env, key_file = _build_git_access(git_url, cred)
-    try:
-        result = subprocess.run(
-            ['git', '-c', 'http.sslVerify=false', 'ls-remote', '--heads', remote_url],
-            capture_output=True, encoding='utf-8', errors='replace', timeout=15, env=env
-        )
-        if result.returncode == 0:
-            return True, '连接成功'
-        return False, (result.stderr or '').strip()[:200] or '连接失败'
-    except subprocess.TimeoutExpired:
-        return False, '连接超时（15s）'
-    except FileNotFoundError:
-        return False, '服务器未安装 git'
-    except Exception as e:
-        return False, str(e)[:200]
-    finally:
-        if key_file:
-            try:
-                os.remove(key_file)
-            except Exception:
-                pass
-
 
 def _ssh_to_https(git_url):
     """将 SSH 格式的 git 地址转换为 HTTPS 格式（SSH 端口非 HTTPS 端口，转换时丢弃）"""

@@ -10,7 +10,10 @@ from core.security import require_permission
 from modules.system.settings_groups import SETTING_GROUPS
 
 # 不返回值的敏感字段
-HIDDEN_FIELDS = ['nfs_ssh_pass', 'harbor_pass', 'k8s_ssh_pass', 'nginx_ssh_pass', 'mysql_default_pass', 'redis_pass', 'rabbitmq_pass', 'nacos_pass', 'authplatform_secret']
+HIDDEN_FIELDS = ['nfs_ssh_pass', 'harbor_pass', 'k8s_ssh_pass', 'k8s_kubeconfig', 'nginx_ssh_pass', 'mysql_default_pass', 'redis_pass', 'rabbitmq_pass', 'nacos_pass', 'authplatform_secret']
+
+# 回显字段（从 HIDDEN_FIELDS 中豁免，list 时返回真实值；中间件密码便于查看/复制）
+REVEAL_FIELDS = ['mysql_default_pass', 'redis_pass', 'rabbitmq_pass', 'nacos_pass']
 
 # 只读设置：不允许通过设置接口修改（如平台密钥，改动会导致所有 Agent 通讯失效）
 READONLY_FIELDS = ['agent_comm_secret']
@@ -28,9 +31,16 @@ def list_settings():
     settings = query.all()
     result = {}
     for s in settings:
-        if s.key in HIDDEN_FIELDS:
+        if s.key in HIDDEN_FIELDS and s.key not in REVEAL_FIELDS:
             result[s.key] = {
                 'value': '******' if s.value else '',
+                'description': s.description,
+                'has_value': bool(s.value)
+            }
+        elif s.key in REVEAL_FIELDS:
+            # 回显字段：返回真实值（中间件密码）
+            result[s.key] = {
+                'value': s.value or '',
                 'description': s.description,
                 'has_value': bool(s.value)
             }
@@ -73,8 +83,8 @@ def update_settings():
 
         old_value = setting.value
 
-        # 密码字段特殊处理
-        if key in HIDDEN_FIELDS:
+        # 密码字段特殊处理（REVEAL 回显字段走普通逻辑：值变化才更新）
+        if key in HIDDEN_FIELDS and key not in REVEAL_FIELDS:
             # 密码字段：空值或占位符不更新
             if not new_value or new_value == '******':
                 skipped.append({'key': key, 'reason': '密码未修改'})

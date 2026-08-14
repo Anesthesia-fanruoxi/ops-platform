@@ -5,7 +5,11 @@ const UsersPage = {
     <div class="card">
       <div class="page-header">
         <div class="section-title" style="margin-bottom:0">用户管理</div>
-        <el-button :loading="syncLoading" @click="handleSyncUsers">🔄 同步认证中心用户</el-button>
+        <div style="display:flex;gap:8px;align-items:center">
+          <el-input v-model="keyword" placeholder="搜索：用户名 / 昵称 / 拼音（如 zhj、ceshi）"
+            clearable style="width:280px" @input="onKeywordInput" @clear="onKeywordClear"></el-input>
+          <el-button :loading="syncLoading" @click="handleSyncUsers">🔄 同步认证中心用户</el-button>
+        </div>
       </div>
 
       <div class="table-wrapper">
@@ -117,6 +121,18 @@ const UsersPage = {
     const totpUrl = Vue.ref('');
 
     const syncLoading = Vue.ref(false);
+    const keyword = Vue.ref('');
+    let debounceTimer = null;
+
+    // 防抖搜索（300ms）：昵称/用户名/拼音首拼子序列匹配由后端 /api/users/list?keyword= 完成
+    const onKeywordInput = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => loadUsers(), 300);
+    };
+    const onKeywordClear = () => {
+      clearTimeout(debounceTimer);
+      loadUsers('');
+    };
 
     const handleSyncUsers = () => {
       syncLoading.value = true;
@@ -131,9 +147,11 @@ const UsersPage = {
       });
     };
 
-    const loadUsers = () => {
+    const loadUsers = (kw) => {
       loading.value = true;
-      ajax('GET', '/api/users/list', null, (res) => {
+      const k = kw === undefined ? keyword.value : kw;
+      keyword.value = k;  // 同步当前关键词（清空/外部触发时）
+      ajax('GET', '/api/users/list' + (k ? '?keyword=' + encodeURIComponent(k) : ''), null, (res) => {
         loading.value = false;
         if (res.code === 200) users.value = res.data || [];
       });
@@ -226,7 +244,7 @@ const UsersPage = {
     return {
       users, roles, loading, saving, dialogVisible, form,
       totpSecret, totpUrl, setupTotp,
-      syncLoading, handleSyncUsers,
+      syncLoading, handleSyncUsers, keyword, onKeywordInput, onKeywordClear,
       openEdit, handleSave,
     };
   }

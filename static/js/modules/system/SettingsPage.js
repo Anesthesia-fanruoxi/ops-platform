@@ -7,6 +7,7 @@ const SETTING_FORM_MAP = {
     harbor_url: '', harbor_user: '', harbor_pass: '',
     harbor_cleanup_keep_versions: '3', harbor_cleanup_cron: '0 0 * * * *',
     k8s_master_ip: '', k8s_cluster_ip: '', k8s_ssh_user: 'root', k8s_ssh_pass: '',
+    k8s_kubeconfig: '', k8s_api_server: '',
     k8s_yaml_remote_dir: '/data/yaml', k8s_yaml_remote_recycle_dir: '/data/yaml-recycle',
     default_domain: '', default_nacos_namespace: '',
     default_publicurl: '', default_privateurl: '', default_publicbucket: '', default_privatebucket: '',
@@ -37,10 +38,11 @@ const SETTING_FORM_MAP = {
 
 // 密码字段：前端始终不显示真实值，留空表示不修改
 const SETTING_PASSWORD_KEYS = [
-  'nfs_ssh_pass', 'harbor_pass', 'k8s_ssh_pass', 'nginx_ssh_pass',
-  'mysql_default_pass', 'redis_pass', 'rabbitmq_pass', 'nacos_pass',
+  'nfs_ssh_pass', 'harbor_pass', 'k8s_ssh_pass', 'k8s_kubeconfig', 'nginx_ssh_pass',
   'authplatform_secret'
 ];
+// 中间件密码：回显显示（可在设置页查看/复制）
+const SETTING_REVEAL_KEYS = ['mysql_default_pass', 'redis_pass', 'rabbitmq_pass', 'nacos_pass'];
 
 const SettingsPage = {
   compilerOptions: { delimiters: ['[[', ']]'] },
@@ -178,6 +180,24 @@ const SettingsPage = {
           </div>
         </div>
 
+        <div class="form-row">
+          <div class="form-group w-url" style="width:100%">
+            <label class="form-label">K8s API Server（可选覆盖）</label>
+            <input class="form-input" v-model="form.k8s_api_server" placeholder="如: https://172.16.0.10:6443（留空则用 admin.conf 里的 server）" @input="detectChange">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="width:100%">
+            <label class="form-label">K8s admin.conf
+              <span v-if="form.k8s_kubeconfig_configured" style="color:#67c23a;font-size:12px;margin-left:6px">✓ 已配置</span>
+              <span v-else style="color:#e6a23c;font-size:12px;margin-left:6px">未配置</span>
+            </label>
+            <textarea class="form-input" rows="8" v-model="form.k8s_kubeconfig"
+                      placeholder="粘贴 admin.conf 完整内容（含证书，服务信息页查看 Pod 状态/日志用）。留空不修改，粘贴新内容保存即覆盖。" @input="detectChange"
+                      style="font-family:monospace;font-size:12px;line-height:1.5"></textarea>
+          </div>
+        </div>
+
         <div class="subsection-title">默认配置</div>
         <div class="form-row">
           <div class="form-group w-key">
@@ -284,6 +304,11 @@ const SettingsPage = {
 
       <!-- ── 中间件配置 ── -->
       <div v-show="activeTab === 'middleware'">
+        <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px">
+          <span style="font-size:13px;color:#606266">密码明文显示</span>
+          <el-switch v-model="showMwPass" size="small" />
+          <span style="color:#909399;font-size:12px">开启后中间件密码以明文显示，便于查看/复制</span>
+        </div>
         <div class="subsection-title">MySQL（测试环境通用）</div>
         <div class="form-row">
           <div class="form-group w-user">
@@ -292,7 +317,7 @@ const SettingsPage = {
           </div>
           <div class="form-group w-pass">
             <label class="form-label">密码</label>
-            <input class="form-input" type="password" v-model="form.mysql_default_pass" placeholder="留空则不修改" @input="detectChange">
+            <input class="form-input" :type="showMwPass ? 'text' : 'password'" v-model="form.mysql_default_pass" placeholder="已保存的密码会显示，留空则不修改" @input="detectChange">
           </div>
         </div>
 
@@ -304,7 +329,7 @@ const SettingsPage = {
           </div>
           <div class="form-group w-pass">
             <label class="form-label">密码</label>
-            <input class="form-input" type="password" v-model="form.redis_pass" placeholder="留空则不修改" @input="detectChange">
+            <input class="form-input" :type="showMwPass ? 'text' : 'password'" v-model="form.redis_pass" placeholder="已保存的密码会显示，留空则不修改" @input="detectChange">
           </div>
         </div>
 
@@ -316,7 +341,7 @@ const SettingsPage = {
           </div>
           <div class="form-group w-pass">
             <label class="form-label">密码</label>
-            <input class="form-input" type="password" v-model="form.rabbitmq_pass" placeholder="留空则不修改" @input="detectChange">
+            <input class="form-input" :type="showMwPass ? 'text' : 'password'" v-model="form.rabbitmq_pass" placeholder="已保存的密码会显示，留空则不修改" @input="detectChange">
           </div>
         </div>
 
@@ -328,7 +353,7 @@ const SettingsPage = {
           </div>
           <div class="form-group w-pass">
             <label class="form-label">密码</label>
-            <input class="form-input" type="password" v-model="form.nacos_pass" placeholder="留空则不修改" @input="detectChange">
+            <input class="form-input" :type="showMwPass ? 'text' : 'password'" v-model="form.nacos_pass" placeholder="已保存的密码会显示，留空则不修改" @input="detectChange">
           </div>
         </div>
       </div>
@@ -404,7 +429,7 @@ const SettingsPage = {
   data() {
     return {
       activeTab: 'platform',
-      form: {},
+      form: {}, showMwPass: false,
       originalForm: {},
       hasChanges: false,
       sshTestResult: { text: '', type: '' },
@@ -437,6 +462,7 @@ const SettingsPage = {
           for (const key in map) {
             if (SETTING_PASSWORD_KEYS.includes(key)) {
               self.form[key] = '';  // 密码不展示，留空表示不修改
+              self.form[key + '_configured'] = !!(data[key] && data[key].has_value);
             } else {
               self.form[key] = (data[key] && data[key].value !== undefined) ? data[key].value : map[key];
             }

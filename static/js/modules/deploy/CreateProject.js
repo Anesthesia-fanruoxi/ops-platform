@@ -71,7 +71,7 @@ const CreateProject = {
           <tr><td>中间件</td><td>[[ mwSelected.join(', ') ]]</td></tr>
           <tr><td>服务列表</td><td>[[ form.services.map(s=>s.name).join(', ') ]]</td></tr>
         </tbody></table>
-        <div class="bg2"><button class="btn btn-default" @click="step=3">上一步</button><button class="btn btn-success" @click="submit">🚀 确认提交</button></div>
+        <div class="bg2"><button class="btn btn-default" @click="step=3">上一步</button><button v-if="$auth.hasPermission('op:deploy_project')" class="btn btn-success" @click="submit">🚀 确认提交</button></div>
       </div>
 
       <!-- 部署进度弹框 -->
@@ -111,8 +111,8 @@ const CreateProject = {
     resetForm(){this.step=1;this.form={name:'',desc:'',envName:'',portStart:this.form.portStart,services:[]};this.projectValid=null;this.mwSelected=['nacos','mysql-nfs','redis','mysql','rabbitmq']},
     submit(){
       if(!this.form.name||!this.form.envName){showWarning('请输入项目名称和环境名称');return}
-      var p={action:'create_project',project_name:this.form.name,project_desc:this.form.desc,env_name:this.form.envName,domain:this.form.name+this.form.envName+'.'+this.domainSuffix,debug_port:this.form.portStart,node_port:this.form.portStart+30,jmx_port:this.form.portStart+60,middleware_port:this.form.portStart+90,middleware:this.mwSelected,services:this.form.services.filter(s=>s.name)};
-      ajax('POST','/api/deploy/execute',p,r=>{
+      var p={project_name:this.form.name,project_desc:this.form.desc,env_name:this.form.envName,domain:this.form.name+this.form.envName+'.'+this.domainSuffix,debug_port:this.form.portStart,node_port:this.form.portStart+30,jmx_port:this.form.portStart+60,middleware_port:this.form.portStart+90,middleware:this.mwSelected,services:this.form.services.filter(s=>s.name)};
+      ajax('POST','/api/deploy/execute/project',p,r=>{
         if(r.code===200){this.openProgress();}
         else showError(r.msg||'提交失败');
       });

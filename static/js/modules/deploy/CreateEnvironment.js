@@ -60,7 +60,7 @@ const CreateEnvironment = {
           <tr><td>服务列表</td><td>[[ sourceServices.map(s=>s.name).join(', ') ]]</td></tr>
           <tr><td>中间件</td><td>[[ sourceMiddleware.join(', ') ]]</td></tr>
         </tbody></table>
-        <div class="bg2"><button class="btn btn-default" @click="step=1">上一步</button><button class="btn btn-success" :disabled="submitting" @click="submit">[[ submitting ? '提交中...' : '确认提交' ]]</button></div>
+        <div class="bg2"><button class="btn btn-default" @click="step=1">上一步</button><button v-if="$auth.hasPermission('op:deploy_env')" class="btn btn-success" :disabled="submitting" @click="submit">[[ submitting ? '提交中...' : '确认提交' ]]</button></div>
       </div>
 
       <!-- Step 3: 部署进度 -->
@@ -106,8 +106,8 @@ const CreateEnvironment = {
     validateEnv(){if(!this.form.envName||!this.projectName){this.envValid=null;return}ajax('GET','/api/manage/validate/environment?project='+this.projectName+'&env='+this.form.envName,null,r=>{this.envValid=r.data.exists})},
     submit(){
       this.submitting=true;
-      var p={action:'create_env',project_id:this.form.projectId,source_env:this.form.sourceEnv,env_name:this.form.envName,domain:this.projectName+this.form.envName+'.'+this.domainSuffix,debug_port:this.form.portStart,node_port:this.form.portStart+30,jmx_port:this.form.portStart+60,middleware_port:this.form.portStart+90,middleware:this.sourceMiddleware,services:this.sourceServices};
-      ajax('POST','/api/deploy/execute',p,r=>{
+      var p={project_id:this.form.projectId,source_env:this.form.sourceEnv,env_name:this.form.envName,domain:this.projectName+this.form.envName+'.'+this.domainSuffix,debug_port:this.form.portStart,node_port:this.form.portStart+30,jmx_port:this.form.portStart+60,middleware_port:this.form.portStart+90,middleware:this.sourceMiddleware,services:this.sourceServices};
+      ajax('POST','/api/deploy/execute/env',p,r=>{
         this.submitting=false;
         if(r.code===200){
           this.step=3;

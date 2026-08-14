@@ -8,7 +8,7 @@ from core.response import success_response, error_response
 from core.security import require_permission
 
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def create_dirs():
     """
     为项目创建所有NFS目录
@@ -90,7 +90,7 @@ def check_dirs():
         return error_response(str(e), 500)
 
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def create_single_dir():
     """
     创建单个目录

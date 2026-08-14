@@ -5,8 +5,11 @@
 import os
 import re
 import json
+import logging
 import shutil
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from core.db import db
 from modules.cicd.models import Build, CicdFlowTemplate, BuildAgent
@@ -16,12 +19,22 @@ from modules.cicd.services import agent_service
 # 构建日志目录
 BUILD_LOG_DIR = os.path.join('logs', 'cicd')
 
-
 def get_build_work_subdir(build):
-    """计算 Agent 构建工作子目录名：{project}-{env}（文件系统安全，任务推送与日志查询两端一致）"""
+    """计算 Agent 构建工作子目录名：{project}-{env}-{type}
+    前后端隔离（type 后缀），同一 Agent 并发构建前端/后端时互不覆盖（任务推送与日志查询两端一致）
+    """
     proj = build.project.name if build.project else 'unknown'
     env = build.environment.name if build.environment else 'default'
-    return re.sub(r'[^A-Za-z0-9_-]', '-', f'{proj}-{env}')
+    typ = build.project_type or 'backend'
+    return re.sub(r'[^A-Za-z0-9_-]', '-', f'{proj}-{env}-{typ}')
+
+def get_build_image_namespace(build):
+    """计算镜像命名空间：{project}-{env}（不含 type 后缀）
+    镜像仓库路径 = {harbor}/{namespace}/{服务名}:{tag}；类型由 project_type 单独区分
+    """
+    proj = build.project.name if build.project else 'unknown'
+    env = build.environment.name if build.environment else 'default'
+    return re.sub(r'[^A-Za-z0-9_-]', '-', f'{proj}-{env}').lower()
 
 # 动态步骤定义：根据 project_type 生成
 BACKEND_STEPS = [
@@ -37,8 +50,8 @@ FRONTEND_STEPS = [
     {'step_no': 1, 'key': 'clone', 'name': 'Git Clone'},
     {'step_no': 2, 'key': 'build', 'name': '编译构建'},
     {'step_no': 3, 'key': 'collect', 'name': '产物收集'},
+    {'step_no': 4, 'key': 'publish', 'name': '发布到Web目录'},
 ]
-
 
 def get_build_steps_def(project_type):
     """根据项目类型获取步骤定义"""
@@ -46,24 +59,43 @@ def get_build_steps_def(project_type):
         return FRONTEND_STEPS
     return BACKEND_STEPS
 
-
 def _generate_build_no():
     """生成构建编号：B + 时间戳 + 4位随机"""
     import random
     ts = datetime.now().strftime('%Y%m%d%H%M%S')
     return f'B{ts}{random.randint(1000, 9999)}'
 
-
-def trigger_build(project_id, environment_id, branch, triggered_by, services=None):
+def trigger_build(project_id, environment_id, branch, triggered_by, services=None, project_type='backend'):
     """
     触发构建：从项目大模板快照配置，创建 pending Build 记录。
     services: 选中的服务 basename 列表，空/None = 构建全部服务。
+    project_type: backend / frontend —— 从模板 configs 取对应类型的配置（语言/Git/编译/产物）。
     返回 (build, error_msg)
     """
     # 查项目大模板
     template = CicdFlowTemplate.query.filter_by(project_id=project_id).first()
     if not template:
         return None, '该项目未配置 CI/CD 流程模板'
+
+    project_type = project_type if project_type in ('backend', 'frontend') else 'backend'
+    cfg = template.configs_dict().get(project_type) or {}
+    language = cfg.get('language') or ''
+    git_url = cfg.get('git_url') or ''
+    if not git_url:
+        type_name = '前端' if project_type == 'frontend' else '后端'
+        return None, f'模板未配置{type_name}的 Git 地址，请先在「流程模板」中完善{type_name}配置'
+    git_credential_id = cfg.get('git_credential_id')
+    build_docker_image = cfg.get('build_docker_image') or ''
+    build_command = cfg.get('build_command') or ''
+    artifact_dirs_raw = cfg.get('artifact_dirs') or ''
+    artifact_dir = cfg.get('artifact_dir') or ''
+    dockerfile_template_id = cfg.get('dockerfile_template_id')
+    image_name = cfg.get('image_name') or ''  # 模板冗余列已删除，从 configs 取（无则空，Agent 端有兜底）
+    # 前端产物固定 dist；后端按行解析服务目录
+    if project_type == 'frontend':
+        artifact_dir_list = ['dist']
+    else:
+        artifact_dir_list = [line.strip() for line in artifact_dirs_raw.splitlines() if line.strip()]
 
     # 确保日志目录存在
     os.makedirs(BUILD_LOG_DIR, exist_ok=True)
@@ -73,30 +105,35 @@ def trigger_build(project_id, environment_id, branch, triggered_by, services=Non
 
     # 渲染 Dockerfile 快照（后端才需要）
     dockerfile_content = ''
-    if template.project_type == 'backend' and template.dockerfile_template_id:
-        dockerfile_content = render_for_build(template.dockerfile_template_id, {
-            'image_name': template.image_name or '',
-            'project_type': template.language or '',
+    if project_type == 'backend' and dockerfile_template_id:
+        dockerfile_content = render_for_build(dockerfile_template_id, {
+            'image_name': image_name or '',
+            'project_type': language or '',
             'project_name': template.project.name if template.project else '',
         })
 
-    # 生成 image_tag（分支名 + 短时间戳）
+    # 生成 image_tag（分支含中文 → 纯时间命名，避免非法 tag 字符；否则 分支名 + 短时间戳）
     safe_branch = (branch or 'master').replace('/', '-').replace('\\', '-')
-    image_tag = f'{safe_branch}-{datetime.now().strftime("%Y%m%d%H%M%S")}'
+    now_ts = datetime.now().strftime('%Y%m%d%H%M%S')
+    if re.search(r'[\u4e00-\u9fff]', branch or ''):
+        image_tag = now_ts
+    else:
+        image_tag = f'{safe_branch}-{now_ts}'
 
     # 组装完整步骤配置快照
     steps_config = {
-        'git_docker_image': template.git_docker_image or '',
-        'git_url': template.git_url or '',
-        'git_credential_id': template.git_credential_id,
-        'build_docker_image': template.build_docker_image or '',
-        'build_command': template.build_command or '',
-        'artifact_dirs': template.get_artifact_dir_list(),
-        'artifact_dir': template.artifact_dir or '',
+        'git_docker_image': cfg.get('git_docker_image') or '',
+        'git_url': git_url,
+        'git_credential_id': git_credential_id,
+        'build_docker_image': build_docker_image,
+        'build_command': build_command,
+        'artifact_dirs': artifact_dir_list,
+        'artifact_dir': artifact_dir if project_type == 'backend' else '',
         'services': services or [],  # 选中的服务 basename，空=构建全部
         'dockerfile_content': dockerfile_content,
-        'image_name': template.image_name or '',
+        'image_name': image_name,
         'image_tag': image_tag,
+        'project_type': project_type,
     }
 
     build = Build(
@@ -104,10 +141,10 @@ def trigger_build(project_id, environment_id, branch, triggered_by, services=Non
         project_id=project_id,
         environment_id=environment_id,
         branch=branch or 'master',
-        project_type=template.project_type,
-        language=template.language or '',
+        project_type=project_type,
+        language=language or '',
         steps_snapshot=json.dumps(steps_config, ensure_ascii=False),
-        image_name=template.image_name,
+        image_name=image_name,
         image_tag=image_tag,
         status='pending',
         log_file=log_file,
@@ -116,15 +153,14 @@ def trigger_build(project_id, environment_id, branch, triggered_by, services=Non
     db.session.add(build)
     db.session.commit()
 
-    # 初始化步骤状态文件
-    init_build_steps(build_no, template.project_type)
+    # 初始化步骤状态文件（按本次构建类型：前端 3 步 / 后端 6 步）
+    init_build_steps(build_no, project_type)
 
     # 触发调度：立即尝试派发给最优空闲 Agent
     from modules.cicd.services.dispatch_service import dispatch_pending
     dispatch_pending()
 
     return build, None
-
 
 def cancel_build(build_id):
     """取消构建：仅 pending 可直接取消；running 标记取消意图"""
@@ -146,10 +182,11 @@ def cancel_build(build_id):
             agent = BuildAgent.query.get(build.agent_id)
             if agent:
                 from modules.cicd.services.dispatch_service import push_cancel_to_agent
-                push_cancel_to_agent(agent, build)
+                # 异步推送：不阻塞取消接口（Agent 响应/超时在后台线程，前端即时返回）
+                import threading
+                threading.Thread(target=push_cancel_to_agent, args=(agent, build), daemon=True).start()
         return True, '已发送取消请求（等待 Agent 响应）'
     return False, f'当前状态 {build.status} 不可取消'
-
 
 def rerun_build(build_id, start_step):
     """
@@ -217,7 +254,6 @@ def rerun_build(build_id, start_step):
 
     return build, '已加入重跑队列'
 
-
 def complete_build(build_id, status, image_digest='', error=''):
     """
     Agent 回调：构建完成，落库终态。
@@ -234,15 +270,20 @@ def complete_build(build_id, status, image_digest='', error=''):
     if build.started_at:
         build.duration = (build.finished_at - build.started_at).total_seconds()
 
-    # 释放 agent 负载
-    if build.agent_id:
-        agent_service.release_agent_load(build.agent_id)
-
     db.session.commit()
 
     # 清除领取标记（终态由 status 兜底）
     from core.redis_client import cache_delete
     cache_delete(f'build:claim:{build.id}')
+    # 释放同环境串行锁（终态放行同一环境的下一个排队构建；owner=build_no 比对防误删）
+    if build.project_id:
+        from core.redis_client import cache_get, cache_delete as _cd2
+        _lock_key = f'lock:env:{build.project_id}:{build.environment_id}'
+        try:
+            if cache_get(_lock_key) == build.build_no:
+                _cd2(_lock_key)
+        except Exception as e:
+            logger.warning('[build] 释放同环境锁失败 %s: %s', _lock_key, e)
 
     # 释放容量后触发调度，消化排队任务
     from modules.cicd.services.dispatch_service import dispatch_pending
@@ -257,7 +298,6 @@ def complete_build(build_id, status, image_digest='', error=''):
     cleanup_old_build_records(build.environment_id, keep)
 
     return build
-
 
 def cleanup_old_build_records(environment_id, keep):
     """与 Agent 目录保留策略同步：每个环境仅保留最近 keep 条构建记录。
@@ -289,7 +329,6 @@ def cleanup_old_build_records(environment_id, keep):
     if removed:
         db.session.commit()
 
-
 def get_env_last_branch(environment_id):
     """获取环境最近一次构建的分支（独立记忆）"""
     last_build = Build.query.filter_by(
@@ -297,20 +336,17 @@ def get_env_last_branch(environment_id):
     ).order_by(Build.created_at.desc()).first()
     return last_build.branch if last_build else ''
 
-
 def get_env_builds(environment_id, limit=20):
     """获取环境的执行记录"""
     return Build.query.filter_by(
         environment_id=environment_id
     ).order_by(Build.created_at.desc()).limit(limit).all()
 
-
 # ─── 步骤状态文件管理 ─────────────────────────────────────
 
 def _build_dir(build_no):
     """获取构建目录"""
     return os.path.join(BUILD_LOG_DIR, build_no)
-
 
 def init_build_steps(build_no, project_type='backend'):
     """初始化 build.json，所有步骤状态为 pending"""
@@ -333,7 +369,6 @@ def init_build_steps(build_no, project_type='backend'):
     _write_build_json(bdir, data)
     return data
 
-
 def _parse_step_time(s):
     """解析步骤时间字符串，兼容秒级和毫秒级两种格式
 
@@ -348,7 +383,6 @@ def _parse_step_time(s):
         except ValueError:
             continue
     return None
-
 
 def update_step_status(build_no, step_no, status, error=''):
     """更新指定步骤状态，并同步 build 总状态"""
@@ -392,12 +426,10 @@ def update_step_status(build_no, step_no, status, error=''):
     _write_build_json(bdir, data)
     return data
 
-
 def get_build_steps(build_no):
     """读取 build.json 步骤状态"""
     bdir = _build_dir(build_no)
     return _read_build_json(bdir)
-
 
 def update_deploy_step(build_no, status, error=''):
     """更新 build.json 中「部署」步骤（key='deploy'）的状态。
@@ -425,12 +457,10 @@ def update_deploy_step(build_no, status, error=''):
         break
     _write_build_json(bdir, data)
 
-
 def _write_build_json(bdir, data):
     path = os.path.join(bdir, 'build.json')
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
 
 def _read_build_json(bdir):
     path = os.path.join(bdir, 'build.json')

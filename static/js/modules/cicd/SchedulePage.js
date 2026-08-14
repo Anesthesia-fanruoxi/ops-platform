@@ -12,7 +12,7 @@ const SchedulePage = {
       <el-tag :type="streamOk ? 'success' : 'info'" size="small" effect="plain">
         [[ streamOk ? '实时连接中' : '连接已断开' ]]
       </el-tag>
-      <el-button size="small" type="primary" @click="openAgentDialog">+ 添加 Agent</el-button>
+      <el-button v-if="agentOpAllowed" size="small" type="primary" @click="openAgentDialog">+ 添加 Agent</el-button>
       <el-button size="small" @click="loadOverview">刷新</el-button>
     </div>
   </div>
@@ -67,9 +67,10 @@ const SchedulePage = {
             <span>心跳 [[ a.last_heartbeat || '-' ]]</span>
             <template v-if="a.state !== 'server_offline'">
               <div style="display:flex;gap:4px">
-                <el-button v-if="['idle','running','disabled'].includes(a.state)" size="small" @click.stop="openUpdateDialog(a)">更新</el-button>
-                <el-button size="small" @click.stop="a.state === 'stopped' ? reinstallAgent(a) : openCleanupDialog(a, 'reset')">[[ a.state === 'stopped' ? '安装' : '重置' ]]</el-button>
-                <el-button size="small" @click.stop="openCleanupDialog(a, 'uninstall')">卸载</el-button>
+                <el-button v-if="agentOpAllowed" size="small" @click.stop="openEditAgent(a)">编辑</el-button>
+                <el-button v-if="['idle','running','disabled'].includes(a.state) && agentOpAllowed" size="small" @click.stop="openUpdateDialog(a)">更新</el-button>
+                <el-button v-if="agentOpAllowed" size="small" @click.stop="a.state === 'stopped' ? reinstallAgent(a) : openCleanupDialog(a, 'reset')">[[ a.state === 'stopped' ? '安装' : '重置' ]]</el-button>
+                <el-button v-if="agentOpAllowed" size="small" @click.stop="openCleanupDialog(a, 'uninstall')">卸载</el-button>
               </div>
             </template>
           </div>
@@ -93,6 +94,7 @@ const SchedulePage = {
         </el-table-column>
         <el-table-column prop="build_no" label="构建编号" width="170" />
         <el-table-column prop="project_name" label="项目" min-width="110" />
+        <el-table-column prop="environment_name" label="环境" min-width="100" show-overflow-tooltip />
         <el-table-column prop="branch" label="分支" width="110" show-overflow-tooltip />
         <el-table-column label="状态" width="100" align="center">
           <template #default="s">
@@ -199,6 +201,20 @@ const SchedulePage = {
       </template>
       <el-form-item label="Master 地址"><el-input v-model="agentForm.master_url" :placeholder="masterUrlPlaceholder" /></el-form-item>
       <el-form-item label="工作目录"><el-input v-model="agentForm.work_dir" placeholder="/data/cicd" :disabled="reinstallMode" /></el-form-item>
+      <el-divider content-position="left">NFS 挂载（安装时自动挂载，无需登录服务器）</el-divider>
+      <el-form-item label="挂载目录">
+        <el-input v-model="agentForm.frontend_mount_dir" placeholder="/web（Agent 机 NFS 挂载根；发布目标 = 挂载根/项目/环境/web，如 /web/ysh/test/web）" />
+        <div style="color:#909399;font-size:12px;margin-top:2px">末尾 / 可不填，保存时自动去除</div>
+      </el-form-item>
+      <el-form-item label="NFS 服务器">
+        <el-input v-model="agentForm.nfs_server" placeholder="192.168.1.200" />
+      </el-form-item>
+      <el-form-item label="NFS 共享目录">
+        <el-input v-model="agentForm.nfs_share" placeholder="/data/project" />
+        <div style="color:#909399;font-size:12px;margin-top:4px">安装时自动挂载 [[ agentForm.nfs_server || 'NFS服务器' ]]:[[ agentForm.nfs_share || '共享目录' ]] → [[ agentForm.frontend_mount_dir || '/web' ]] 并写入 /etc/fstab</div>
+        <div style="color:#e6a23c;font-size:12px;margin-top:2px">⚠ 挂载目录不要填写 /etc 等系统目录；目录不存在会自动递归创建</div>
+        <div style="color:#909399;font-size:12px;margin-top:2px">末尾 / 可不填，自动去除</div>
+      </el-form-item>
       <el-form-item label="保留构建数">
         <el-input-number v-model="agentForm.keep_builds" :min="1" :max="50" />
         <span style="color:#909399;margin-left:8px;font-size:12px">每环境保留的最近构建数，超出自动清理</span>
@@ -224,18 +240,82 @@ const SchedulePage = {
     </el-form>
     <template #footer>
       <el-button @click="showAgentDialog=false">取消</el-button>
-      <el-button type="primary" :loading="saving" @click="addAgent">开始安装</el-button>
+      <el-button v-if="agentOpAllowed" type="primary" :loading="saving" @click="addAgent">开始安装</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- ═══ 编辑 Agent 配置弹窗（仅改 DB 配置，不触发重装；SSH/Harbor 变更下次安装生效） ═══ -->
+  <el-dialog v-model="editAgentVisible" title="编辑 Agent 配置" width="560px" :close-on-click-modal="false">
+    <el-form label-width="110px" size="small">
+      <el-form-item label="名称" required><el-input v-model="editForm.name" placeholder="build-node-01" /></el-form-item>
+      <el-form-item label="主机地址" required><el-input v-model="editForm.host" placeholder="192.168.1.100" /></el-form-item>
+      <el-form-item label="SSH 端口"><el-input-number v-model="editForm.ssh_port" :min="1" :max="65535" /></el-form-item>
+      <el-form-item label="认证方式" required>
+        <el-radio-group v-model="editForm.auth_type">
+          <el-radio label="credential">凭据</el-radio>
+          <el-radio label="password">账号密码</el-radio>
+        </el-radio-group>
+      </el-form-item>
+      <el-form-item v-if="editForm.auth_type==='credential'" label="选择凭据">
+        <el-select v-model="editForm.credential_id" placeholder="选择已有凭据" style="width:100%">
+          <el-option v-for="c in credentials" :key="c.id" :label="c.name + ' (' + c.type + ')'" :value="c.id" />
+        </el-select>
+      </el-form-item>
+      <template v-if="editForm.auth_type==='password'">
+        <el-form-item label="用户名" required><el-input v-model="editForm.ssh_username" placeholder="root" /></el-form-item>
+        <el-form-item label="密码">
+          <el-input v-model="editForm.ssh_password" type="password" show-password placeholder="留空则保持已保存的密码" />
+        </el-form-item>
+      </template>
+      <el-form-item label="Master 地址"><el-input v-model="editForm.master_url" :placeholder="masterUrlPlaceholder" /></el-form-item>
+      <el-form-item label="工作目录"><el-input v-model="editForm.work_dir" placeholder="/data/cicd" /></el-form-item>
+      <el-divider content-position="left">NFS 挂载</el-divider>
+      <el-form-item label="挂载目录">
+        <el-input v-model="editForm.frontend_mount_dir" placeholder="/web（Agent 机 NFS 挂载根；发布目标 = 挂载根/项目/环境/web）" />
+      </el-form-item>
+      <el-form-item label="NFS 服务器"><el-input v-model="editForm.nfs_server" placeholder="192.168.1.200" /></el-form-item>
+      <el-form-item label="NFS 共享目录">
+        <el-input v-model="editForm.nfs_share" placeholder="/data/project" />
+        <div style="color:#e6a23c;font-size:12px;margin-top:2px">⚠ 挂载目录不要填写 /etc 等系统目录；目录不存在会自动递归创建</div>
+        <div style="color:#909399;font-size:12px;margin-top:2px">末尾 / 可不填，自动去除</div>
+      </el-form-item>
+      <el-form-item label="保留构建数">
+        <el-input-number v-model="editForm.keep_builds" :min="1" :max="50" />
+        <span style="color:#909399;margin-left:8px;font-size:12px">每环境保留的最近构建数，超出自动清理</span>
+      </el-form-item>
+      <el-form-item label="禁用调度"><el-switch v-model="editForm.disabled" /></el-form-item>
+      <el-divider content-position="left">Harbor 镜像仓库</el-divider>
+      <el-form-item label="仓库类型" required>
+        <el-radio-group v-model="editForm.harbor_type">
+          <el-radio label="public">公有</el-radio>
+          <el-radio label="private">私有</el-radio>
+        </el-radio-group>
+      </el-form-item>
+      <el-form-item label="Harbor 地址"><el-input v-model="editForm.harbor_url" placeholder="hub.example.com" /></el-form-item>
+      <el-form-item v-if="editForm.harbor_type==='private'" label="IP 映射">
+        <el-input v-model="editForm.harbor_ip" placeholder="192.168.1.200" />
+        <div style="color:#909399;font-size:12px;margin-top:4px">安装时将在远程 /etc/hosts 写入：[[ editForm.harbor_ip || '<IP>' ]] [[ editForm.harbor_url || '<域名>' ]]</div>
+      </el-form-item>
+      <el-form-item label="Harbor 凭据">
+        <el-select v-model="editForm.harbor_credential_id" placeholder="选择账号密码凭据" style="width:100%">
+          <el-option v-for="c in harborCredentials" :key="c.id" :label="c.name + (c.username ? ' (' + c.username + ')' : '')" :value="c.id" />
+        </el-select>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="editAgentVisible=false">取消</el-button>
+      <el-button v-if="agentOpAllowed" type="primary" :loading="savingEdit" @click="saveEditAgent">保存</el-button>
     </template>
   </el-dialog>
 
   <!-- ═══ Agent 安装进度弹窗 ═══ -->
-  <el-dialog v-model="installVisible" :title="installTitle" width="600px" :close-on-click-modal="installDone" :close-on-press-escape="installDone">
+  <el-dialog v-model="installVisible" :title="installTitle" width="30%" :close-on-click-modal="installDone" :close-on-press-escape="installDone" top="12vh">
     <div style="margin-bottom:12px">
       <el-steps :active="installStep" finish-status="success" align-center size="small">
         <el-step v-for="(t, i) in installStepTitles" :key="i" :title="t" />
       </el-steps>
     </div>
-    <div class="cicd-log-viewer" style="height:220px;font-size:12px">
+    <div class="cicd-log-viewer" style="height:44vh;font-size:12px">
       <div v-for="(line, i) in installLogs" :key="i" class="log-line" :style="{color: line.color || '#d4d4d4'}">[[ line.text ]]</div>
     </div>
     <template #footer>
@@ -248,22 +328,35 @@ const SchedulePage = {
     <el-alert v-if="cleanupMode==='uninstall'" type="error" :closable="false" show-icon style="margin-bottom:14px">
       <template #title>卸载将执行以下操作（不可恢复）</template>
       <template #default>
-        <div style="line-height:1.8">1. 停止并移除 cicd-agent 服务<br>2. 删除远程二进制 /usr/local/bin/cicd-agent<br>3. 删除工作目录 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]]<br>4. 删除本地数据库记录</div>
+        <div style="line-height:1.8">1. 停止并移除 cicd-agent 服务<br>2. 删除远程二进制 /usr/local/bin/cicd-agent<br>3. 删除工作目录 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]]<br>4. [[ cleanupAgent && cleanupAgent.frontend_mount_dir ? '卸载 NFS 挂载 ' + cleanupAgent.frontend_mount_dir : '删除本地数据库记录' ]]</div>
       </template>
     </el-alert>
     <el-alert v-else type="warning" :closable="false" show-icon style="margin-bottom:14px">
       <template #title>重置将执行以下操作（保留本地记录，可重新安装）</template>
       <template #default>
-        <div style="line-height:1.8">1. 停止并移除 cicd-agent 服务<br>2. 删除远程二进制 /usr/local/bin/cicd-agent<br>3. 删除工作目录 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]]</div>
+        <div style="line-height:1.8">1. 停止并移除 cicd-agent 服务<br>2. 删除远程二进制 /usr/local/bin/cicd-agent<br>3. 删除工作目录 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]]<br>4. [[ cleanupAgent && cleanupAgent.frontend_mount_dir ? '（可选）卸载 NFS 挂载 ' + cleanupAgent.frontend_mount_dir : '' ]]</div>
       </template>
     </el-alert>
     <el-form label-width="100px" size="small">
       <el-form-item label="主机"><span style="font-weight:bold">[[ cleanupAgent?cleanupAgent.host:'' ]]</span></el-form-item>
-      <el-form-item label="卸载 Docker"><el-switch v-model="cleanupForm.remove_docker" /><span style="margin-left:8px;color:#909399;font-size:12px">同时卸载 Docker 并删除 /data/docker</span></el-form-item>
+      <el-form-item label="卸载 Docker">
+        <el-switch v-model="cleanupForm.remove_docker" />
+        <span style="margin-left:8px;color:#909399;font-size:12px">同时卸载 Docker</span>
+      </el-form-item>
+      <el-alert v-if="cleanupForm.remove_docker" type="warning" :closable="false" show-icon style="margin:-4px 0 12px 100px">
+        <template #default>将停止并卸载 Docker，删除 /data/docker 与 /etc/docker</template>
+      </el-alert>
+      <el-form-item label="卸载 NFS">
+        <el-switch v-model="cleanupForm.remove_nfs" :disabled="!(cleanupAgent && cleanupAgent.frontend_mount_dir)" />
+        <span style="margin-left:8px;color:#909399;font-size:12px">[[ cleanupAgent && cleanupAgent.frontend_mount_dir ? '卸载 ' + cleanupAgent.frontend_mount_dir : '未配置 NFS 挂载' ]]</span>
+      </el-form-item>
+      <el-alert v-if="cleanupForm.remove_nfs && cleanupAgent && cleanupAgent.frontend_mount_dir" type="warning" :closable="false" show-icon style="margin:-4px 0 12px 100px">
+        <template #default>将卸载 [[ cleanupAgent.frontend_mount_dir ]] 并清除 /etc/fstab 中的对应记录</template>
+      </el-alert>
     </el-form>
     <template #footer>
       <el-button @click="cleanupVisible=false">取消</el-button>
-      <el-button :type="cleanupMode==='uninstall'?'danger':'warning'" :loading="saving" @click="confirmCleanup">确认[[ cleanupMode==='uninstall'?'卸载':'重置' ]]</el-button>
+      <el-button v-if="agentOpAllowed" :type="cleanupMode==='uninstall'?'danger':'warning'" :loading="saving" @click="confirmCleanup">确认[[ cleanupMode==='uninstall'?'卸载':'重置' ]]</el-button>
     </template>
   </el-dialog>
 
@@ -306,14 +399,25 @@ const SchedulePage = {
       credentials: [],
       saving: false,
       showAgentDialog: false, reinstallMode: false, reinstallAgentId: null,
-      agentForm: { name: '', host: '', ssh_port: 22, ssh_username: 'root', auth_type: 'credential', ssh_password: '', credential_id: '', master_url: '', work_dir: '/data/cicd', keep_builds: 5, install_docker: true, harbor_type: 'public', harbor_url: '', harbor_credential_id: '', harbor_ip: '' },
-      installVisible: false, installStep: 0, installLogs: [], installDone: false, installSource: null,
+      editAgentVisible: false, savingEdit: false,
+      editForm: {
+        id: null, name: '', host: '', ssh_port: 22, auth_type: 'credential', credential_id: '',
+        ssh_username: 'root', ssh_password: '', master_url: '', work_dir: '/data/cicd',
+        frontend_mount_dir: '', nfs_server: '', nfs_share: '', keep_builds: 5, disabled: false,
+        harbor_type: 'public', harbor_url: '', harbor_credential_id: '', harbor_ip: '',
+      },
+      agentForm: { name: '', host: '', ssh_port: 22, ssh_username: 'root', auth_type: 'credential', ssh_password: '', credential_id: '', master_url: '', work_dir: '/data/cicd', frontend_mount_dir: '', nfs_server: '', nfs_share: '', keep_builds: 5, install_docker: true, harbor_type: 'public', harbor_url: '', harbor_credential_id: '', harbor_ip: '' },
+      installVisible: false, installStep: 0, installLogs: [], installDone: false, installSource: null, installAutoClose: null,
       installTitle: 'Agent 安装进度', installStepTitles: ['SSH 连接', '安装 Docker', '上传文件', '启动服务'],
       cleanupVisible: false, cleanupMode: 'uninstall', cleanupAgent: null,
-      cleanupForm: { remove_docker: false },
+      cleanupForm: { remove_docker: false, remove_nfs: false },
     };
   },
   computed: {
+    // Agent 操作权限（op:agent）：无权限隐藏添加/更新/安装/重置/卸载等操作（后端仍 403 兜底）
+    agentOpAllowed() {
+      return !!(this.$auth && this.$auth.hasPermission('op:agent'));
+    },
     onlineCount() { return this.agents.filter(a => a.state === 'idle' || a.state === 'running').length; },
     masterUrlPlaceholder() { return window.location.origin || 'http://192.168.1.x:8050'; },
     harborCredentials() { return this.credentials.filter(c => c.type === 'password'); },
@@ -396,11 +500,11 @@ const SchedulePage = {
 
     // ─── 状态标签 ─────────────────────────────────────────
     logStatusType(s) {
-      const m = { dispatched: 'success', dispatching: 'warning', no_agent: 'danger', failed: 'danger' };
+      const m = { dispatched: 'success', dispatching: 'warning', no_agent: 'danger', same_env: 'warning', agent_full: 'warning', node_down: 'warning', failed: 'danger' };
       return m[s] || 'info';
     },
     logStatusLabel(s) {
-      const m = { dispatched: '已调度', dispatching: '调度中', no_agent: '无节点', failed: '失败' };
+      const m = { dispatched: '已调度', dispatching: '调度中', no_agent: '无节点', same_env: '同环境等待', agent_full: '等待Agent', node_down: '等待原节点', failed: '失败' };
       return m[s] || s;
     },
     stateType(state) {
@@ -575,8 +679,71 @@ const SchedulePage = {
       this.loadCredentials();
       this.reinstallMode = false;
       this.reinstallAgentId = null;
-      this.agentForm = { name: '', host: '', ssh_port: 22, ssh_username: 'root', auth_type: 'credential', ssh_password: '', credential_id: '', master_url: '', work_dir: '/data/cicd', keep_builds: 5, install_docker: true, harbor_type: 'public', harbor_url: '', harbor_credential_id: '', harbor_ip: '' };
+      this.agentForm = { name: '', host: '', ssh_port: 22, ssh_username: 'root', auth_type: 'credential', ssh_password: '', credential_id: '', master_url: '', work_dir: '/data/cicd', frontend_mount_dir: '', nfs_server: '', nfs_share: '', keep_builds: 5, install_docker: true, harbor_type: 'public', harbor_url: '', harbor_credential_id: '', harbor_ip: '' };
       this.showAgentDialog = true;
+    },
+    openEditAgent(agent) {
+      this.loadCredentials();
+      // 全量配置从 detail 接口取（卡片对象仅含列表字段）
+      ajax('GET', '/api/cicd/agents/' + agent.id + '/detail', null, res => {
+        if (res.code !== 200) { ElementPlus.ElMessage.error(res.msg || '获取配置失败'); return; }
+        const d = res.data;
+        this.editForm = {
+          id: d.id,
+          name: d.name || '',
+          host: d.host || '',
+          ssh_port: d.ssh_port || 22,
+          auth_type: d.ssh_auth_type || 'credential',
+          credential_id: d.ssh_credential_id || '',
+          ssh_username: d.ssh_username || 'root',
+          ssh_password: '',
+          master_url: d.master_url || '',
+          work_dir: d.work_dir || '/data/cicd',
+          frontend_mount_dir: d.frontend_mount_dir || '',
+          nfs_server: d.nfs_server || '',
+          nfs_share: d.nfs_share || '',
+          keep_builds: d.keep_builds || 5,
+          disabled: !!d.disabled,
+          harbor_type: d.harbor_type || 'public',
+          harbor_url: d.harbor_url || '',
+          harbor_credential_id: d.harbor_credential_id || '',
+          harbor_ip: d.harbor_ip || '',
+        };
+        this.editAgentVisible = true;
+      });
+    },
+    saveEditAgent() {
+      if (!this.editForm.name) { ElementPlus.ElMessage.warning('请填写名称'); return; }
+      if (!this.editForm.host) { ElementPlus.ElMessage.warning('请填写主机地址'); return; }
+      this.savingEdit = true;
+      ajax('PUT', '/api/cicd/agents/' + this.editForm.id + '/config', {
+        name: this.editForm.name,
+        host: this.editForm.host,
+        ssh_port: this.editForm.ssh_port,
+        ssh_username: this.editForm.ssh_username,
+        ssh_auth_type: this.editForm.auth_type,
+        ssh_credential_id: this.editForm.credential_id || null,
+        master_url: this.editForm.master_url,
+        work_dir: this.editForm.work_dir,
+        frontend_mount_dir: this.editForm.frontend_mount_dir,
+        nfs_server: this.editForm.nfs_server,
+        nfs_share: this.editForm.nfs_share,
+        keep_builds: this.editForm.keep_builds,
+        disabled: this.editForm.disabled,
+        harbor_type: this.editForm.harbor_type,
+        harbor_url: this.editForm.harbor_url,
+        harbor_credential_id: this.editForm.harbor_credential_id || null,
+        harbor_ip: this.editForm.harbor_ip,
+      }, res => {
+        this.savingEdit = false;
+        if (res.code === 200) {
+          this.editAgentVisible = false;
+          ElementPlus.ElMessage.success('Agent 配置已更新');
+          this.loadOverview();
+        } else {
+          ElementPlus.ElMessage.error(res.msg || '保存失败');
+        }
+      });
     },
     addAgent() {
       if (!this.agentForm.name) { ElementPlus.ElMessage.warning('请填写名称'); return; }
@@ -604,7 +771,7 @@ const SchedulePage = {
           this.saving = false;
           if (res.code === 200) {
             this.showAgentDialog = false;
-            this.agentForm = { name: '', host: '', ssh_port: 22, ssh_username: 'root', auth_type: 'credential', ssh_password: '', credential_id: '', master_url: '', work_dir: '/data/cicd', keep_builds: 5, install_docker: true, harbor_type: 'public', harbor_url: '', harbor_credential_id: '', harbor_ip: '' };
+            this.agentForm = { name: '', host: '', ssh_port: 22, ssh_username: 'root', auth_type: 'credential', ssh_password: '', credential_id: '', master_url: '', work_dir: '/data/cicd', frontend_mount_dir: '', nfs_server: '', nfs_share: '', keep_builds: 5, install_docker: true, harbor_type: 'public', harbor_url: '', harbor_credential_id: '', harbor_ip: '' };
             this.startInstallStream(res.data.task_id);
           } else ElementPlus.ElMessage.error(res.msg || '启动安装失败');
         });
@@ -618,6 +785,7 @@ const SchedulePage = {
       this.installStep = 0;
       this.installLogs = [];
       this.installDone = false;
+      clearTimeout(this.installAutoClose);
       if (this.installSource) { this.installSource.close(); }
       const token = localStorage.getItem('auth_token');
       const url = '/api/cicd/agents/install-stream/' + taskId + '?token=' + encodeURIComponent(token);
@@ -626,10 +794,12 @@ const SchedulePage = {
       es.onmessage = (evt) => {
         const data = JSON.parse(evt.data);
         if (data.done) {
-          this.installDone = true;
           es.close();
           // 操作完成立即刷新概览，让卡片按钮状态（安装/更新/重置）及时变化
           this.loadOverview();
+          // 成功：不显示"完成"按钮，停留 1 秒自动关闭；失败/异常保留按钮手动关闭
+          clearTimeout(this.installAutoClose);
+          this.installAutoClose = setTimeout(() => { this.installVisible = false; }, 1000);
           return;
         }
         if (data.step > 0) {
@@ -673,7 +843,9 @@ const SchedulePage = {
         this.agentForm = {
           name: d.name, host: d.host, ssh_port: d.ssh_port || 22, ssh_username: d.ssh_username || 'root',
           auth_type: d.ssh_auth_type || 'credential', ssh_password: '', credential_id: d.ssh_credential_id || '',
-          master_url: d.master_url || '', work_dir: d.work_dir || '/data/cicd', keep_builds: d.keep_builds || 5,
+          master_url: d.master_url || '', work_dir: d.work_dir || '/data/cicd', frontend_mount_dir: d.frontend_mount_dir || '',
+          nfs_server: d.nfs_server || '', nfs_share: d.nfs_share || '',
+          keep_builds: d.keep_builds || 5,
           install_docker: true, harbor_type: d.harbor_type || 'public', harbor_url: d.harbor_url || '',
           harbor_credential_id: d.harbor_credential_id || '', harbor_ip: d.harbor_ip || '',
         };
@@ -683,7 +855,7 @@ const SchedulePage = {
     openCleanupDialog(row, mode) {
       this.cleanupAgent = row;
       this.cleanupMode = mode;
-      this.cleanupForm = { remove_docker: false };
+      this.cleanupForm = { remove_docker: false, remove_nfs: (mode === 'uninstall') };
       this.cleanupVisible = true;
     },
     confirmCleanup() {
@@ -696,7 +868,7 @@ const SchedulePage = {
           const isUninstall = this.cleanupMode === 'uninstall';
           this.startInstallStream(res.data.task_id, {
             title: isUninstall ? 'Agent 卸载进度' : 'Agent 重置进度',
-            steps: ['SSH 连接', '移除 Agent 服务', '删除工作目录', '卸载 Docker'],
+            steps: ['SSH 连接', '移除 Agent 服务', '删除工作目录', '卸载 NFS', '卸载 Docker'],
           });
         } else ElementPlus.ElMessage.error(res.msg || '启动失败');
       });

@@ -44,7 +44,7 @@ def get_namespace(namespace_id):
         return error_response(str(e), 500)
 
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def create_namespace():
     """
     创建namespace
@@ -79,7 +79,7 @@ def create_namespace():
         return error_response(str(e), 500)
 
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def copy_namespace():
     """
     复制namespace（包括配置数据）
@@ -114,7 +114,7 @@ def copy_namespace():
         return error_response(str(e), 500)
 
 
-@require_permission('op:deploy')
+@require_permission('op:deploy_project')
 def delete_namespace(namespace_id):
     """删除namespace"""
     try:

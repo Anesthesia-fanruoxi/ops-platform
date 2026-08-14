@@ -102,7 +102,7 @@ const DatasourcesPage = {
   methods: {
     load() {
       this.loading = true;
-      ajax('GET', '/api/collation/datasources', null, r => {
+      ajax('GET', '/api/database/datasources', null, r => {
         this.loading = false;
         this.list = (r.code === 200 ? r.data : []) || [];
       });
@@ -126,13 +126,13 @@ const DatasourcesPage = {
       if (this.editingId && !payload.password) delete payload.password;
       var self = this;
       if (this.editingId) {
-        ajax('PUT', '/api/collation/datasources/' + this.editingId, payload, function(r) {
+        ajax('PUT', '/api/database/datasources/' + this.editingId, payload, function(r) {
           self.saving = false;
           if (r.code === 200) { ElementPlus.ElMessage.success('更新成功'); self.dialogVisible = false; self.load(); }
           else ElementPlus.ElMessage.error(r.msg || '更新失败');
         });
       } else {
-        ajax('POST', '/api/collation/datasources', payload, function(r) {
+        ajax('POST', '/api/database/datasources', payload, function(r) {
           self.saving = false;
           if (r.code === 200) { ElementPlus.ElMessage.success('创建成功'); self.dialogVisible = false; self.load(); }
           else ElementPlus.ElMessage.error(r.msg || '创建失败');
@@ -140,14 +140,15 @@ const DatasourcesPage = {
       }
     },
     remove(row) {
-      ajax('DELETE', '/api/collation/datasources/' + row.id, null, r => {
+      ajax('DELETE', '/api/database/datasources/' + row.id, null, r => {
         if (r.code === 200) { ElementPlus.ElMessage.success('已删除'); this.load(); }
         else ElementPlus.ElMessage.error(r.msg || '删除失败');
       });
     },
     testConn(row) {
       this.testingId = row.id;
-      ajax('POST', '/api/collation/datasources/test', { host: row.host, port: row.port, user: row.user, password: '' }, r => {
+      // 后端直接查库取完整配置（含密码），前端只传 id
+      ajax('POST', '/api/database/datasources/test', { datasource_id: row.id }, r => {
         this.testingId = null;
         if (r.code === 200) ElementPlus.ElMessage.success('连接成功');
         else ElementPlus.ElMessage.error(r.msg || '连接失败');
@@ -156,7 +157,10 @@ const DatasourcesPage = {
     testFormConn() {
       if (!this.form.host) { ElementPlus.ElMessage.warning('请先输入主机地址'); return; }
       this.testingForm = true;
-      ajax('POST', '/api/collation/datasources/test', { host: this.form.host, port: this.form.port, user: this.form.user, password: this.form.password }, r => {
+      // 编辑模式带 datasource_id：密码为空时后端回读已保存的密码测试
+      const payload = { host: this.form.host, port: this.form.port, user: this.form.user, password: this.form.password };
+      if (this.editingId) payload.datasource_id = this.editingId;
+      ajax('POST', '/api/database/datasources/test', payload, r => {
         this.testingForm = false;
         if (r.code === 200) ElementPlus.ElMessage.success('连接成功');
         else ElementPlus.ElMessage.error(r.msg || '连接失败');

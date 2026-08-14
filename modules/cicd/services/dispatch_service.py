@@ -52,6 +52,20 @@ def _harbor_config_from_agent(agent):
     }
 
 
+def _frontend_web_dir(build, agent):
+    """前端发布目标：Agent 机 NFS web 挂载根 + 项目/环境/web 子路径。
+    例：frontend_mount_dir=/web, 项目 ysh, 环境 test → /web/ysh/test/web
+    后端或未配置挂载根返回空（Agent 跳过发布步骤）。
+    """
+    if build.project_type != 'frontend':
+        return ''
+    mount_root = (agent.frontend_mount_dir or '').strip().rstrip('/')
+    if not mount_root:
+        return ''
+    proj = build.project.name if build.project else ''
+    envn = build.environment.name if build.environment else ''
+    return f'{mount_root}/{proj}/{envn}/web'
+
 def assemble_task(build, agent):
     """组装下发给 Agent 的完整任务体（凭据仅此刻解密）"""
     # 解析步骤快照
@@ -75,6 +89,8 @@ def assemble_task(build, agent):
         'build_id': build.id,
         'build_no': build.build_no,
         'project_env': build_service.get_build_work_subdir(build),
+        # 镜像命名空间：{项目}-{环境}（不含 type），镜像路径 = {harbor}/{namespace}/{服务}:{tag}
+        'image_namespace': build_service.get_build_image_namespace(build),
         'project_type': build.project_type,
         'language': build.language or '',
         'branch': build.branch,
@@ -89,6 +105,9 @@ def assemble_task(build, agent):
             'dockerfile_content': steps.get('dockerfile_content', ''),
             'image_name': steps.get('image_name', ''),
             'image_tag': steps.get('image_tag', ''),
+            # 前端发布目标：Agent 机 NFS web 挂载根 + 项目/环境/web 子路径（空=跳过发布步骤）
+            # 例：frontend_mount_dir=/web, 项目 ysh, 环境 test → /web/ysh/test/web
+            'web_dir': _frontend_web_dir(build, agent),
         },
         'harbor': _harbor_config_from_agent(agent),
         'cancel_requested': build.cancel_requested or False,
@@ -104,7 +123,7 @@ def compute_score(agent, hb):
     计算 Agent 负载评分（越低越优）。
     容量比 + CPU + 内存 + 磁盘IO，各归一化到 0~1 后加权。
     """
-    load = int(agent_service.to_float(hb.get('load')))
+    load = agent_service._safe_running_count(hb.get('running_count'))
     cap_ratio = load / max(agent.max_concurrent or 1, 1)
     cpu = min(agent_service.to_float(hb.get('cpu_load')) / 100.0, 1.0)
     mem = min(agent_service.to_float(hb.get('mem_percent')) / 100.0, 1.0)
@@ -143,7 +162,7 @@ def pick_best_agent(logs=None):
             if logs is not None:
                 logs.append(f'  ✗ {a.name} → Docker 异常，跳过')
             continue
-        load = int(agent_service.to_float(hb.get('load')))
+        load = agent_service._safe_running_count(hb.get('running_count'))
         if load >= (a.max_concurrent or 1):
             if logs is not None:
                 logs.append(f'  ✗ {a.name} → 并发槽已满 ({load}/{a.max_concurrent})，跳过')
@@ -162,7 +181,7 @@ def pick_best_agent(logs=None):
         logs.append(f'[评分] {len(candidates)} 个候选节点（权重: 容量{W_CAPACITY} CPU{W_CPU} 内存{W_MEM} 磁盘{W_DISK}）')
     scored = []
     for a, hb in candidates:
-        load = int(agent_service.to_float(hb.get('load')))
+        load = agent_service._safe_running_count(hb.get('running_count'))
         score = compute_score(a, hb)
         scored.append((score, a, hb))
         if logs is not None:
@@ -184,13 +203,10 @@ def pick_best_agent(logs=None):
 def push_task(agent, build, logs=None):
     """
     加密推送任务到 Agent。成功返回 True 并置 build running。
-    先预占 current_load（防并发重复派发），失败回滚。
     """
     url = f'http://{agent.host}:{agent.port or 9090}/task'
     if logs is not None:
         logs.append(f'[推送] 目标 {agent.name} ({agent.host}:{agent.port or 9090})')
-    # 预占负载（Redis 原子 +1）
-    agent_service.incr_agent_load(agent.id, 1)
     try:
         payload = encrypt_request_bytes(assemble_task(build, agent))
         if logs is not None:
@@ -212,8 +228,6 @@ def push_task(agent, build, logs=None):
             return True
         raise RuntimeError(f'agent 响应无效: {result}')
     except Exception as e:
-        # 回滚负载（Redis 原子 -1）
-        agent_service.incr_agent_load(agent.id, -1)
         if logs is not None:
             logs.append(f'[失败] 推送异常: {e}')
         logger.warning(f'[Dispatch] 推送 {agent.name} 失败: {e}')
@@ -267,36 +281,47 @@ def dispatch_pending():
 
 
 def _dispatch_one(build):
-    """派发单个 pending 构建：重跑钉住原节点，新建选最优节点；不可用则挂起等待"""
+    """派发单个 pending 构建：同环境串行 + 重跑钉住原节点，新建选最优节点；不可用则挂起等待"""
     logs = []
+    # 同环境串行（第 3 条）：同 project_id + environment_id 同时只允许一个构建（Redis 原子锁，
+    # 防跨 worker 竞态）；即使存在空闲 Agent 也不派发；前一个完成（成功/失败/取消）后释放锁自动放行
+    if build.project_id:
+        env_lock = f'lock:env:{build.project_id}:{build.environment_id}'
+        # 锁值 = 本构建 build_no（owner），释放时比对防误删他人锁
+        if not set_if_absent(env_lock, value=build.build_no, ttl=21600000):
+            _wait_dispatch(build, logs, '同环境构建进行中，排队等待其完成（同环境串行）', status='same_env')
+            return
+        build._env_lock = env_lock
     if build.agent_id:
         # 重跑：必须回到原构建节点（构建目录在其磁盘上）
         logs.append(f'[触发] 构建 {build.build_no} 重跑进入调度队列（钉住原节点）')
         agent = BuildAgent.query.get(build.agent_id)
         if not agent or agent.disabled:
-            _wait_dispatch(build, logs, '原构建节点已禁用或不存在，等待节点恢复')
+            _wait_dispatch(build, logs, '原构建节点已禁用或不存在，等待节点恢复', status='node_down')
             return
         hb = agent_service.get_hb(agent)
         if hb is None:
-            _wait_dispatch(build, logs, f'原构建节点 {agent.name} 离线，等待节点上线')
+            _wait_dispatch(build, logs, f'原构建节点 {agent.name} 离线，等待节点上线', status='node_down')
             return
         if hb.get('docker_ok') != '1':
-            _wait_dispatch(build, logs, f'原构建节点 {agent.name} Docker 异常，等待恢复')
+            _wait_dispatch(build, logs, f'原构建节点 {agent.name} Docker 异常，等待恢复', status='node_down')
             return
-        load = int(agent_service.to_float(hb.get('load')))
+        load = agent_service._safe_running_count(hb.get('running_count'))
         if load >= (agent.max_concurrent or 1):
-            _wait_dispatch(build, logs, f'原构建节点 {agent.name} 并发槽已满 ({load}/{agent.max_concurrent})，排队等待')
+            _wait_dispatch(build, logs, f'原构建节点 {agent.name} 并发槽已满 ({load}/{agent.max_concurrent})，排队等待', status='agent_full')
             return
     else:
         # 新建：评分选最优节点
         logs.append(f'[触发] 构建 {build.build_no} 进入调度队列')
         agent = pick_best_agent(logs)
         if not agent:
-            _wait_dispatch(build, logs, '无可用节点（无在线节点/Docker 异常/全部繁忙），排队等待')
+            _wait_dispatch(build, logs, '无可用节点（无在线节点/Docker 异常/全部繁忙），排队等待', status='agent_full')
             return
 
     # 跨 worker 原子领取：防并发派发同一构建（Agent poll 领取/其他 worker 已处理则跳过）
     if not set_if_absent(f'build:claim:{build.id}', value=f'dispatch-{agent.name}', ttl=60000):
+        # 未领取成功：释放已获取的同环境锁（避免残留）
+        _release_env_lock(build)
         return
     ok = push_task(agent, build, logs)
     slog = _active_log(build)
@@ -304,7 +329,8 @@ def _dispatch_one(build):
         slog.status = 'dispatched'
         slog.selected_agent = agent.name
     else:
-        # 推送失败：保持 pending 挂起，等待下次心跳重试
+        # 推送失败：保持 pending 挂起，等待下次心跳重试；释放同环境锁（本次未成功持锁）
+        _release_env_lock(build)
         logs.append(f'[等待] 推送到 {agent.name} 失败，排队等待重试')
         slog.status = 'no_agent'
     slog.detail_logs = '\n'.join(logs)
@@ -313,11 +339,29 @@ def _dispatch_one(build):
     cache_delete(f'build:claim:{build.id}')
 
 
-def _wait_dispatch(build, logs, reason):
-    """无可用节点：任务保持 pending 挂起，复用同一条等待态调度日志（防刷屏）"""
+def _release_env_lock(build):
+    """释放同环境锁（比对 owner=build_no，防误删其他构建持有的锁）"""
+    key = getattr(build, '_env_lock', None)
+    if not key:
+        return
+    from core.redis_client import cache_get, cache_delete as _cd
+    try:
+        if cache_get(key) == build.build_no:
+            _cd(key)
+    except Exception as e:
+        logger.warning('[Dispatch] 释放同环境锁失败 %s: %s', key, e)
+    build._env_lock = None
+
+
+def _wait_dispatch(build, logs, reason, status='no_agent'):
+    """任务保持 pending 挂起，复用同一条等待态调度日志（防刷屏）。
+    status 排队原因分类：same_env=同环境等待 / agent_full=等待Agent释放 / node_down=等待原节点恢复 / no_agent=无节点"""
+    # 若已获取同环境锁但本次未能成功派发（node_down/agent_full/推送失败等提前返回路径），必须释放锁，
+    # 否则同环境锁残留会阻塞该环境后续所有构建（最长 TTL 6h）
+    _release_env_lock(build)
     logs.append(f'[等待] {reason}')
     slog = _active_log(build)
-    slog.status = 'no_agent'
+    slog.status = status
     slog.detail_logs = '\n'.join(logs)
     db.session.commit()
     logger.info(f'[Dispatch] 构建#{build.id} 挂起等待：{reason}')
@@ -327,7 +371,7 @@ def _active_log(build):
     """获取/创建该构建当前等待态的调度日志：复用 dispatching/no_agent 记录，避免每次心跳新建"""
     slog = ScheduleLog.query.filter(
         ScheduleLog.build_id == build.id,
-        ScheduleLog.status.in_(['dispatching', 'no_agent']),
+        ScheduleLog.status.in_(['dispatching', 'no_agent', 'same_env', 'agent_full', 'node_down']),
     ).order_by(ScheduleLog.created_at.desc()).first()
     if not slog:
         slog = ScheduleLog(

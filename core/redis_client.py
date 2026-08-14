@@ -27,10 +27,27 @@ _DOWN_WINDOW = 5  # 故障后快速降级窗口（秒）
 
 
 def _config(key, default=None):
+    # 后台线程（binlog 监听等）无 app context：优先用 init_app 固化的配置
+    if key in _CFG:
+        return _CFG[key]
     try:
-        return current_app.config.get(key, default)
+        val = current_app.config.get(key, default)
+        if key in _CFG_KEYS:
+            _CFG[key] = val  # 有 context 时回写固化，供无 context 线程使用
+        return val
     except Exception:
-        return default
+        return _CFG.get(key, default)
+
+
+_CFG = {}
+_CFG_KEYS = ('REDIS_ENABLED', 'REDIS_URL')
+
+
+def init_app(app):
+    """应用初始化时固化 Redis 连接配置（供无 app context 的后台线程使用）"""
+    with app.app_context():
+        for k in _CFG_KEYS:
+            _CFG[k] = app.config.get(k, _CFG.get(k))
 
 
 def _build_client():

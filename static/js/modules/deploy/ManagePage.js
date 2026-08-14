@@ -13,6 +13,11 @@ const ManagePage = {
           </el-radio-group>
         </div>
         <div class="header-actions" style="display:flex;align-items:center;gap:12px">
+          <!-- 前后端构建视图切换：构建状态/最近构建/构建按钮随之联动 -->
+          <el-radio-group v-if="!showDeleted" v-model="buildViewType" size="small">
+            <el-radio-button label="backend">后端</el-radio-button>
+            <el-radio-button label="frontend">前端</el-radio-button>
+          </el-radio-group>
           <el-radio-group v-model="showDeleted" size="small" @change="onTabChange">
             <el-radio-button :label="false">运行中 ([[ runningCount ]])</el-radio-button>
             <el-radio-button v-if="$auth.hasPermission('op:recycle_admin')" :label="true">回收站 ([[ deletedCount ]])</el-radio-button>
@@ -53,28 +58,28 @@ const ManagePage = {
         </el-table-column>
         <el-table-column v-if="!showDeleted" label="构建状态" width="90" align="center">
           <template #default="scope">
-            <el-tag v-if="scope.row.last_build" :type="buildStatusType(scope.row.last_build.status)" size="small"
-                    style="cursor:pointer" @click="openProgressDrawer(scope.row.last_build)">
-              [[ buildStatusText(scope.row.last_build.status) ]]
+            <el-tag v-if="curBuild(scope.row)" :type="buildStatusType(curBuild(scope.row).status)" size="small"
+                    style="cursor:pointer" @click="openProgressDrawer(curBuild(scope.row))">
+              [[ buildStatusText(curBuild(scope.row).status) ]]
             </el-tag>
             <span v-else style="color:#c0c4cc">-</span>
           </template>
         </el-table-column>
         <el-table-column v-if="!showDeleted" label="最后分支" width="120">
           <template #default="scope">
-            <span v-if="scope.row.last_build" style="font-size:12px;font-family:monospace">[[ scope.row.last_build.branch ]]</span>
+            <span v-if="curBuild(scope.row)" style="font-size:12px;font-family:monospace">[[ curBuild(scope.row).branch ]]</span>
             <span v-else style="color:#c0c4cc">-</span>
           </template>
         </el-table-column>
         <el-table-column v-if="!showDeleted" label="执行人" width="90" align="center">
           <template #default="scope">
-            <span v-if="scope.row.last_build" style="font-size:12px">[[ scope.row.last_build.triggered_by ]]</span>
+            <span v-if="curBuild(scope.row)" style="font-size:12px">[[ curBuild(scope.row).triggered_by ]]</span>
             <span v-else style="color:#c0c4cc">-</span>
           </template>
         </el-table-column>
         <el-table-column v-if="!showDeleted" label="构建时间" width="150">
           <template #default="scope">
-            <span v-if="scope.row.last_build" style="font-size:12px;color:#909399">[[ scope.row.last_build.created_at ]]</span>
+            <span v-if="curBuild(scope.row)" style="font-size:12px;color:#909399">[[ curBuild(scope.row).created_at ]]</span>
             <span v-else style="color:#c0c4cc">-</span>
           </template>
         </el-table-column>
@@ -87,7 +92,7 @@ const ManagePage = {
           <template #default="scope">
             <template v-if="!showDeleted">
               <el-button type="primary" size="small" link @click="showDetail(scope.row)">详情</el-button>
-              <el-button v-if="$auth.hasPermission('op:cicd_build')" type="warning" size="small" link @click="openBuildDialog(scope.row)">构建</el-button>
+              <el-button v-if="$auth.hasPermission('op:cicd_build')" type="warning" size="small" link @click="openBuildDialog(scope.row, buildViewType)">构建</el-button>
               <el-button v-if="$auth.hasPermission('op:recycle')" type="danger" size="small" link @click="confirmRecycle(scope.row)">回收</el-button>
             </template>
             <template v-else>
@@ -217,35 +222,84 @@ const ManagePage = {
       </template>
     </el-dialog>
 
-    <!-- 构建弹窗 -->
-    <el-dialog v-model="buildDialogVisible" :title="'构建 - ' + (buildEnv?.project || '') + '-' + (buildEnv?.environment || '')" width="480px" :close-on-click-modal="false">
-      <el-form label-width="80px">
-        <el-form-item label="分支">
-          <el-select v-model="buildBranch" filterable allow-create default-first-option
-                     :filter-method="filterBranches" @visible-change="onBranchDrop"
-                     :loading="branchLoading" loading-text="加载分支中..."
-                     placeholder="选择或输入分支" style="width:100%">
-            <el-option-group v-if="recentBranchesFiltered.length" label="最近使用">
-              <el-option v-for="b in recentBranchesFiltered" :key="'recent-' + b" :label="b" :value="b" />
-            </el-option-group>
-            <el-option-group label="全部分支">
-              <el-option v-for="b in branchFiltered" :key="b" :label="b" :value="b" />
-            </el-option-group>
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="serviceOptions.length > 1" label="构建范围">
-          <el-switch v-model="buildAllServices" active-text="全部服务" inline-prompt style="margin-bottom:8px" />
-          <template v-if="!buildAllServices">
-            <div style="display:flex;flex-direction:column;gap:8px;width:100%">
-              <div v-for="s in serviceOptions" :key="s" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border:1px solid #e4e7ed;border-radius:4px">
-                <span style="font-family:monospace;font-size:13px">[[ s ]]</span>
-                <el-switch v-model="serviceToggles[s]" />
+    <!-- 构建弹窗：两栏对称（左分支 / 右构建范围），与服务信息页快捷部署一致 -->
+    <el-dialog v-model="buildDialogVisible" :title="'构建' + (buildType === 'frontend' ? '前端' : '后端') + ' - ' + (buildEnv?.project || '') + '-' + (buildEnv?.environment || '')"
+               width="810px" top="10vh" class="build-dialog" :close-on-click-modal="false">
+      <div class="build-two-col">
+        <!-- 左栏：分支 -->
+        <div class="build-col">
+          <div class="build-col-head">
+            <span class="build-col-title">分支</span>
+            <el-radio-group v-model="buildType" size="small" @change="onDeployTypeChange">
+              <el-radio-button value="backend">后端</el-radio-button>
+              <el-radio-button value="frontend">前端</el-radio-button>
+            </el-radio-group>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <el-switch v-model="branchTreeMode" size="small" active-text="按目录展示" />
+            <span style="color:#c0c4cc;font-size:12px">共 [[ branchOptions.length ]] 个分支</span>
+          </div>
+          <!-- 平铺模式：输入框选择/过滤 + 直接展示全部分支（最近分支分组） -->
+          <div v-if="!branchTreeMode" class="svc-branch-pane">
+            <el-input v-model="branchSearch"
+                      :placeholder="'默认分支：' + buildBranch" clearable size="small"
+                      @keyup.enter="applyBranchInput" @focus="onBranchFocus" style="margin-bottom:6px" />
+            <div class="svc-branch-list">
+              <div v-if="branchLoading" class="svc-col-loading">加载分支中...</div>
+              <div v-else>
+                <template v-if="branchRecentList.length">
+                  <div class="svc-branch-group">最近分支</div>
+                  <div v-for="b in branchRecentList" :key="'r-' + b" class="svc-branch-item"
+                       :class="{ active: buildBranch === b }" @click="buildBranch = b" :title="b">
+                    <span class="svc-branch-recent-tag">最近</span>[[ b ]]
+                  </div>
+                </template>
+                <div v-if="branchAllList.length" class="svc-branch-group">全部分支</div>
+                <div v-for="b in branchAllList" :key="'a-' + b" class="svc-branch-item"
+                     :class="{ active: buildBranch === b }" @click="buildBranch = b" :title="b">[[ b ]]</div>
+                <div v-if="!branchRecentList.length && !branchAllList.length" class="svc-col-empty">无匹配分支</div>
               </div>
             </div>
-            <div style="color:#909399;font-size:12px;margin-top:4px">仅对开启的服务执行产物收集 / Docker Build / Push，未开启的服务自动跳过</div>
+          </div>
+          <!-- 目录树模式：直接展示层级树 -->
+          <div v-else class="svc-branch-tree">
+            <el-input v-model="branchTreeFilter" placeholder="搜索分支" clearable size="small" style="margin-bottom:6px" />
+            <div v-if="branchLoading" class="svc-col-loading">加载分支中...</div>
+            <el-tree v-else :data="branchTree" node-key="key" :props="{ label: 'label', children: 'children' }"
+                     highlight-current :filter-node-method="filterBranchTree" ref="branchTreeRef"
+                     @node-click="onBranchNodeClick">
+              <template #default="{ data }">
+                <span v-if="data.isBranch" style="font-family:monospace;font-size:13px">[[ data.branch ]]</span>
+                <span v-else style="font-weight:500;color:#303133">[[ data.label ]]</span>
+              </template>
+            </el-tree>
+          </div>
+        </div>
+        <!-- 右栏：构建范围 -->
+        <div class="build-col">
+          <div class="build-col-head">
+            <span class="build-col-title">构建范围</span>
+            <span v-if="buildType === 'backend'" style="color:#909399;font-size:12px">全部勾选</span>
+          </div>
+          <template v-if="buildType === 'backend'">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+              <span style="color:#606266;font-size:13px">已选 [[ selectedServiceCount ]] / [[ serviceOptions.length ]] 个服务</span>
+              <el-switch :model-value="allServicesChecked" @change="toggleAllServices" active-text="全部勾选" size="small" />
+            </div>
+            <div class="svc-service-list">
+              <div v-if="!serviceOptions.length" class="svc-col-loading">加载服务中...</div>
+              <div v-for="s in serviceOptions" :key="s" class="svc-service-item">
+                <span style="font-family:monospace;font-size:13px">[[ s ]]</span>
+                <el-switch v-model="serviceToggles[s]" size="small" />
+              </div>
+            </div>
+            <div style="color:#c0c4cc;font-size:11.5px;margin-top:8px">仅对开启的服务执行产物收集 / Docker Build / Push，未开启的服务自动跳过</div>
           </template>
-        </el-form-item>
-      </el-form>
+          <div v-else style="color:#909399;font-size:12px;padding:60px 0;text-align:center">
+            前端构建固定 dist 产物，无服务范围选择
+          </div>
+        </div>
+      </div>
       <template #footer>
         <el-button @click="buildDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="buildTriggering" @click="executeBuild">触发构建</el-button>
@@ -295,7 +349,7 @@ const ManagePage = {
     </el-drawer>
 
     <!-- 详情对话框 -->
-    <el-dialog v-model="detailVisible" :title="detailEnv + ' 详细信息'" width="800px" top="5vh">
+    <el-dialog v-model="detailVisible" :title="detailEnv + ' 详细信息'" width="800px" class="manage-dialog">
       <div v-if="detailData">
         <el-tabs v-model="activeTab" @tab-change="onDetailTabChange">
           <el-tab-pane :label="'服务 (' + (detailData.deployments?.length || 0) + ')'" name="service">
@@ -346,7 +400,7 @@ const ManagePage = {
             <el-empty v-else description="暂无数据" :image-size="60" />
           </el-tab-pane>
 
-          <el-tab-pane label="构建记录" name="builds">
+          <el-tab-pane label="前端构建记录" name="builds_frontend">
             <el-table v-if="envBuilds.length" :data="envBuilds" stripe border size="small">
               <el-table-column prop="build_no" label="编号" width="170" />
               <el-table-column prop="branch" label="分支" width="120" show-overflow-tooltip />
@@ -366,7 +420,30 @@ const ManagePage = {
                 </template>
               </el-table-column>
             </el-table>
-            <el-empty v-else description="暂无构建记录" :image-size="60" />
+            <el-empty v-else description="暂无前端构建记录" :image-size="60" />
+          </el-tab-pane>
+
+          <el-tab-pane label="后端构建记录" name="builds_backend">
+            <el-table v-if="envBuilds.length" :data="envBuilds" stripe border size="small">
+              <el-table-column prop="build_no" label="编号" width="170" />
+              <el-table-column prop="branch" label="分支" width="120" show-overflow-tooltip />
+              <el-table-column label="状态" width="80" align="center">
+                <template #default="s">
+                  <el-tag :type="buildStatusType(s.row.status)" size="small">[[ buildStatusText(s.row.status) ]]</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="triggered_by" label="执行人" width="80" align="center" />
+              <el-table-column label="耗时" width="70" align="center">
+                <template #default="s">[[ s.row.duration ? Math.round(s.row.duration) + 's' : '-' ]]</template>
+              </el-table-column>
+              <el-table-column prop="created_at" label="创建时间" width="155" />
+              <el-table-column label="操作" width="80" align="center">
+                <template #default="s">
+                  <el-button type="primary" size="small" link @click="viewBuildLog(s.row)">日志</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-else description="暂无后端构建记录" :image-size="60" />
           </el-tab-pane>
         </el-tabs>
       </div>
@@ -404,6 +481,8 @@ const ManagePage = {
       loading: false,
       importing: false,
       detailVisible: false,
+      detailBuildType: 'backend',  // 详情构建记录 tab 的 前后端 过滤
+      _detailEnvId: null,
       detailEnv: '',
       detailData: null,
       serviceFilter: '',
@@ -441,14 +520,18 @@ const ManagePage = {
       sortOrder: 'asc',
       // 构建弹窗
       buildDialogVisible: false,
+      buildType: 'backend',  // backend / frontend（构建弹窗实际类型）
+      buildViewType: 'backend',  // 页面构建视图切换：后端/前端（构建状态/构建按钮联动）
       buildEnv: null,
       buildBranch: '',
+      branchTreeMode: false,
+      branchTreeFilter: '',
+      branchSearch: '',
       branchOptions: [],
       branchFiltered: [],
       branchLoading: false,
       recentBranches: [],
       recentBranchesFiltered: [],
-      buildAllServices: true,
       serviceToggles: {},
       serviceOptions: [],
       buildTriggering: false,
@@ -468,8 +551,58 @@ const ManagePage = {
     };
   },
   computed: {
-    sortedEnvs() {
-      var list = this.envs.slice();
+    // 全部勾选状态：所有服务开关都开启时为 true（供「全部勾选」开关联动）
+    allServicesChecked() {
+      return this.serviceOptions.length > 0 && this.serviceOptions.every(s => this.serviceToggles[s]);
+    },
+    selectedServiceCount() {
+      return this.serviceOptions.filter(s => this.serviceToggles[s]).length;
+    },
+    // 输入框关键字：仅手动输入时过滤（回填为 placeholder，不参与过滤）
+    branchKw() {
+      return (this.branchSearch || '').trim().toLowerCase();
+    },
+    branchRecentList() {
+      const kw = this.branchKw;
+      const list = kw
+        ? this.recentBranches.filter(b => this.subsequenceMatch(b.toLowerCase(), kw))
+        : this.recentBranches.slice();
+      return list.slice(0, 5);
+    },
+    branchAllList() {
+      const kw = this.branchKw;
+      const recent = this.recentBranches;
+      const list = kw
+        ? this.branchOptions.filter(b => this.subsequenceMatch(b.toLowerCase(), kw))
+        : this.branchOptions.slice();
+      return list.filter(b => !recent.includes(b));
+    },
+    // 分支目录树：按 / 分层构建
+    branchTree() {
+      const map = {};
+      const tree = [];
+      (this.branchOptions || []).forEach(b => {
+        const parts = b.split('/');
+        let level = tree;
+        let path = '';
+        parts.forEach((p, i) => {
+          path = path ? path + '/' + p : p;
+          if (i === parts.length - 1) {
+            level.push({ key: 'branch-' + b, label: b, branch: b, isBranch: true });
+            return;
+          }
+          let node = map[path];
+          if (!node) {
+            node = { key: 'dir-' + path, label: p, children: [] };
+            map[path] = node;
+            level.push(node);
+          }
+          level = node.children;
+        });
+      });
+      return tree;
+    },
+    sortedEnvs() {      var list = this.envs.slice();
       var field = this.sortField;
       var order = this.sortOrder;
       if (!field) return list;
@@ -543,6 +676,11 @@ const ManagePage = {
           pass: cred?.pass || '-',
         };
       });
+    },
+  },
+  watch: {
+    branchTreeFilter(v) {
+      this.$refs.branchTreeRef && this.$refs.branchTreeRef.filter(v);
     },
   },
   methods: {
@@ -911,25 +1049,54 @@ const ManagePage = {
       try {
         localStorage.setItem(this._buildPrefKey(this.buildEnv.id), JSON.stringify({
           branch: this.buildBranch,
-          all_services: this.buildAllServices,
           services: enabled
         }));
       } catch (e) { /* 忽略存储异常（隐私模式等） */ }
     },
-    openBuildDialog(row) {
+    // 当前视图类型的最近构建（返回体 builds 分层：{backend, frontend}；元数据在顶层不变）
+    curBuild(row) {
+      return ((row.builds || {})[this.buildViewType] || null);
+    },
+    // 点击构建：先校验该类型模板配置并预取分支，成功后才弹出分支选择框（避免未配置时弹窗一闪而过）
+    openBuildDialog(row, type) {
+      this.buildType = (type === 'frontend') ? 'frontend' : 'backend';
       this.buildEnv = row;
-      // 恢复上次构建配置（localStorage 按环境记忆：分支/全部或部分/勾选服务），无记录时回退到最后一次构建分支
+      if (!row.project_id) { ElementPlus.ElMessage.warning('缺少项目信息'); return; }
+
+      // 立即弹窗（git ls-remote 可能 1s+，分支异步加载不阻塞）
+      this._initBuildDialog(row);
+      this.buildDialogVisible = true;
+      if (this.buildType === 'backend') this._loadBuildServices(row);
+      // 分支异步加载：期间弹窗已可操作，显示 loading
+      this.branchLoading = true;
+      ajax('GET', '/api/cicd/builds/branches?project_id=' + row.project_id + '&project_type=' + this.buildType, null, (r) => {
+        this.branchLoading = false;
+        if (r.code === 200) {
+          let branches = r.data || [];
+          const lastBranch = (row.last_build && row.last_build.branch) || '';
+          if (lastBranch && !branches.includes(lastBranch)) branches.unshift(lastBranch);
+          this.branchOptions = branches;
+          this.branchFiltered = branches;
+        } else if (r.code === 400) {
+          // 该类型未配置模板/无 Git 地址：收起弹窗并提示
+          this.buildDialogVisible = false;
+          ElementPlus.ElMessage.error(r.message || r.msg || '该项目未配置模板');
+        } else {
+          // 网络/服务异常：保留弹窗，分支可手动输入
+          ElementPlus.ElMessage.error((r.message || r.msg || '获取分支失败') + '，可手动输入分支');
+        }
+      }, () => { this.branchLoading = false; });
+    },
+
+    // 初始化构建弹窗状态（恢复上次偏好 + 最近使用分支）
+    _initBuildDialog(row) {
       const pref = this._buildPrefLoad(row.id);
       const lastBranch = (row.last_build && row.last_build.branch) || '';
       this.buildBranch = (pref && pref.branch) || lastBranch || 'master';
-      this.branchOptions = [];
-      this.branchFiltered = [];
       this.recentBranches = [];
       this.recentBranchesFiltered = [];
-      this.buildAllServices = pref ? !!pref.all_services : true;
       this.serviceToggles = {};
       this.serviceOptions = [];
-      this.buildDialogVisible = true;
       // 加载最近构建分支（下拉“最近使用”分组，按时间降序取5个）
       if (row.id) {
         ajax('GET', '/api/cicd/builds?environment_id=' + row.id, null, (r) => {
@@ -944,40 +1111,28 @@ const ManagePage = {
           }
         });
       }
-      // 加载服务列表（用于部分构建选择，默认全部开启；上次为部分构建时恢复勾选）
-      if (row.project_id) {
-        ajax('GET', '/api/cicd/builds/services?project_id=' + row.project_id, null, (r) => {
-          if (r.code === 200) {
-            this.serviceOptions = r.data || [];
-            const toggles = {};
-            this.serviceOptions.forEach(s => { toggles[s] = true; });
-            if (!this.buildAllServices && pref && Array.isArray(pref.services)) {
-              // 部分构建：恢复上次勾选的服务，新增服务默认不勾选
-              this.serviceOptions.forEach(s => { toggles[s] = pref.services.includes(s); });
+    },
+
+    // 加载服务列表（后端部分构建选择；默认全部开启；上次为部分构建时恢复勾选）
+    _loadBuildServices(row) {
+      const pref = this._buildPrefLoad(row.id);
+      ajax('GET', '/api/cicd/builds/services?project_id=' + row.project_id, null, (r) => {
+        if (r.code === 200) {
+          this.serviceOptions = r.data || [];
+          const toggles = {};
+          if (pref && Array.isArray(pref.services) && pref.services.length) {
+            // 恢复上次勾选的服务；新增服务不在上次列表，默认不勾选
+            this.serviceOptions.forEach(s => { toggles[s] = pref.services.includes(s); });
+            // 上次列表与现服务无交集（异常数据）时回退全部勾选
+            if (!this.serviceOptions.some(s => toggles[s])) {
+              this.serviceOptions.forEach(s => { toggles[s] = true; });
             }
-            this.serviceToggles = toggles;
-          }
-        });
-      }
-      // 加载远程分支列表
-      if (row.project_id) {
-        this.branchLoading = true;
-        ajax('GET', '/api/cicd/builds/branches?project_id=' + row.project_id, null, (r) => {
-          this.branchLoading = false;
-          if (r.code === 200) {
-            let branches = r.data || [];
-            // 最近使用的分支置顶（优先展示，确保下拉第一项即为上次分支）
-            if (lastBranch) {
-              branches = branches.filter(b => b !== lastBranch);
-              branches.unshift(lastBranch);
-            }
-            this.branchOptions = branches;
-            this.branchFiltered = this.branchOptions;
           } else {
-            ElementPlus.ElMessage.warning(r.message || '该项目暂未配置模板');
+            this.serviceOptions.forEach(s => { toggles[s] = true; });
           }
-        }, () => { this.branchLoading = false; });
-      }
+          this.serviceToggles = toggles;
+        }
+      });
     },
     filterBranches(query) {
       const kw = (query || '').trim().toLowerCase();
@@ -995,14 +1150,47 @@ const ManagePage = {
         this.recentBranchesFiltered = this.recentBranches;
       }
     },
+    // 全部勾选/取消全部：一键开关所有服务
+    toggleAllServices(val) {
+      this.serviceOptions.forEach(s => { this.serviceToggles[s] = !!val; });
+    },
+    // 弹窗内类型切换：重开构建弹窗（重拉分支/服务）
+    onDeployTypeChange() {
+      if (!this.buildEnv || !this.buildEnv.id) return;
+      this.buildViewType = this.buildType;
+      this.openBuildDialog(this.buildEnv, this.buildType);
+    },
+    // 点击输入框：清空默认分支提示，开始输入即过滤
+    onBranchFocus() {
+      this.branchSearch = '';
+    },
+    // 输入框回车：直接采用输入值作为分支
+    applyBranchInput() {
+      const v = (this.branchSearch || '').trim();
+      if (v) this.buildBranch = v;
+    },
+    // 该分支是否为最近构建选择过的分支
+    isRecentBranch(b) {
+      return this.recentBranches.includes(b);
+    },
+    // 树形过滤
+    filterBranchTree(value, data) {
+      if (!value) return true;
+      if (data.isBranch) return data.branch.toLowerCase().includes(value.toLowerCase());
+      return (data.children || []).some(c => this.filterBranchTree(value, c));
+    },
+    // 树形选择分支：叶子设置 buildBranch；目录节点自动展开/收起
+    onBranchNodeClick(data) {
+      if (data && data.isBranch) this.buildBranch = data.branch;
+    },
     executeBuild() {
       if (!this.buildBranch.trim()) {
         ElementPlus.ElMessage.warning('请选择或输入分支');
         return;
       }
-      // 部分构建模式：收集开启的服务
+      // 构建范围：始终以开启的服务为准（去掉「全部服务」开关后，服务列表常显、逐个开关控制）
       let services = [];
-      if (!this.buildAllServices && this.serviceOptions.length > 1) {
+      if (this.serviceOptions.length > 1) {
         services = this.serviceOptions.filter(s => this.serviceToggles[s]);
         if (!services.length) {
           ElementPlus.ElMessage.warning('请至少开启一个要构建的服务');
@@ -1017,7 +1205,8 @@ const ManagePage = {
         project_id: env.project_id,
         environment_id: env.id,
         branch: this.buildBranch.trim(),
-        services: services
+        services: services,
+        project_type: this.buildType
       }, (res) => {
         this.buildTriggering = false;
         if (res.code === 200) {
@@ -1208,7 +1397,7 @@ const ManagePage = {
       this.openProgressDrawer(build);
     },
     loadEnvBuilds(envId) {
-      ajax('GET', '/api/cicd/builds?environment_id=' + envId, null, (res) => {
+      ajax('GET', '/api/cicd/builds?environment_id=' + envId + '&project_type=' + (this.detailBuildType || 'backend'), null, (res) => {
         this.envBuilds = (res.code === 200) ? (res.data || []) : [];
       });
     },
@@ -1227,8 +1416,9 @@ const ManagePage = {
       return 'wait';
     },
     onDetailTabChange(tab) {
-      if (tab === 'builds' && this._detailEnvId) {
-        this.loadEnvBuilds(this._detailEnvId);
+      if (tab === 'builds_frontend' || tab === 'builds_backend') {
+        this.detailBuildType = (tab === 'builds_frontend') ? 'frontend' : 'backend';
+        if (this._detailEnvId) this.loadEnvBuilds(this._detailEnvId);
       }
     }
   },

@@ -7,12 +7,26 @@ from flask import g, request, jsonify
 from core.response import error_response
 
 
+# 超管权限集：系统管理分组下全部菜单权限（用户/角色/设置/审计），其余业务接口一律 403
+SUPER_ADMIN_PERMS = frozenset({
+    'page:users', 'op:users',
+    'page:roles', 'op:roles',
+    'page:settings', 'op:settings',
+    'page:audit',
+})
+
+
 def require_permission(perm_code):
     """操作权限校验装饰器（全局共享）"""
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
             user = getattr(g, 'current_user', None)
+            # 超级管理员（super_admins 独立账号）：仅放行系统设置权限，其余与无权限一致 403
+            if user and getattr(user, 'is_super_admin', False):
+                if perm_code in SUPER_ADMIN_PERMS:
+                    return f(*args, **kwargs)
+                return error_response('无操作权限', 403)
             if user and user.role:
                 perms = user.role.permissions_list()
                 if perm_code in perms:
@@ -28,6 +42,11 @@ def require_any_permission(*perm_codes):
         @wraps(f)
         def wrapper(*args, **kwargs):
             user = getattr(g, 'current_user', None)
+            # 超级管理员（super_admins 独立账号）：仅放行系统设置权限
+            if user and getattr(user, 'is_super_admin', False):
+                if any(p in SUPER_ADMIN_PERMS for p in perm_codes):
+                    return f(*args, **kwargs)
+                return error_response('无操作权限', 403)
             if user and user.role:
                 perms = user.role.permissions_list()
                 if any(p in perms for p in perm_codes):
@@ -69,6 +88,12 @@ def validate_token(req):
     if user is None:
         return None
 
+    # 超级管理员（super_admins 独立账号）：users 表无此记录，不实时查 DB；
+    # 本地会话按 TTL 有效（禁用/改密由管理操作删会话兜底）
+    if user.is_super_admin:
+        refresh_session(token_str)
+        return user
+
     # 实时原子校验（内网规模每次请求一次单行查询，代价可接受）
     from sqlalchemy.orm import joinedload
     from modules.system.models import User
@@ -91,7 +116,9 @@ def validate_token(req):
 # 白名单：无需 Token 即可访问的 API 路径
 AUTH_WHITELIST = [
     '/api/auth/login',
+    '/api/auth/login-2fa',
     '/api/auth/admin-login',
+    '/api/auth/logout',  # 退出登录：Token 已过期/无效也返回成功（不应提示"Token已过期"）
 ]
 # 白名单前缀
 AUTH_WHITELIST_PREFIXES = [
@@ -123,4 +150,19 @@ def init_auth(app):
 
         # 将用户对象存入 g，供后续接口使用
         g.current_user = user
+
+        # 超级管理员（super_admins）仅放行系统设置 + 认证自身接口 + 菜单：
+        # 无权限装饰器的接口（如审计等）也在此全局拦截，保证超管只有系统设置权限
+        if getattr(user, 'is_super_admin', False) and not _super_admin_allowed(request.path):
+            return jsonify({'code': 403, 'msg': '无操作权限', 'data': None}), 403
         return None
+
+
+def _super_admin_allowed(path):
+    """超管白名单：系统管理分组接口（用户/角色/设置/审计）+ 首页（登录即可见，无权限码）+ 认证自身 + 菜单"""
+    if path in ('/api/auth/me', '/api/auth/logout', '/api/auth/change-password', '/api/menus'):
+        return True
+    for prefix in ('/api/users/', '/api/roles/', '/api/settings/', '/api/audit/', '/api/dashboard/'):
+        if path.startswith(prefix):
+            return True
+    return False

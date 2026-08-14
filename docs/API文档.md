@@ -133,7 +133,9 @@ GET /health
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/deploy/execute` | 执行部署（新建/复制模式） |
+| POST | `/api/deploy/execute/project` | 新增项目部署（op:deploy_project） |
+| POST | `/api/deploy/execute/env` | 新增环境部署（op:deploy_env） |
+| POST | `/api/deploy/execute/service` | 新增服务部署（op:deploy_service） |
 | GET | `/api/deploy/stream` | 部署进度 SSE |
 | GET | `/api/deploy/status` | 部署状态 |
 | POST | `/api/deploy/recycle` | 回收环境 |
@@ -235,17 +237,20 @@ Agent 与 Master 使用 AES-256-GCM + gzip 加密，身份为节点 name，共�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/collation/instances` | 实例列表（自动 + 自定义） |
-| GET | `/api/collation/databases` | 实例数据库列表 |
-| GET | `/api/collation/tables/<database>` | 表列表 |
-| GET | `/api/collation/columns/<database>/<table>` | 字段列表 |
-| GET | `/api/collation/column_issues/<database>` | 字段问题清单 |
-| GET/POST | `/api/collation/datasources` | 自定义数据源列表/创建 |
-| POST/DELETE | `/api/collation/datasources/<id>` | 更新/删除数据源 |
-| POST | `/api/collation/datasources/test` | 连接测试 |
-| POST | `/api/collation/fix_database_async` / `fix_table_async` / `fix_all_tables_async` / `fix_columns_async` | 异步修复任务 |
-| GET | `/api/collation/stream?task_key=` | 修复进度 SSE |
-| GET | `/api/collation/report/<database>` | 校验报告下载 |
+| GET | `/api/database/instances` | 实例列表（自动 + 自定义） |
+| GET | `/api/database/databases` | 实例数据库列表 |
+| GET | `/api/database/tables/<database>` | 表列表 |
+| GET | `/api/database/columns/<database>/<table>` | 字段列表 |
+| GET | `/api/database/column_issues/<database>` | 字段问题清单 |
+| GET/POST | `/api/database/datasources` | 自定义数据源列表/创建 |
+| POST/DELETE | `/api/database/datasources/<id>` | 更新/删除数据源 |
+| POST | `/api/database/datasources/test` | 连接测试 |
+| POST | `/api/database/fix_database_async` / `fix_table_async` / `fix_all_tables_async` / `fix_columns_async` | 异步修复任务 |
+| POST | `/api/database/compare_structure` | 表结构对比（源库→目标库） |
+| POST | `/api/database/sync_structure_sql` | 预览同步 SQL（不执行） |
+| POST | `/api/database/sync_structure_async` | 异步执行表结构同步 |
+| GET | `/api/database/stream?task_key=` | 修复/同步进度 SSE |
+| GET | `/api/database/report/<database>` | 校验报告下载 |
 
 ---
 

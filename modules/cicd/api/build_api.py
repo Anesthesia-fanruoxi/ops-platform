@@ -15,17 +15,20 @@ from modules.cicd.services import build_service
 
 @require_any_permission('page:cicd', 'op:cicd_build')
 def list_builds():
-    """构建列表（支持按 project/env/status 过滤）"""
+    """构建列表（支持按 project/env/status/project_type 过滤）"""
     q = Build.query
     project_id = request.args.get('project_id', type=int)
     environment_id = request.args.get('environment_id', type=int)
     status = request.args.get('status', '')
+    project_type = request.args.get('project_type', '')
     if project_id:
         q = q.filter_by(project_id=project_id)
     if environment_id:
         q = q.filter_by(environment_id=environment_id)
     if status:
         q = q.filter_by(status=status)
+    if project_type in ('backend', 'frontend'):
+        q = q.filter_by(project_type=project_type)
     builds = q.order_by(Build.created_at.desc()).limit(100).all()
     return success_response([b.to_dict() for b in builds])
 
@@ -38,11 +41,12 @@ def trigger_build():
     environment_id = data.get('environment_id')
     branch = data.get('branch', '')
     services = data.get('services') or []  # 选中的服务 basename 列表，空=构建全部
+    project_type = data.get('project_type', 'backend')  # backend / frontend
     if not project_id:
         return error_response('请选择项目', 400)
 
     triggered_by = g.current_user.display_name() if g.current_user else 'system'
-    build, err = build_service.trigger_build(project_id, environment_id, branch, triggered_by, services)
+    build, err = build_service.trigger_build(project_id, environment_id, branch, triggered_by, services, project_type)
     if err:
         return error_response(err, 400)
     return success_response(build.to_dict(), '构建已提交')
@@ -364,23 +368,77 @@ def _stream_deploy_log(build, follow):
 
 @require_permission('op:cicd_build')
 def list_branches():
-    """获取项目 Git 远程分支列表（用于构建弹窗下拉选择）"""
+    """获取项目 Git 远程分支列表（用于构建弹窗下拉选择；按构建类型取 configs 配置）"""
     project_id = request.args.get('project_id', type=int)
+    project_type = request.args.get('project_type', 'backend')
+    project_type = project_type if project_type in ('backend', 'frontend') else 'backend'
     if not project_id:
         return error_response('缺少 project_id', 400)
 
     template = CicdFlowTemplate.query.filter_by(project_id=project_id).first()
-    if not template or not template.git_url:
-        return error_response('该项目未配置 CI/CD 流程模板或 Git 地址', 400)
+    if not template:
+        return error_response('该项目未配置 CI/CD 流程模板', 400)
+    cfg = template.configs_dict().get(project_type) or {}
+    git_url = cfg.get('git_url') or ''
+    if not git_url:
+        type_name = '前端' if project_type == 'frontend' else '后端'
+        return error_response(f'模板未配置{type_name}的 Git 地址，请先在「流程模板」中完善{type_name}配置', 400)
 
     from modules.cicd.services.credential_service import list_git_branches
-    branches, err = list_git_branches(template.git_url, template.git_credential_id)
+    branches, err = list_git_branches(git_url, cfg.get('git_credential_id'))
     if err:
         return error_response(err, 502)
     return success_response(branches)
 
 
+def _build_current_step(build_no):
+    """返回构建当前正在执行的步骤名；无 running 步骤时取下一个 pending 步骤（等待开始），都没有则空串"""
+    try:
+        steps = build_service.get_build_steps(build_no) or {}
+        for st in steps.get('steps', []):
+            if st.get('status') == 'running':
+                return st.get('name') or ''
+        for st in steps.get('steps', []):
+            if st.get('status') == 'pending':
+                return st.get('name') or ''
+    except Exception:
+        pass
+    return ''
+
+
 @require_any_permission('page:cicd', 'op:cicd_build')
+def env_builds_stream(environment_id):
+    """
+    环境级构建状态 SSE：实时推送该环境进行中的构建（running/pending），
+    供服务信息页顶部显示「构建中」状态（即使构建是从环境信息页触发的）。
+    GET /api/cicd/builds/env/<environment_id>/stream?token=
+    每 5s 推送一次当前进行中构建列表（含当前步骤名），客户端断开自动停止。
+    """
+    import time
+    from flask import stream_with_context, Response
+
+    def generate():
+        while True:
+            builds = Build.query.filter(
+                Build.environment_id == environment_id,
+                Build.status.in_(('running', 'pending')),
+            ).order_by(Build.id.desc()).all()
+            items = [{
+                'id': b.id,
+                'build_no': b.build_no,
+                'status': b.status,
+                'project_type': b.project_type or 'backend',
+                'branch': b.branch or '',
+                'current_step': _build_current_step(b.build_no),
+            } for b in builds]
+            payload = json.dumps({'environment_id': environment_id, 'builds': items}, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
+            time.sleep(5)
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
 def list_services():
     """获取项目服务列表（模板服务目录的 basename，用于部分构建选择）"""
     project_id = request.args.get('project_id', type=int)
@@ -391,9 +449,15 @@ def list_services():
     if not template:
         return error_response('该项目未配置 CI/CD 流程模板', 400)
 
+    # 与构建触发同数据源：优先读 configs.backend.artifact_dirs（页面修改只更新 configs JSON），
+    # 顶层 artifact_dirs 为旧版兼容字段，仅作回退
+    backend_cfg = template.configs_dict().get('backend') or {}
+    artifact_dirs_raw = backend_cfg.get('artifact_dirs') or ''
+    dirs = [line.strip() for line in artifact_dirs_raw.splitlines() if line.strip()]
+
     # 只取服务目录的最后一级（basename），多级路径自动剔除，去重保序
     services = []
-    for d in template.get_artifact_dir_list():
+    for d in dirs:
         base = d.strip().rstrip('/').split('/')[-1]
         if base and base not in services:
             services.append(base)

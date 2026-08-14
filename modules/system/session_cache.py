@@ -56,8 +56,8 @@ class SessionUser:
         self.auth_source = data.get('auth_source', 'local')
         role = data.get('role') or {}
         self.role = _SessionRole(role.get('name'), role.get('permissions')) if role else None
-        # 超级管理员：角色驱动（拥有「超级管理员」内置角色）
-        self.is_super_admin = bool(self.role and self.role.name == '超级管理员')
+        # 超级管理员：优先取独立表标记（super_admins）；兼容旧会话（「超级管理员」角色驱动）
+        self.is_super_admin = bool(data.get('is_super_admin', False)) or bool(self.role and self.role.name == '超级管理员')
 
     def apply_real_time(self, db_user):
         """用 DB 实时数据覆盖会话快照（禁用状态 + 角色权限），供每次请求原子校验。
@@ -102,18 +102,21 @@ def save_session(token, user, expires_at, ttl):
         'user_id': user.id,
         'username': user.username,
         'nickname': user.nickname or '',
-        'role_id': user.role_id,
+        'role_id': getattr(user, 'role_id', None),
         'is_active': bool(user.is_active),
-        'auth_source': user.auth_source or 'local',
+        'auth_source': getattr(user, 'auth_source', None) or 'local',
+        'is_super_admin': bool(getattr(user, 'is_super_admin', False)),
         'role': {
-            'name': user.role.name if user.role else '',
-            'permissions': user.role.permissions_list() if user.role else [],
+            'name': getattr(user.role, 'name', '') if getattr(user, 'role', None) else '',
+            'permissions': getattr(user.role, 'permissions_list', lambda: [])() if getattr(user, 'role', None) else [],
         },
         'expires_at': expires_at.strftime('%Y-%m-%d %H:%M:%S'),
     }
     ok = cache_set_json(_token_key(token), payload, ttl=ttl)
     if ok:
         sadd(_user_tokens_key(user.id), token)
+        # 索引集与会话生命周期对齐：避免 token 过期后 set 永久驻留 Redis
+        expire(_user_tokens_key(user.id), ttl)
     return ok
 
 
@@ -149,11 +152,18 @@ def delete_session(token, user_id=None):
 
 
 def delete_user_sessions(user_id):
-    """改密/禁用/删号：删除该用户全部会话缓存"""
-    tokens = smembers(_user_tokens_key(user_id))
-    if tokens:
-        cache_delete(*[_token_key(t) for t in tokens])
-    cache_delete(_user_tokens_key(user_id))
+    """改密/禁用/删号：删除该用户全部会话缓存（惰性清理已过期的死 token）"""
+    key = _user_tokens_key(user_id)
+    tokens = smembers(key)
+    live = []
+    for t in tokens:
+        if cache_get(_token_key(t)) is not None:
+            live.append(t)
+        else:
+            srem(key, t)  # 死成员（token 已自然过期）顺手清掉
+    if live:
+        cache_delete(*[_token_key(t) for t in live])
+    cache_delete(key)
 
 
 def refresh_session(token, ttl=None):
@@ -163,7 +173,14 @@ def refresh_session(token, ttl=None):
         from modules.system.settings_service import get_setting_int
         hours = get_setting_int('token_expire_hours', 8) or 8
         ttl = hours * 3600
-    return expire(_token_key(token), ttl)
+    if not expire(_token_key(token), ttl):
+        return False
+    # 索引集随会话滑动续期，确保活跃会话期间不被误删
+    data = cache_get_json(_token_key(token))
+    user_id = (data or {}).get('user_id')
+    if user_id is not None:
+        expire(_user_tokens_key(user_id), ttl)
+    return True
 
 
 # ─── 登录限流 ────────────────────────────────────────────────

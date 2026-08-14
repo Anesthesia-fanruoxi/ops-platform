@@ -73,6 +73,7 @@ def _hb_metrics(**kw):
         'load1': s(kw.get('load1')),
         'load5': s(kw.get('load5')),
         'load15': s(kw.get('load15')),
+        'running_count': s(kw.get('running_count')),
         'net_rx_kb': s(kw.get('net_rx_kb')),
         'net_tx_kb': s(kw.get('net_tx_kb')),
         'disk_percent': s(kw.get('disk_percent')),
@@ -83,14 +84,9 @@ def _hb_metrics(**kw):
     }
 
 
-def _write_hb(agent_id, reset_load=False, **kw):
-    """写心跳到 Redis（保留 Master 维护的 load；reset_load=True 时归零）"""
+def _write_hb(agent_id, **kw):
+    """写心跳到 Redis（并发依据 running_count 由 Agent 自行上报，Master 不维护）"""
     mapping = _hb_metrics(**kw)
-    prev = hgetall(_hb_key(agent_id)) or {}
-    if reset_load:
-        mapping['load'] = '0'
-    elif 'load' in prev:
-        mapping['load'] = prev['load']
     return hset_all(_hb_key(agent_id), mapping, ttl=HB_TTL)
 
 
@@ -99,17 +95,21 @@ def agent_is_online(agent):
     return hgetall(_hb_key(agent.id)) is not None
 
 
+def _safe_running_count(value):
+    """running_count 服务端钳制：非法（nan/inf/负数/非数字）一律按 0，防恶意/异常 Agent 上报导致崩溃"""
+    try:
+        v = float(value)
+        if v != v or v in (float('inf'), float('-inf')) or v < 0:
+            return 0
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
 def get_agent_load(agent):
-    """读取 Agent 当前负载（Redis 心跳字段）"""
+    """读取 Agent 当前运行任务数（Agent 自行上报，Master 并发依据）"""
     data = get_hb(agent)
-    return int(to_float(data.get('load')) if data else 0)
-
-
-def incr_agent_load(agent_id, delta):
-    """原子增减负载；心跳键不存在（离线）时返回 None 不生效"""
-    if not exists(_hb_key(agent_id)):
-        return None
-    return hincrby(_hb_key(agent_id), 'load', delta)
+    return _safe_running_count(data.get('running_count') if data else 0)
 
 
 def _ensure_server_probe(agent):
@@ -154,7 +154,7 @@ def _probe_server_worker(app, agent_id):
 def agent_runtime_dict(agent, hb):
     """由 MySQL 配置 + Redis 心跳组装调度中心展示数据（字段与前端一致）"""
     online = hb is not None
-    load = int(to_float(hb.get('load')) if hb else 0)
+    load = _safe_running_count(hb.get('running_count') if hb else 0)
     if not online:
         # 无心跳：区分「服务器离线」与「服务停止/已重置」
         server_ok = cache_get(_server_ok_key(agent.id))
@@ -219,6 +219,7 @@ def agent_runtime_dict(agent, hb):
         'docker_cache_size': (hb.get('docker_cache_size') if hb else '') or '0B',
         'sys_info': sys_info,
         'last_heartbeat': last_hb,
+        'frontend_mount_dir': agent.frontend_mount_dir or '',
     }
 
 
@@ -254,15 +255,6 @@ def delete_agent(agent_id):
     return True
 
 
-def release_agent_load(agent_id):
-    """构建结束后释放 Agent 负载（Redis 原子减，离线时不生效）"""
-    if not exists(_hb_key(agent_id)):
-        return
-    val = hincrby(_hb_key(agent_id), 'load', -1)
-    if val is not None and val < 0:
-        hincrby(_hb_key(agent_id), 'load', 1)
-
-
 def get_comm_secret():
     """读取全局 Agent 通讯共享密钥"""
     from modules.system.models import Setting
@@ -278,7 +270,7 @@ def register_agent_by_name(name, host, port=None, docker_ok=True, version='',
                            load1=None, load5=None, load15=None,
                            net_rx_kb=None, net_tx_kb=None,
                            disk_percent=None, mem_used_gb=None, mem_avail_gb=None,
-                           docker_cache_size=None, sys_info=None):
+                           docker_cache_size=None, sys_info=None, running_count=None):
     """按 name 注册：写 MySQL 配置 + 写 Redis 心跳（在线，负载归零）"""
     agent = BuildAgent.query.filter_by(name=name).first()
     if not agent:
@@ -294,7 +286,7 @@ def register_agent_by_name(name, host, port=None, docker_ok=True, version='',
     db.session.commit()
 
     _write_hb(
-        agent.id, reset_load=True,
+        agent.id,
         port=port, docker_ok=docker_ok, version=version,
         cpu_load=cpu_load, mem_percent=mem_percent,
         disk_read_kb=disk_read_kb, disk_write_kb=disk_write_kb,
@@ -304,6 +296,7 @@ def register_agent_by_name(name, host, port=None, docker_ok=True, version='',
         net_rx_kb=net_rx_kb, net_tx_kb=net_tx_kb,
         disk_percent=disk_percent, mem_used_gb=mem_used_gb, mem_avail_gb=mem_avail_gb,
         docker_cache_size=docker_cache_size, sys_info=sys_info,
+        running_count=running_count,
     )
     return agent
 
@@ -316,7 +309,7 @@ def heartbeat_by_name(name, docker_ok=True, version='',
                       load1=None, load5=None, load15=None,
                       net_rx_kb=None, net_tx_kb=None,
                       disk_percent=None, mem_used_gb=None, mem_avail_gb=None,
-                      docker_cache_size=None, sys_info=None):
+                      docker_cache_size=None, sys_info=None, running_count=None):
     """按 name 处理心跳：仅写 Redis（TTL 15s），不写数据库"""
     agent = BuildAgent.query.filter_by(name=name).first()
     if not agent:
@@ -333,6 +326,7 @@ def heartbeat_by_name(name, docker_ok=True, version='',
         net_rx_kb=net_rx_kb, net_tx_kb=net_tx_kb,
         disk_percent=disk_percent, mem_used_gb=mem_used_gb, mem_avail_gb=mem_avail_gb,
         docker_cache_size=docker_cache_size, sys_info=sys_info,
+        running_count=running_count,
     )
 
     # 有空闲容量时触发调度，消化排队任务
@@ -353,19 +347,34 @@ def poll_build_by_name(name):
         return None, 'busy'
 
     # 跨 worker 原子领取：逐个尝试 SETNX，防两个 worker 同时派发同一构建
+    # 同环境串行（与 dispatch_service._dispatch_one 一致）：同环境已有 running 构建则跳过
+    active_env_ids = set()
+    for rb in Build.query.filter(Build.status == 'running').all():
+        if rb.project_id:
+            active_env_ids.add((rb.project_id, rb.environment_id))
     pending = Build.query.filter_by(status='pending').order_by(Build.created_at.asc()).all()
     build = None
     for b in pending:
+        if b.project_id and (b.project_id, b.environment_id) in active_env_ids:
+            continue  # 同环境构建进行中，排队等待
+        # 重跑钉住其他节点的任务不可被本 Agent 领取（构建目录在原节点）
+        if b.agent_id and b.agent_id != agent.id:
+            continue
+        # 同环境串行原子锁：与 _dispatch_one 一致，防跨 worker 竞态双派
+        env_lock = f'lock:env:{b.project_id}:{b.environment_id}' if b.project_id else None
+        if env_lock and not set_if_absent(env_lock, value=b.build_no, ttl=21600000):
+            continue  # 同环境已有构建持锁（进行中），排队等待
         if set_if_absent(f'build:claim:{b.id}', value=f'agent-{agent.id}', ttl=60000):
             build = b
             break
+        if env_lock and cache_get(env_lock) == b.build_no:
+            cache_delete(env_lock)  # 领取失败：释放本候选的环境锁（owner 比对），继续下一个
     if not build:
         return None, 'no_task'
 
     build.status = 'running'
     build.agent_id = agent.id
     build.started_at = datetime.now()
-    incr_agent_load(agent.id, 1)
     db.session.commit()
     cache_delete(f'build:claim:{build.id}')
     return build, 'ok'

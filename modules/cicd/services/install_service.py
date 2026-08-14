@@ -110,6 +110,45 @@ def _run_install(task_id, app):
                 raise Exception(f'Harbor 登录失败: {err or out}')
             _emit(task_id, 2, '安装 Docker', 'success', f'Harbor 登录成功：{harbor_url}')
 
+        # Step 2.7: 挂载 NFS 目录（前端发布目录，安装时自动完成，无需再登录服务器）
+        nfs_server = (p.get('nfs_server') or '').strip()
+        nfs_share = (p.get('nfs_share') or '').strip().rstrip('/')
+        mount_dir = (p.get('frontend_mount_dir') or '').strip().rstrip('/')
+        if nfs_server and nfs_share and mount_dir:
+            _emit(task_id, 2, '安装 Docker', 'running',
+                  f'挂载 NFS：{nfs_server}:{nfs_share} → {mount_dir} ...')
+            # 1) 按系统版本安装 NFS 客户端
+            os_id = (os_info.get('id') or '').lower()
+            if os_id in ('ubuntu', 'debian'):
+                _exec(ssh, 'apt-get update -qq && apt-get install -y nfs-common', timeout=300)
+            else:
+                _exec(ssh, 'dnf install -y nfs-utils || yum install -y nfs-utils', timeout=300)
+            # 2) showmount 预检：确认 NFS 服务器可达且共享目录已导出
+            _emit(task_id, 2, '安装 Docker', 'running',
+                  f'showmount 检查：{nfs_server} ...')
+            code, out, err = _exec(ssh, f'showmount -e {nfs_server} 2>&1', timeout=30)
+            if code != 0:
+                raise Exception(
+                    f'NFS 服务器不可用：无法获取 {nfs_server} 的导出列表。'
+                    f'请确认服务器已启动并 export 共享目录（{err or out}）')
+            if nfs_share not in out:
+                raise Exception(
+                    f'NFS 共享目录 {nfs_share} 未在服务器 {nfs_server} 的导出列表中找到。'
+                    f'当前导出：{out.strip()}')
+            # 3) 递归创建挂载点（目录不存在会自动创建）
+            _exec(ssh, f'mkdir -p {mount_dir}')
+            # 4) 挂载（已挂载则跳过，避免重复/冲突）
+            _exec(ssh, f'grep -q " {mount_dir} " /etc/mtab || mount -t nfs {nfs_server}:{nfs_share} {mount_dir}')
+            # 5) 写 /etc/fstab 开机自动挂载（已存在则不重复写入）
+            _exec(ssh, f'grep -q "{nfs_server}:{nfs_share} {mount_dir}" /etc/fstab || '
+                       f'echo "{nfs_server}:{nfs_share} {mount_dir} nfs defaults 0 0" >> /etc/fstab')
+            # 6) 验证挂载结果
+            code, out, err = _exec(ssh, f'mountpoint -q {mount_dir} && echo OK || echo FAIL')
+            if 'OK' not in out:
+                raise Exception(f'NFS 挂载失败: {nfs_server}:{nfs_share} → {mount_dir} ({err or out})')
+            _emit(task_id, 2, '安装 Docker', 'success',
+                  f'NFS 已挂载：{nfs_server}:{nfs_share} → {mount_dir}（已写入 fstab）')
+
         # Step 3: 上传文件
         _emit(task_id, 3, '上传文件', 'running', '正在上传 Agent 二进制 ...')
         _upload_files(ssh, p)
@@ -462,15 +501,26 @@ def _run_uninstall(task_id, app):
         _exec(ssh, f'rm -rf {workdir}')
         _emit(task_id, 3, '删除工作目录', 'success', f'{workdir} 已删除')
 
-        # Step 4: 卸载 Docker（可选）
+        # Step 4: 卸载 NFS 挂载（可选：重置勾选/卸载默认）
+        if p.get('remove_nfs') and p.get('frontend_mount_dir'):
+            mount_dir = p['frontend_mount_dir'].rstrip('/')
+            _emit(task_id, 4, '卸载 NFS', 'running', f'正在卸载 {mount_dir} ...')
+            _exec(ssh, f'umount -l {mount_dir} 2>/dev/null || true')
+            # 从 /etc/fstab 移除对应挂载行（含 mount_dir 的行）
+            _exec(ssh, f"sed -i '\\| {mount_dir} |d' /etc/fstab")
+            _emit(task_id, 4, '卸载 NFS', 'success', f'{mount_dir} 已卸载，fstab 已清理')
+        else:
+            _emit(task_id, 4, '卸载 NFS', 'skipped', '已跳过')
+
+        # Step 5: 卸载 Docker（可选）
         if p.get('remove_docker'):
-            _emit(task_id, 4, '卸载 Docker', 'running', '正在停止并卸载 Docker ...')
+            _emit(task_id, 5, '卸载 Docker', 'running', '正在停止并卸载 Docker ...')
             _exec(ssh, 'systemctl stop docker 2>/dev/null; systemctl disable docker 2>/dev/null')
             _exec(ssh, 'dnf remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin', timeout=300)
             _exec(ssh, 'rm -rf /data/docker /etc/docker')
-            _emit(task_id, 4, '卸载 Docker', 'success', 'Docker 已卸载，数据目录已删除')
+            _emit(task_id, 5, '卸载 Docker', 'success', 'Docker 已卸载，数据目录已删除')
         else:
-            _emit(task_id, 4, '卸载 Docker', 'skipped', '已跳过')
+            _emit(task_id, 5, '卸载 Docker', 'skipped', '已跳过')
 
         # 删除 DB 记录（仅卸载模式，重置保留记录并标记待安装）
         with app.app_context():
