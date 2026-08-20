@@ -79,7 +79,7 @@ const DashboardPage = {
     return {
       now: '', location: window.location.host || '', entryGroups: [],
       loadingStats: false, stats: {}, recentBuilds: [],
-      monitor: null, monitorChecks: {}, lastUpdate: '', _monitorTimer: null,
+      monitor: null, monitorChecks: {}, lastUpdate: '', es: null, _timer: null,
     };
   },
   computed: {
@@ -131,15 +131,26 @@ const DashboardPage = {
   },
   mounted() {
     this.now = this.formatNow();
-    setInterval(() => { this.now = this.formatNow(); }, 1000);
+    this._timer = setInterval(() => { this.now = this.formatNow(); }, 1000);
     this.buildEntryGroups();
     setTimeout(() => this.buildEntryGroups(), 300); // 菜单异步加载兜底：稍后重建入口卡
     this.fetchStats();
-    this.startMonitor();
+    this.connect();
+  },
+  // keep-alive 缓存首页：切走断开 SSE、切回重连（首次挂载 mounted 已连接，用标志避免重复建连）
+  activated() {
+    if (this._deactivated) {
+      this._deactivated = false;
+      this.connect();
+    }
+  },
+  deactivated() {
+    this._deactivated = true;
+    this.closeMonitor();
   },
   beforeUnmount() {
     this.closeMonitor();
-    this._timer && clearInterval(this._timer);
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
   },
   watch: {
     '$root.menuItems': { deep: true, handler() { this.buildEntryGroups(); } },
@@ -168,28 +179,25 @@ const DashboardPage = {
       const map = { ok: '正常', warning: '警告', danger: '异常', failed: '异常', unknown: '未知' };
       return map[s] || s;
     },
-    // 监控卡数据走接口轮询：整体健康 + 六维度单卡（/api/dashboard/monitor/xxx）
-    startMonitor() {
+    // 监控数据走 SSE（/api/monitor/stream，同监控信息页）：一帧同时更新整体状态 + 六维度卡片
+    connect() {
       this.closeMonitor();
-      this.fetchMonitor();
-      this._monitorTimer = setInterval(() => this.fetchMonitor(), 5000);
-    },
-    fetchMonitor() {
-      const ajaxP = (url) => new Promise((resolve) => {
-        ajax('GET', url, null, (res) => resolve(res && res.code === 200 ? res.data : null), () => resolve(null));
-      });
-      ajaxP('/api/dashboard/monitor/health').then((d) => {
-        if (d) { this.monitor = d; this.lastUpdate = new Date().toLocaleTimeString('zh-CN', { hour12: false }); }
-      });
-      const keys = ['database', 'redis', 'thread_pool', 'task_queue', 'event_loop', 'downstream'];
-      Promise.all(keys.map((k) => ajaxP('/api/dashboard/monitor/' + k))).then((list) => {
-        const obj = {};
-        keys.forEach((k, i) => { if (list[i]) obj[k] = list[i]; });
-        this.monitorChecks = obj;
-      });
+      const token = localStorage.getItem('auth_token') || '';
+      this.es = new EventSource('/api/monitor/stream?token=' + encodeURIComponent(token));
+      this.es.onmessage = (e) => {
+        try {
+          const d = JSON.parse(e.data);
+          if (d.type === 'health' && d.data) {
+            this.monitor = d.data;
+            this.monitorChecks = d.data.checks || {};
+            this.lastUpdate = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+          }
+        } catch (err) { /* 忽略解析错误 */ }
+      };
+      this.es.onerror = () => { /* EventSource 自动重连 */ };
     },
     closeMonitor() {
-      if (this._monitorTimer) { clearInterval(this._monitorTimer); this._monitorTimer = null; }
+      if (this.es) { this.es.close(); this.es = null; }
     },
     // 快捷入口：按父菜单分组（每组展示子菜单），按权限过滤，取前 5 组
     buildEntryGroups() {

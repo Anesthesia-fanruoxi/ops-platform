@@ -51,6 +51,15 @@ class Config:
     SQLALCHEMY_DATABASE_URI = (
         f'mysql+pymysql://{MYSQL_USER}:{MYSQL_PASS}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}?charset=utf8mb4'
     )
+    # SQLAlchemy 引擎连接池配置（SSE 长连接频繁查 DB，容量需与 gunicorn threads 匹配）
+    # pool_size=10：基础连接数；max_overflow=20：溢出允许，合计 30
+    # 避免 gunicorn threads 增加到 48 后 DB 连接等待成为新瓶颈
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_size': 10,
+        'max_overflow': 20,
+        'pool_pre_ping': True,  # 复用前验证连接可用（防僵尸连接）
+        'pool_recycle': 3600,   # 1 小时回收一次连接
+    }
 
     # Redis 配置（环境变量优先，其次 config.yaml redis 段：认证会话、Agent 心跳、分布式锁、调度概览缓存）
     REDIS_ENABLED = os.getenv('REDIS_ENABLED') if os.getenv('REDIS_ENABLED') is not None \

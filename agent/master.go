@@ -136,7 +136,19 @@ func sendResult(buildID int, status, digest, errMsg string) {
 		"image_digest": digest,
 		"error":        errMsg,
 	}
-	postEncrypted(fmt.Sprintf("/api/cicd/agent/build/%d/result", buildID), body)
+	path := fmt.Sprintf("/api/cicd/agent/build/%d/result", buildID)
+	// 构建结果回调是关键链路：失败会导致构建状态停在 running，UI 一直显示「构建中」
+	// 重试 3 次（3s/6s/12s 指数退避），避免单次网络/解密异常导致状态卡死
+	for attempt := 0; attempt < 3; attempt++ {
+		result := postEncrypted(path, body)
+		if result != nil {
+			return
+		}
+		wait := time.Duration(3<<uint(attempt)) * time.Second // 3s, 6s, 12s
+		log.Printf("[HTTP] sendResult build#%d 第 %d 次失败，%v 后重试", buildID, attempt+1, wait)
+		time.Sleep(wait)
+	}
+	log.Printf("[HTTP] sendResult build#%d 重试 3 次均失败，构建状态可能无法及时更新", buildID)
 }
 
 // postEncrypted 加密请求体（AES-GCM+gzip 信封）并解密响应信封

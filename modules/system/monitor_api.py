@@ -35,9 +35,9 @@ def _get_check_fn(key):
 
 
 def dashboard_monitor_health():
-    """整体健康（状态条）：并行跑全部六维度检查，返回 status/summary"""
-    from modules.system.healthz import run_checks
-    result = run_checks()
+    """整体健康（状态条）：复用缓存的检查结果（TTL 内多请求共享，避免重复全量检查）"""
+    from modules.system.healthz import run_checks_cached
+    result = run_checks_cached()
     return success_response({
         'status': result['status'],
         'summary': result['summary'],
@@ -67,8 +67,8 @@ def dashboard_monitor_check(check_key):
 
 # 首页监控 SSE：登录即可（全局 token 校验兜底），保留供聚合/兼容
 def monitor_stream():
-    """监控信息 SSE 流：定时推送平台多维度健康检查结果"""
-    from modules.system.healthz import run_checks
+    """监控信息 SSE 流：定时推送平台多维度健康检查结果（缓存层：N 个连接共享同一份结果）"""
+    from modules.system.healthz import run_checks_cached
     app_obj = current_app._get_current_object()
     interval = request.args.get('interval', 5, type=int)
     interval = max(2, min(interval, 30))
@@ -79,7 +79,7 @@ def monitor_stream():
             # 首帧立即推送一次，再按间隔循环
             while True:
                 try:
-                    result = run_checks()
+                    result = run_checks_cached()
                     payload = json.dumps({'type': 'health', 'data': result}, ensure_ascii=False)
                 except Exception as e:
                     payload = json.dumps({'type': 'error', 'data': {'detail': str(e)[:200]}}, ensure_ascii=False)

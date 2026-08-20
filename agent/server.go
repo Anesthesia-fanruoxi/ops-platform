@@ -23,6 +23,7 @@ func startLogServer() {
 	mux.HandleFunc("/agentlog", handleAgentLog)
 	mux.HandleFunc("/task", handleTask)
 	mux.HandleFunc("/cancel", handleCancel)
+	mux.HandleFunc("/list", handleList)
 	mux.HandleFunc("/metrics", handleMetricsHistory)
 	addr := fmt.Sprintf(":%d", cfg.LogPort)
 	log.Printf("[LogServer] 监听 %s", addr)
@@ -88,9 +89,14 @@ func handleCancel(w http.ResponseWriter, r *http.Request) {
 	}
 	if runner := getRunner(req.BuildID); runner != nil {
 		log.Printf("[Cancel] 构建#%d 收到取消信号，终止当前运行操作", req.BuildID)
-		runner.kill()
+		// 异步 kill：docker stop 有 10s 宽限期，同步等待会超过 Master 推送超时（5s）被误记推送失败
+		go runner.kill()
+		writeTaskResp(w, true)
+	} else {
+		// 构建未在运行（不存在/已完成）：如实上报失败，避免 Master 误以为已取消
+		log.Printf("[Cancel] 构建#%d 未找到运行中任务，取消失败", req.BuildID)
+		writeTaskResp(w, false)
 	}
-	writeTaskResp(w, true)
 }
 
 // writeTaskResp 以加密信封响应 Master

@@ -76,9 +76,58 @@ def rerun_build(build_id):
     data = request.json or {}
     start_step = data.get('start_step', 1)
     build, err = build_service.rerun_build(build_id, start_step)
-    if err:
+    if not build:
         return error_response(err, 400)
     return success_response(build.to_dict(), '已开始重跑')
+
+
+@require_permission('op:agent_dir')
+def build_code_dirs(build_id):
+    """GET /builds/<id>/code-dirs?path= → 浏览该构建在 Agent 上的 code 目录（编译后目录；只读防越界）"""
+    build = Build.query.get(build_id)
+    if not build:
+        return error_response('构建不存在', 404)
+    if not build.agent_id:
+        return error_response('构建未绑定执行节点', 400)
+    agent = BuildAgent.query.get(build.agent_id)
+    if not agent:
+        return error_response('执行节点不存在', 404)
+
+    from modules.cicd.services import agent_service
+    if agent_service.get_hb(agent) is None:
+        return error_response('执行节点离线，无法浏览代码目录', 400)
+
+    # 相对工作目录路径 = {project}-{env}-{type}/{build_no}/code[/{path}]
+    rel = build_service.get_build_work_subdir(build)
+    path = (request.args.get('path') or '').strip()
+    full = f'{rel}/{build.build_no}/code'
+    if path:
+        full = f'{full}/{path}'
+
+    from modules.cicd.services import dispatch_service
+    entries, err = dispatch_service.list_agent_dir(agent, full)
+    if err:
+        return error_response(err, 502)
+
+    # 当前模板全局产物目录（供前端预填）
+    from modules.cicd.models import CicdFlowTemplate
+    artifact_dir = ''
+    template = CicdFlowTemplate.query.filter_by(project_id=build.project_id).first()
+    if template:
+        artifact_dir = (template.configs_dict().get('backend') or {}).get('artifact_dir') or ''
+    return success_response({'entries': entries, 'path': path, 'artifact_dir': artifact_dir})
+
+
+@require_permission('op:cicd_build')
+def build_configure_dirs(build_id):
+    """POST /builds/<id>/configure-dirs {artifact_dirs: [...], artifact_dir: str}
+    → 勾选服务目录 + 全局产物目录回填模板（不续跑，需重新构建）"""
+    data = request.json or {}
+    build, err = build_service.configure_artifact_dirs(
+        build_id, data.get('artifact_dirs'), data.get('artifact_dir'))
+    if not build:
+        return error_response(err, 400)
+    return success_response(build.to_dict(), '服务目录与产物目录已回填到流程模板，请重新触发构建完成完整流程')
 
 
 @require_any_permission('page:cicd', 'op:cicd_build')
@@ -211,8 +260,9 @@ def proxy_build_log(build_id):
         # 总览日志：并行转发 Agent 流 + Master 侧部署日志（部署由 Master 后台线程执行，不经 Agent）
         if log_type == 'all':
             return _stream_all_log(build, agent_url)
-        # SSE 流式代理
+        # SSE 流式代理：客户端断开即释放 Agent 连接（try/finally 中 resp.close()）
         def generate():
+            resp = None
             try:
                 resp = http_requests.get(agent_url, stream=True, timeout=(5, 300))
                 for chunk in resp.iter_content(chunk_size=None):
@@ -220,6 +270,9 @@ def proxy_build_log(build_id):
                         yield chunk
             except Exception as e:
                 yield f'data: {{"error": "{str(e)}"}}\n\n'
+            finally:
+                if resp:
+                    resp.close()
 
         return Response(
             stream_with_context(generate()),
@@ -238,25 +291,36 @@ def proxy_build_log(build_id):
 def _stream_all_log(build, agent_url):
     """总览日志：并行转发 Agent 全流程日志（SSE 流）+ Master 侧部署日志（本地文件增量追加）。
     构建在 Agent 上执行、部署由 Master 后台线程执行，两者日志来源不同；仅透传 Agent 流
-    会导致总览只见 Docker Push 结果，部署阶段日志缺失。"""
+    会导致总览只见 Docker Push 结果，部署阶段日志缺失。
+    生命周期治理：pump 线程随主生成器结束而退出；主生成器 exit 时（客户端断开/结束条件满足）
+    daemon 线程自动停止（无需显式 kill）。"""
     import queue
     import threading
 
     deploy_path = os.path.join('logs', 'cicd', f'{build.build_no}.deploy.log')
     q = queue.Queue()
+    stop_pump = threading.Event()  # 退出信号
 
     def pump_agent():
+        """并行拉取 Agent 流，直到主生成器请求停止或 Agent 连接关闭"""
+        resp = None
         try:
             resp = http_requests.get(agent_url, stream=True, timeout=(5, 300))
             for chunk in resp.iter_content(chunk_size=None):
+                if stop_pump.is_set():  # 检查是否应停止
+                    break
                 if chunk:
                     q.put(('agent', chunk))
         except Exception as e:
-            q.put(('agent_err', f'data: {{"error": "{str(e)}"}}\n\n'))
+            if not stop_pump.is_set():
+                q.put(('agent_err', f'data: {{"error": "{str(e)}"}}\n\n'))
         finally:
+            if resp:
+                resp.close()
             q.put(('agent_done', None))
 
-    threading.Thread(target=pump_agent, daemon=True).start()
+    pump_thread = threading.Thread(target=pump_agent, daemon=True)
+    pump_thread.start()
 
     def read_deploy():
         try:
@@ -273,44 +337,48 @@ def _stream_all_log(build, agent_url):
         idle = 0
         agent_done = False
         header_sent = False
-        while True:
-            # 1. 排空 Agent 流队列（非阻塞；Agent 数据优先进帧，心跳帧也照常转发）
+        try:
             while True:
-                try:
-                    kind, payload = q.get_nowait()
-                except queue.Empty:
-                    break
-                if kind in ('agent', 'agent_err'):
-                    yield payload
+                # 1. 排空 Agent 流队列（非阻塞；Agent 数据优先进帧，心跳帧也照常转发）
+                while True:
+                    try:
+                        kind, payload = q.get_nowait()
+                    except queue.Empty:
+                        break
+                    if kind in ('agent', 'agent_err'):
+                        yield payload
+                        idle = 0
+                    elif kind == 'agent_done':
+                        agent_done = True
+
+                # 2. 每轮追加部署日志增量（构建中文件未生成时为空，不影响 Agent 转发）
+                content = read_deploy()
+                if content and not header_sent:
+                    yield 'data: ' + sse_escape('\n=== 部署 ===\n') + '\n\n'
+                    header_sent = True
                     idle = 0
-                elif kind == 'agent_done':
-                    agent_done = True
+                if len(content) > sent:
+                    yield f'data: {sse_escape(content[sent:])}\n\n'
+                    sent = len(content)
+                    idle = 0
+                else:
+                    idle += 1
 
-            # 2. 每轮追加部署日志增量（构建中文件未生成时为空，不影响 Agent 转发）
-            content = read_deploy()
-            if content and not header_sent:
-                yield 'data: ' + sse_escape('\n=== 部署 ===\n') + '\n\n'
-                header_sent = True
-                idle = 0
-            if len(content) > sent:
-                yield f'data: {sse_escape(content[sent:])}\n\n'
-                sent = len(content)
-                idle = 0
-            else:
-                idle += 1
-
-            # 3. 结束判定：Agent 流结束且部署无新内容（部署已终态，或部署未开始且构建步骤已失败）
-            steps = build_service.get_build_steps(build.build_no) or {}
-            step_list = steps.get('steps', [])
-            deploy_status = next((st.get('status') for st in step_list if st.get('key') == 'deploy'), None)
-            deploy_done = deploy_status in ('success', 'failed', 'skipped')
-            deploy_never = deploy_status in (None, 'pending')
-            any_failed = any(st.get('status') == 'failed' for st in step_list)
-            if agent_done and (deploy_done or (deploy_never and any_failed)):
-                break
-            if idle >= 300:
-                break
-            time.sleep(1)
+                # 3. 结束判定：Agent 流结束且部署无新内容（部署已终态，或部署未开始且构建步骤已失败）
+                steps = build_service.get_build_steps(build.build_no) or {}
+                step_list = steps.get('steps', [])
+                deploy_status = next((st.get('status') for st in step_list if st.get('key') == 'deploy'), None)
+                deploy_done = deploy_status in ('success', 'failed', 'skipped')
+                deploy_never = deploy_status in (None, 'pending')
+                any_failed = any(st.get('status') == 'failed' for st in step_list)
+                if agent_done and (deploy_done or (deploy_never and any_failed)):
+                    break
+                if idle >= 300:
+                    break
+                time.sleep(1)
+        finally:
+            # 主生成器退出时通知 pump 线程停止，释放 Agent 连接
+            stop_pump.set()
 
     return Response(
         stream_with_context(generate()),
@@ -412,16 +480,18 @@ def env_builds_stream(environment_id):
     环境级构建状态 SSE：实时推送该环境进行中的构建（running/pending），
     供服务信息页顶部显示「构建中」状态（即使构建是从环境信息页触发的）。
     GET /api/cicd/builds/env/<environment_id>/stream?token=
-    每 5s 推送一次当前进行中构建列表（含当前步骤名），客户端断开自动停止。
+    断线自动关闭；连续一段时间（5min）无进行中构建自动关闭，避免线程不必要地占用。
     """
     import time
     from flask import stream_with_context, Response
 
     def generate():
+        idle_count = 0  # 空闲轮数（每 5s 一轮）
+        max_idle = 60  # 5s * 60 = 300s = 5min 无报告构建，自动关闭
         while True:
             builds = Build.query.filter(
                 Build.environment_id == environment_id,
-                Build.status.in_(('running', 'pending')),
+                Build.status.in_(('running', 'pending', 'waiting')),
             ).order_by(Build.id.desc()).all()
             items = [{
                 'id': b.id,
@@ -433,6 +503,14 @@ def env_builds_stream(environment_id):
             } for b in builds]
             payload = json.dumps({'environment_id': environment_id, 'builds': items}, ensure_ascii=False)
             yield f"data: {payload}\n\n"
+            # 有构建时重置空闲计数；无构建时递增
+            if builds:
+                idle_count = 0
+            else:
+                idle_count += 1
+            # 空闲超阈值自动结束，前端 onerror 已有兜底
+            if idle_count >= max_idle:
+                break
             time.sleep(5)
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream',

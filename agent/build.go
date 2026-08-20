@@ -103,6 +103,13 @@ func executeBuild(task *BuildTask) {
 	registerRunner(runner)
 	defer unregisterRunner(runner)
 
+	// 任务下发即带取消标记（push_cancel 失败/任务在途）：不再执行，直接上报取消
+	if task.CancelRequested {
+		log.Printf("[Build#%d] 任务下发即带取消标记（push_cancel 失败或任务在途），直接上报取消", task.BuildID)
+		sendResult(task.BuildID, "failed", "", "构建已取消")
+		return
+	}
+
 	// 目录结构：{WorkDir}/{project}-{env}/{buildNo}/{code,product,logs}
 	projEnvDir := filepath.Join(cfg.WorkDir, task.ProjectEnv)
 	buildDir := filepath.Join(projEnvDir, task.BuildNo)
@@ -201,6 +208,17 @@ func executeBuild(task *BuildTask) {
 
 	// Step 3: 产物收集
 	if startStep <= 3 && success {
+		// 后端未配置服务目录：跳过产物收集/打镜像/推送，构建报 success，
+		// 由 Master 在部署步骤置 waiting，等平台勾选回填模板后重新构建
+		if task.ProjectType == "backend" && len(task.Steps.ArtifactDirs) == 0 {
+			stepLog.log("\n=== 产物收集 ===\n未配置服务目录：跳过产物收集 / Docker Build / Docker Push，请到平台部署步骤配置服务目录后重新构建")
+			sendStep(task.BuildID, 3, "collect", "skipped", "")
+			sendStep(task.BuildID, 4, "docker_build", "skipped", "")
+			sendStep(task.BuildID, 5, "docker_push", "skipped", "")
+			finalStatus = "success"
+			sendResult(task.BuildID, "success", "", "")
+			return
+		}
 		cancelled = sendStep(task.BuildID, 3, "collect", "running", "")
 		if cancelled {
 			sendResult(task.BuildID, "failed", "", "构建已取消")
@@ -520,47 +538,153 @@ func execCollectArtifacts(logger *stepLogger, task *BuildTask, codeDir, productD
 	return nil
 }
 
+// splitArtifactCandidates 解析产物目录候选链（| 分隔，逐段去空白），全部为空时返回 nil
+func splitArtifactCandidates(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, "|") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// containsGlob 判断候选是否含通配符（Go 的 * 不跨目录分隔符，? 匹配单个字符）
+func containsGlob(p string) bool {
+	return strings.ContainsAny(p, "*?")
+}
+
+// globStaticDir 返回 glob 候选中首个通配符（* 或 ?）之前的目录（绝对路径），
+// 作为匹配结果落盘相对路径的基准；通配符位于第一段（如 *.jar）时返回空串。
+func globStaticDir(svcAbs, cand string) string {
+	idx := strings.IndexAny(cand, "*?")
+	if idx < 0 {
+		return ""
+	}
+	if slash := strings.LastIndex(cand[:idx], "/"); slash > 0 {
+		return filepath.Join(svcAbs, filepath.FromSlash(cand[:slash]))
+	}
+	return ""
+}
+
 // collectOne 收集单个服务的产物到 product 下（均按 basename 扁平化）：
 //
-//	artifactSub 非空：src = codeDir/svcDir/artifactSub → dst = productDir/basename(svcDir)/basename(artifactSub)
-//	artifactSub 为空：src = codeDir/svcDir → dst = productDir/basename(svcDir)（兼容旧配置，整个服务目录复制）
+//	artifactSub 支持 | 分隔的候选链（如 target/pkg | target/*.jar），按序探测首个命中者：
+//	  - 无通配符候选：路径存在即整目录收集 → product/{svc}/{basename}（旧语义，单文件亦可）
+//	  - 含通配符候选（* 或 ?）：glob 匹配收集，文件平铺、目录整拷，保留相对静态前缀的相对路径
+//	artifactSub 为空：兼容旧配置，整个服务目录复制 → product/{svc}
 func collectOne(logger *stepLogger, codeDir, productDir, svcDir, artifactSub string) error {
 	cleanSvc := filepath.Clean(svcDir)
 	if filepath.IsAbs(cleanSvc) || strings.HasPrefix(cleanSvc, "..") {
 		return fmt.Errorf("服务目录不合法(禁止绝对路径或..): %s", svcDir)
 	}
 
-	src := filepath.Join(codeDir, cleanSvc)
-	dst := filepath.Join(productDir, filepath.Base(cleanSvc))
-	relDesc := cleanSvc
-	if artifactSub != "" {
-		cleanSub := filepath.Clean(artifactSub)
-		if filepath.IsAbs(cleanSub) || strings.HasPrefix(cleanSub, "..") {
-			return fmt.Errorf("产物目录不合法(禁止绝对路径或..): %s", artifactSub)
-		}
-		src = filepath.Join(src, cleanSub)
-		dst = filepath.Join(dst, filepath.Base(cleanSub))
-		relDesc = cleanSvc + "/" + cleanSub
-	}
-
-	// 二次验证：解析后的路径必须在 codeDir 内
-	absSrc, _ := filepath.Abs(src)
+	// 二次验证：解析后的服务路径必须在 codeDir 内
+	svcAbs, _ := filepath.Abs(filepath.Join(codeDir, cleanSvc))
 	absBase, _ := filepath.Abs(codeDir)
-	if !strings.HasPrefix(absSrc, absBase+string(os.PathSeparator)) {
-		return fmt.Errorf("产物路径逃逸代码目录: %s", relDesc)
+	if !strings.HasPrefix(svcAbs, absBase+string(os.PathSeparator)) {
+		return fmt.Errorf("产物路径逃逸代码目录: %s", cleanSvc)
 	}
-	if _, err := os.Stat(src); os.IsNotExist(err) {
-		return fmt.Errorf("产物目录不存在: %s (完整路径: %s)", relDesc, absSrc)
+	dstBase := filepath.Join(productDir, filepath.Base(cleanSvc))
+	svcName := filepath.Base(cleanSvc)
+
+	candidates := splitArtifactCandidates(artifactSub)
+	if len(candidates) == 0 {
+		// 兼容旧配置：未配产物目录，整个服务目录复制
+		if _, err := os.Stat(svcAbs); os.IsNotExist(err) {
+			return fmt.Errorf("服务目录不存在: %s (完整路径: %s)", cleanSvc, svcAbs)
+		}
+		logger.log(fmt.Sprintf("  收集: %s → product/%s (整服务目录)", cleanSvc, svcName))
+		if err := copyDir(svcAbs, dstBase); err != nil {
+			return fmt.Errorf("复制产物失败 %s: %v", cleanSvc, err)
+		}
+		return nil
 	}
 
-	absDst, _ := filepath.Abs(dst)
-	relDst, _ := filepath.Rel(productDir, dst)
-	logger.log(fmt.Sprintf("  收集: %s → product/%s", relDesc, filepath.ToSlash(relDst)))
-	logger.log(fmt.Sprintf("    cp -r %s %s", absSrc, absDst))
-	if err := copyDir(src, dst); err != nil {
-		return fmt.Errorf("复制产物失败 %s: %v", relDesc, err)
+	var tried []string
+	for _, cand := range candidates {
+		cleanSub := filepath.Clean(cand)
+		if filepath.IsAbs(cleanSub) || strings.HasPrefix(cleanSub, "..") {
+			return fmt.Errorf("产物目录不合法(禁止绝对路径或..): %s", cand)
+		}
+		if containsGlob(cand) {
+			n, err := collectGlob(logger, codeDir, cleanSvc, svcAbs, dstBase, cleanSub)
+			if err != nil {
+				return err
+			}
+			if n > 0 {
+				return nil
+			}
+			tried = append(tried, cand+"(无匹配)")
+			continue
+		}
+
+		src := filepath.Join(svcAbs, cleanSub)
+		absSrc, _ := filepath.Abs(src)
+		if !strings.HasPrefix(absSrc, absBase+string(os.PathSeparator)) {
+			return fmt.Errorf("产物路径逃逸代码目录: %s/%s", cleanSvc, cleanSub)
+		}
+		if _, err := os.Stat(src); err != nil {
+			tried = append(tried, cand+"(不存在)")
+			continue
+		}
+		logger.log(fmt.Sprintf("  收集: %s/%s → product/%s/%s", cleanSvc, cleanSub, svcName, filepath.Base(cleanSub)))
+		if err := os.MkdirAll(dstBase, 0755); err != nil {
+			return fmt.Errorf("创建产物目录失败: %v", err)
+		}
+		if err := copyDir(src, filepath.Join(dstBase, filepath.Base(cleanSub))); err != nil {
+			return fmt.Errorf("复制产物失败 %s/%s: %v", cleanSvc, cleanSub, err)
+		}
+		return nil
 	}
-	return nil
+	return fmt.Errorf("所有产物候选均未命中: %s（已尝试: %s）", cleanSvc, strings.Join(tried, ", "))
+}
+
+// collectGlob 按 glob 候选收集产物：匹配 svcAbs/cand 下的文件/目录，落到 dstBase 下并保留
+// 相对静态前缀目录的相对路径（如 target/*.jar 匹配 target/x.jar → product/{svc}/x.jar）。
+// 返回收集条数（0 = 未命中，由调用方继续尝试下一候选）；非法模式亦视为未命中，由候选链统一报错。
+func collectGlob(logger *stepLogger, codeDir, cleanSvc, svcAbs, dstBase, cand string) (int, error) {
+	// 静态前缀（通配符之前的目录）仍须位于代码目录内，防止 glob 路径逃逸
+	prefix := globStaticDir(svcAbs, cand)
+	if prefix != "" {
+		absPrefix, _ := filepath.Abs(prefix)
+		absBase, _ := filepath.Abs(codeDir)
+		if !strings.HasPrefix(absPrefix, absBase+string(os.PathSeparator)) {
+			return 0, fmt.Errorf("产物路径逃逸代码目录: %s/%s", cleanSvc, cand)
+		}
+	}
+
+	matches, err := filepath.Glob(filepath.Join(svcAbs, filepath.FromSlash(cand)))
+	if err != nil {
+		return 0, nil
+	}
+
+	svcName := filepath.Base(cleanSvc)
+	n := 0
+	for _, m := range matches {
+		rel := filepath.Base(m)
+		if prefix != "" {
+			if r, err := filepath.Rel(prefix, m); err == nil {
+				rel = r
+			}
+		}
+		logger.log(fmt.Sprintf("  收集: %s/%s → product/%s/%s", cleanSvc, cand, svcName, filepath.ToSlash(rel)))
+		dst := filepath.Join(dstBase, rel)
+		if fi, err := os.Stat(m); err == nil && fi.IsDir() {
+			if err := copyDir(m, dst); err != nil {
+				return n, fmt.Errorf("复制产物失败 %s/%s: %v", cleanSvc, cand, err)
+			}
+		} else {
+			if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+				return n, fmt.Errorf("创建产物目录失败: %v", err)
+			}
+			if err := copyFile(m, dst); err != nil {
+				return n, fmt.Errorf("复制产物失败 %s/%s: %v", cleanSvc, cand, err)
+			}
+		}
+		n++
+	}
+	return n, nil
 }
 
 // ─── Step 4: Docker Build（多线程）────────────────────────────────
@@ -642,27 +766,43 @@ func execDockerBuild(runner *buildRunner, logger *stepLogger, task *BuildTask, p
 }
 
 // detectJar 在服务的构建上下文目录中识别待启动的主 jar，返回相对 svcPath 的斜杠路径。
-// 产物已按 artifactDir 扁平化收集到 svcPath/<产物目录basename>/ 下，主 jar 直接位于该目录，
-// 故优先非递归扫描该目录（不深入 lib/resource 等子目录）；仅未指定产物目录的旧配置才递归兑底。
+// 产物目录支持候选链：无通配符候选的产物整目录落盘于 svcPath/<basename>/，优先在其中
+// 非递归查找（不深入 lib 等子目录）；glob 候选（如 target/*.jar）的文件平铺于 svcPath 根，
+// 其次在根下非递归查找；最后递归兜底（跳过 lib/ 依赖目录），覆盖旧配置整服务目录复制的场景。
 func detectJar(svcPath, artifactDir string) string {
-	jarDir := svcPath
-	if sub := strings.TrimSpace(artifactDir); sub != "" {
-		jarDir = filepath.Join(svcPath, filepath.Base(filepath.Clean(sub)))
+	for _, cand := range splitArtifactCandidates(artifactDir) {
+		if containsGlob(cand) {
+			continue // glob 候选无固定落盘目录，产物平铺于 svcPath 根，由下一步覆盖
+		}
+		if rel := scanJars(svcPath, filepath.Join(svcPath, filepath.Base(filepath.Clean(cand))), false); rel != "" {
+			return rel
+		}
 	}
-	if rel := scanJars(svcPath, jarDir, false); rel != "" {
+	if rel := scanJars(svcPath, svcPath, false); rel != "" {
 		return rel
 	}
-	// 兑底：旧配置（未指定产物目录，整个服务目录被复制）时递归查找
+	// 兜底：旧配置（未指定产物目录，整个服务目录被复制）时递归查找
 	return scanJars(svcPath, svcPath, true)
 }
 
-// scanJars 扫描 dir 下的 *.jar（recursive 控制是否递归），过滤 sources/javadoc/original，
-// 多个候选取体积最大者（Spring Boot fat jar 通常最大），返回相对 base 的斜杠路径；无则返回 ""。
+// scanJars 扫描 dir 下的 *.jar（recursive 控制是否递归，递归时跳过 lib 依赖目录），
+// 过滤 sources/javadoc/original，多个候选取体积最大者（Spring Boot fat jar 通常最大），
+// 返回相对 base 的斜杠路径；无则返回 ""。
 func scanJars(base, dir string, recursive bool) string {
 	var candidates []string
 	if recursive {
 		filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
-			if err == nil && info != nil && !info.IsDir() && isMainJar(info.Name()) {
+			if err != nil || info == nil {
+				return nil
+			}
+			// 跳过 lib 依赖目录：外置依赖场景主 jar 与 lib 平级，避免误选体积最大的依赖 jar
+			if info.IsDir() {
+				if info.Name() == "lib" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if isMainJar(info.Name()) {
 				candidates = append(candidates, p)
 			}
 			return nil

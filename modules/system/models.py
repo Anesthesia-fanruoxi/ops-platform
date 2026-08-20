@@ -18,8 +18,9 @@ class Role(db.Model):
     is_builtin = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
-    # 关联用户
-    users = db.relationship('User', backref='role', lazy=True)
+    # 关联用户（DB 层无外键，ORM 显式 primaryjoin）
+    users = db.relationship('User', backref='role', lazy=True,
+                            primaryjoin='foreign(User.role_id) == Role.id')
 
     def permissions_list(self):
         try:
@@ -52,7 +53,7 @@ class User(db.Model):
     auth_source = db.Column(db.String(16), default='local')  # local=本地账号 / sso=统一鉴权中心映射
     phone = db.Column(db.String(20), default='')  # 认证中心同步（手机号）
     email = db.Column(db.String(128), default='')  # 认证中心同步（邮箱）
-    role_id = db.Column(db.Integer, db.ForeignKey('roles.id'), nullable=True)
+    role_id = db.Column(db.Integer, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
 

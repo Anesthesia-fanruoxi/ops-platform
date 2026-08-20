@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""调度中心 API：概览 + SSE 实时推送 + 调度日志"""
+"""调度中心 API：概览 + SSE 实时推送 + 调度日志 + 节点目录浏览"""
 import json
 import time
 
-from flask import Response, stream_with_context
+from flask import Response, stream_with_context, request
 
-from core.response import success_response
+from core.response import success_response, error_response
 from core.security import require_permission
 from core.db import db
 from modules.cicd.models import BuildAgent, Build, ScheduleLog
@@ -125,3 +125,24 @@ def schedule_scores():
     # 在线且有评分在前，按评分升序（越低越优）；离线排在最后
     result.sort(key=lambda x: (x['score'] is None, x['score'] if x['score'] is not None else 0))
     return success_response(result)
+
+
+# ─── 节点目录浏览（op:agent_dir，只读、仅工作目录内）─────────────────
+@require_permission('op:agent_dir')
+def schedule_dirs():
+    """GET /dirs?agent_id=&path= → 单层列举 Agent 工作目录（节点侧防越界）"""
+    agent_id = request.args.get('agent_id', type=int)
+    path = request.args.get('path', '')
+    if not agent_id:
+        return error_response('缺少 agent_id', 400)
+    agent = BuildAgent.query.get(agent_id)
+    if not agent:
+        return error_response('Agent 不存在', 404)
+    if agent_service.get_hb(agent) is None:
+        return error_response('Agent 离线，无法浏览目录', 400)
+
+    from modules.cicd.services import dispatch_service
+    entries, err = dispatch_service.list_agent_dir(agent, path)
+    if err:
+        return error_response(err, 502)
+    return success_response({'entries': entries, 'path': path})

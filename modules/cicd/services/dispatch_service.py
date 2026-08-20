@@ -14,7 +14,7 @@ import requests
 
 from core.db import db
 from core.redis_client import (
-    acquire_lock_mixed, release_lock_mixed, set_if_absent, cache_delete,
+    acquire_lock_mixed, release_lock_mixed, set_if_absent, cache_delete, cache_get,
 )
 from modules.cicd.models import BuildAgent, Build, ScheduleLog
 from modules.cicd.services import build_service
@@ -257,6 +257,23 @@ def push_cancel_to_agent(agent, build):
         return False
 
 
+def list_agent_dir(agent, path=''):
+    """加密请求 Agent 单层列举工作目录（只读、节点侧防越界）；失败返回 (None, error)"""
+    url = f'http://{agent.host}:{agent.port or 9090}/list'
+    try:
+        payload = encrypt_request_bytes({'path': path or ''})
+        resp = requests.post(url, data=payload, headers={'Content-Type': 'application/json'}, timeout=5)
+        result = decrypt_bytes(resp.content)
+        if resp.status_code == 200 and result:
+            if result.get('ok'):
+                return result.get('entries') or [], ''
+            return None, result.get('error') or 'Agent 拒绝请求'
+        return None, f'Agent 响应异常 (HTTP {resp.status_code})'
+    except Exception as e:
+        logger.warning(f'[List] 请求 {agent.name} 目录失败: {e}')
+        return None, f'连接 Agent 失败: {e}'
+
+
 # 调度日志保留条数（独立保留，不随构建记录同步删除）
 SCHEDULE_LOG_KEEP = 100
 
@@ -289,8 +306,11 @@ def _dispatch_one(build):
         env_lock = f'lock:env:{build.project_id}:{build.environment_id}'
         # 锁值 = 本构建 build_no（owner），释放时比对防误删他人锁
         if not set_if_absent(env_lock, value=build.build_no, ttl=21600000):
-            _wait_dispatch(build, logs, '同环境构建进行中，排队等待其完成（同环境串行）', status='same_env')
-            return
+            # 残留锁自愈：owner 构建非活跃（取消/终态/历史 waiting）时清理后重试抢锁
+            _reclaim_stale_env_lock(env_lock)
+            if not set_if_absent(env_lock, value=build.build_no, ttl=21600000):
+                _wait_dispatch(build, logs, '同环境构建进行中，排队等待其完成（同环境串行）', status='same_env')
+                return
         build._env_lock = env_lock
     if build.agent_id:
         # 重跑：必须回到原构建节点（构建目录在其磁盘上）
@@ -337,6 +357,26 @@ def _dispatch_one(build):
     db.session.commit()
     # 无论成败都释放领取标记：成功由 running 状态兜底，失败等待下次重试
     cache_delete(f'build:claim:{build.id}')
+
+
+def _reclaim_stale_env_lock(env_lock):
+    """残留同环境锁自愈：owner 构建不存在或非活跃（非 pending/running）时删除锁（比对 owner 防误删）"""
+    try:
+        owner = cache_get(env_lock)
+    except Exception:
+        return
+    if not owner:
+        return
+    owner_build = Build.query.filter_by(build_no=owner).first()
+    if owner_build and owner_build.status in ('pending', 'running'):
+        return  # owner 确实活跃，正常串行等待
+    try:
+        if cache_get(env_lock) == owner:
+            cache_delete(env_lock)
+            logger.warning('[Dispatch] 清理残留同环境锁 %s（owner=%s status=%s）',
+                           env_lock, owner, owner_build.status if owner_build else '记录不存在')
+    except Exception as e:
+        logger.warning('[Dispatch] 清理残留同环境锁失败 %s: %s', env_lock, e)
 
 
 def _release_env_lock(build):

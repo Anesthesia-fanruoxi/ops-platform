@@ -34,6 +34,7 @@ reasonix.toml
 # ── Go（Agent 构建产物） ───────────────────────────────
 agent/dist/
 agent/*.exe
+agent/cicd-agent
 agent/*.test
 *.exe
 
@@ -49,3 +50,7 @@ desktop.ini
 *.log
 *.tmp
 *.bak
+
+# ── 工具 / 临时目录（不入库） ───────────────────────────
+.workbuddy/
+test/

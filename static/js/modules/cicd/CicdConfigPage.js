@@ -9,23 +9,47 @@ const CicdConfigPage = {
   <el-tabs v-model="activeTab" @tab-change="onTabChange">
     <!-- ═══ 流程模板 ═══ -->
     <el-tab-pane label="流程模板" name="templates">
-      <div style="margin-bottom:10px">
+      <div class="tpl-toolbar">
+        <span class="tpl-toolbar-count">共 <strong>[[ templates.length ]]</strong> 个模板</span>
         <el-button type="primary" size="small" @click="openTemplateForm(null)">+ 新增模板</el-button>
       </div>
       <div v-loading="loadingTemplates" class="cred-grid">
         <div v-for="t in templates" :key="t.id" class="tpl-card" @click="openTemplateForm(t, true)">
-          <div class="cred-card-head">
-            <span class="cred-card-name">[[ t.project_name ]]</span>
+          <div class="tpl-card-top">
+            <div class="tpl-card-logo">[[ (t.project_name || '?').slice(0, 1).toUpperCase() ]]</div>
+            <div class="tpl-card-titlebox">
+              <div class="tpl-card-name" :title="t.project_name">[[ t.project_name ]]</div>
+              <div class="tpl-card-sub">[[ t.language || '未指定语言' ]]</div>
+            </div>
           </div>
-          <div class="cred-card-body">
-            <div class="cred-card-row" v-if="t.git_url"><span class="cred-card-label">Git 地址</span><span class="cred-card-truncate" :title="t.git_url">[[ t.git_url ]]</span></div>
-            <div class="cred-card-row" v-if="t.build_docker_image"><span class="cred-card-label">编译镜像</span><span class="cred-card-truncate" :title="t.build_docker_image">[[ t.build_docker_image ]]</span></div>
-            <div class="cred-card-row" v-if="t.description"><span class="cred-card-label">描述</span>[[ t.description || '-' ]]</div>
+
+          <div class="tpl-card-meta">
+            <div class="tpl-meta-row" v-if="t.git_url">
+              <span class="tpl-meta-label">Git</span>
+              <span class="tpl-meta-val tpl-truncate" :title="t.git_url">[[ t.git_url ]]</span>
+            </div>
+            <div class="tpl-meta-row" v-if="t.build_docker_image">
+              <span class="tpl-meta-label">镜像</span>
+              <span class="tpl-meta-val tpl-truncate" :title="t.build_docker_image">[[ t.build_docker_image ]]</span>
+            </div>
+            <div class="tpl-meta-row" v-if="tplServiceCount(t)">
+              <span class="tpl-meta-label">服务</span>
+              <span class="tpl-meta-val">[[ tplServiceCount(t) ]] 个目录</span>
+            </div>
+            <div class="tpl-meta-row tpl-desc" v-if="t.description">
+              <span class="tpl-meta-label">描述</span>
+              <span class="tpl-meta-val tpl-truncate" :title="t.description">[[ t.description ]]</span>
+            </div>
           </div>
-          <div class="cred-card-actions" @click.stop>
-            <el-button link type="primary" size="small" @click="openTemplateForm(t)">编辑</el-button>
-            <el-button link type="success" size="small" @click="copyTemplate(t)">复制</el-button>
-            <el-button link type="danger" size="small" @click="deleteTemplate(t)">删除</el-button>
+
+          <div class="tpl-card-foot">
+            <span class="tpl-card-time" v-if="t.updated_at">更新于 [[ t.updated_at.slice(0, 10) ]]</span>
+            <span class="tpl-card-time" v-else>未记录更新</span>
+            <div class="tpl-card-actions" @click.stop>
+              <el-button link type="primary" size="small" @click="openTemplateForm(t)">编辑</el-button>
+              <el-button link type="success" size="small" @click="copyTemplate(t)">复制</el-button>
+              <el-button link type="danger" size="small" @click="deleteTemplate(t)">删除</el-button>
+            </div>
           </div>
         </div>
         <el-empty v-if="!loadingTemplates && !templates.length" description="暂无流程模板" :image-size="60"></el-empty>
@@ -34,24 +58,33 @@ const CicdConfigPage = {
 
     <!-- ═══ 凭据 ═══ -->
     <el-tab-pane label="凭据" name="credentials">
-      <div style="margin-bottom:10px">
+      <div class="tpl-toolbar">
+        <span class="tpl-toolbar-count">共 <strong>[[ credentials.length ]]</strong> 个凭据</span>
         <el-button type="primary" size="small" @click="openCredForm(null)">+ 新增凭据</el-button>
       </div>
       <div v-loading="loadingCreds" class="cred-grid">
         <div v-for="c in credentials" :key="c.id" class="cred-card" @click="openCredForm(c, true)">
-          <div class="cred-card-head">
-            <span class="cred-card-name">[[ c.name ]]</span>
-            <el-tag size="small" :type="c.type === 'ssh_key' ? 'warning' : 'primary'">[[ c.type === 'ssh_key' ? 'SSH 私钥' : '密码' ]]</el-tag>
+          <div class="tpl-card-top">
+            <div class="tpl-card-logo">[[ (c.name || '?').slice(0, 1).toUpperCase() ]]</div>
+            <div class="tpl-card-titlebox">
+              <div class="tpl-card-name" :title="c.name">[[ c.name ]]</div>
+              <div class="tpl-card-sub">[[ c.type === 'ssh_key' ? 'SSH 私钥凭据' : '密码凭据' ]]</div>
+            </div>
+            <el-tag size="small" effect="plain" :type="c.type === 'ssh_key' ? 'warning' : 'primary'" class="tpl-card-type">[[ c.type === 'ssh_key' ? 'SSH' : '密码' ]]</el-tag>
           </div>
-          <div class="cred-card-body">
-            <div class="cred-card-row" v-if="c.username"><span class="cred-card-label">用户名</span>[[ c.username ]]</div>
-            <div class="cred-card-row" v-if="c.url"><span class="cred-card-label">地址</span><span class="cred-card-truncate" :title="c.url">[[ c.url ]]</span></div>
-            <div class="cred-card-row" v-if="c.description"><span class="cred-card-label">描述</span>[[ c.description || '-' ]]</div>
-            <div class="cred-card-row" v-if="!c.username && !c.url && !c.description"><span style="color:#c0c4cc">点击卡片查看详情</span></div>
+          <div class="tpl-card-meta">
+            <div class="tpl-meta-row" v-if="c.username"><span class="tpl-meta-label">用户</span><span class="tpl-meta-val tpl-truncate" :title="c.username">[[ c.username ]]</span></div>
+            <div class="tpl-meta-row" v-if="c.url"><span class="tpl-meta-label">地址</span><span class="tpl-meta-val tpl-truncate" :title="c.url">[[ c.url ]]</span></div>
+            <div class="tpl-meta-row" v-if="c.description"><span class="tpl-meta-label">描述</span><span class="tpl-meta-val tpl-truncate" :title="c.description">[[ c.description ]]</span></div>
+            <div class="tpl-meta-row" v-if="!c.username && !c.url && !c.description"><span class="tpl-meta-val" style="color:#c0c4cc">点击卡片查看详情</span></div>
           </div>
-          <div class="cred-card-actions" @click.stop>
-            <el-button link type="primary" size="small" @click="openCredForm(c)">编辑</el-button>
-            <el-button link type="danger" size="small" @click="deleteCred(c)">删除</el-button>
+          <div class="tpl-card-foot">
+            <span class="tpl-card-time" v-if="c.updated_at">更新于 [[ c.updated_at.slice(0, 10) ]]</span>
+            <span class="tpl-card-time" v-else>未记录更新</span>
+            <div class="tpl-card-actions" @click.stop>
+              <el-button link type="primary" size="small" @click="openCredForm(c)">编辑</el-button>
+              <el-button link type="danger" size="small" @click="deleteCred(c)">删除</el-button>
+            </div>
           </div>
         </div>
         <el-empty v-if="!loadingCreds && !credentials.length" description="暂无凭据" :image-size="60"></el-empty>
@@ -60,24 +93,33 @@ const CicdConfigPage = {
 
     <!-- ═══ Dockerfile 模板 ═══ -->
     <el-tab-pane label="Dockerfile" name="dockerfiles">
-      <div style="margin-bottom:10px">
+      <div class="tpl-toolbar">
+        <span class="tpl-toolbar-count">共 <strong>[[ dockerfiles.length ]]</strong> 个模板</span>
         <el-button type="primary" size="small" @click="openDockerfileForm(null)">+ 新增模板</el-button>
       </div>
       <div v-loading="loadingDockers" class="cred-grid">
         <div v-for="d in dockerfiles" :key="d.id" class="df-card" @click="openDockerfileForm(d, true)">
-          <div class="cred-card-head">
-            <span class="cred-card-name">[[ d.name ]]</span>
-            <el-tag size="small" :type="d.project_type === 'vue' ? 'success' : 'primary'">[[ d.project_type ]]</el-tag>
+          <div class="tpl-card-top">
+            <div class="tpl-card-logo">[[ (d.name || '?').slice(0, 1).toUpperCase() ]]</div>
+            <div class="tpl-card-titlebox">
+              <div class="tpl-card-name" :title="d.name">[[ d.name ]]</div>
+              <div class="tpl-card-sub">[[ (d.project_type || '').toUpperCase() || '通用' ]] 模板</div>
+            </div>
+            <el-tag size="small" effect="plain" :type="d.project_type === 'vue' ? 'success' : 'primary'" class="tpl-card-type">[[ d.project_type || '通用' ]]</el-tag>
           </div>
-          <div class="cred-card-body">
-            <div class="cred-card-row" v-if="d.base_image"><span class="cred-card-label">基础镜像</span><span class="cred-card-truncate" :title="d.base_image">[[ d.base_image ]]</span></div>
-            <div class="cred-card-row" v-if="d.description"><span class="cred-card-label">描述</span>[[ d.description || '-' ]]</div>
-            <div class="cred-card-row" v-if="!d.base_image && !d.description"><span style="color:#c0c4cc">点击卡片查看详情</span></div>
+          <div class="tpl-card-meta">
+            <div class="tpl-meta-row" v-if="d.base_image"><span class="tpl-meta-label">镜像</span><span class="tpl-meta-val tpl-truncate" :title="d.base_image">[[ d.base_image ]]</span></div>
+            <div class="tpl-meta-row" v-if="d.description"><span class="tpl-meta-label">描述</span><span class="tpl-meta-val tpl-truncate" :title="d.description">[[ d.description ]]</span></div>
+            <div class="tpl-meta-row" v-if="!d.base_image && !d.description"><span class="tpl-meta-val" style="color:#c0c4cc">点击卡片查看详情</span></div>
           </div>
-          <div class="cred-card-actions" @click.stop>
-            <el-button link type="primary" size="small" @click="openDockerfileForm(d)">编辑</el-button>
-            <el-button link type="success" size="small" @click="previewDockerfile(d)">预览</el-button>
-            <el-button link type="danger" size="small" @click="deleteDockerfile(d)">删除</el-button>
+          <div class="tpl-card-foot">
+            <span class="tpl-card-time" v-if="d.created_at">创建于 [[ d.created_at.slice(0, 10) ]]</span>
+            <span class="tpl-card-time" v-else>未记录时间</span>
+            <div class="tpl-card-actions" @click.stop>
+              <el-button link type="primary" size="small" @click="openDockerfileForm(d)">编辑</el-button>
+              <el-button link type="success" size="small" @click="previewDockerfile(d)">预览</el-button>
+              <el-button link type="danger" size="small" @click="deleteDockerfile(d)">删除</el-button>
+            </div>
           </div>
         </div>
         <el-empty v-if="!loadingDockers && !dockerfiles.length" description="暂无 Dockerfile 模板" :image-size="60"></el-empty>
@@ -87,11 +129,11 @@ const CicdConfigPage = {
   </el-tabs>
 
   <!-- ═══ 模板编辑弹窗（单页全量展示） ═══ -->
-  <el-dialog v-model="tplFormVisible" :title="tplForm.id ? '编辑流程模板' : '新增流程模板'" width="900px" class="cicd-dialog" :close-on-click-modal="false">
-    <el-form label-width="120px" size="small">
-      <el-divider content-position="left">基本信息</el-divider>
+  <el-dialog v-model="tplFormVisible" :title="tplForm.id ? '编辑流程模板' : '新增流程模板'" width="1080px" class="cicd-dialog" :close-on-click-modal="false">
+    <el-form label-width="130px" size="small">
+      <div class="cicd-section-title">基本信息</div>
       <el-form-item label="项目" required>
-        <el-select :disabled="tplReadonly" v-model="tplForm.project_id" placeholder="选择项目" style="width:100%" :disabled="tplReadonly || !!tplForm.id">
+        <el-select v-model="tplForm.project_id" placeholder="选择项目" style="width:100%" :disabled="tplReadonly || !!tplForm.id">
           <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
         </el-select>
       </el-form-item>
@@ -100,6 +142,7 @@ const CicdConfigPage = {
           <el-radio label="backend">后端</el-radio>
           <el-radio label="frontend">前端</el-radio>
         </el-radio-group>
+        <span v-if="tplReadonly" style="font-size:12px;color:#909399;margin-left:8px">可切换查看不同类型的配置</span>
       </el-form-item>
       <el-form-item label="语言" required>
         <el-select :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].language" style="width:100%">
@@ -113,7 +156,10 @@ const CicdConfigPage = {
       </el-form-item>
       <el-form-item label="描述"><el-input :disabled="tplReadonly" v-model="tplForm.description" /></el-form-item>
 
-      <el-divider content-position="left">Git 配置</el-divider>
+      <div class="cicd-section-title">Git 配置</div>
+      <el-form-item label="Git 地址" required>
+        <el-input :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].git_url" placeholder="如：git@192.168.1.10:group/project.git 或 https://git.example.com/group/project.git" />
+      </el-form-item>
       <el-form-item label="Git Docker镜像" required>
         <el-input :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].git_docker_image" placeholder="alpine/git:latest" />
       </el-form-item>
@@ -123,26 +169,28 @@ const CicdConfigPage = {
         </el-select>
       </el-form-item>
 
-      <el-divider content-position="left">编译配置</el-divider>
+      <div class="cicd-section-title">编译配置</div>
+      <el-form-item label="编译镜像">
+        <el-input :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].build_docker_image" :placeholder="tplForm.project_type==='backend' ? '如：maven:3.8-jdk-8（留空则在 Agent 宿主机执行）' : '如：node:16（留空则在 Agent 宿主机执行）'" />
+      </el-form-item>
       <el-form-item label="编译命令" required>
         <el-input :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].build_command" type="textarea" :rows="3" :placeholder="tplForm.project_type==='backend' ? 'mvn clean package -DskipTests' : 'npm install && npm run build'" />
       </el-form-item>
 
-      <el-divider content-position="left">
-        <div style="display:flex;align-items:center;gap:8px;width:100%">
-          <span>产物配置</span>
-          <span style="font-size:12px;color:#909399;font-weight:normal">
-            <template v-if="tplForm.project_type==='backend'">每个服务目录对应一个微服务，收集 服务目录/产物目录 到 product 下（如 ysh-gateway/pkg）并并发构建镜像</template>
-            <template v-else>前端项目固定收集 dist 目录作为产物</template>
-          </span>
+      <div class="cicd-section-title">
+        产物配置
+        <div class="cicd-section-hint">
+          <template v-if="tplForm.project_type==='backend'">每个服务目录对应一个微服务，收集 服务目录/产物目录 到 product 下并并发构建镜像；产物目录支持 | 分隔多候选按序探测、* 通配（如 target/pkg | target/*.jar）</template>
+          <template v-else>前端项目固定收集 dist 目录作为产物</template>
         </div>
-      </el-divider>
+      </div>
       <template v-if="tplForm.project_type==='backend'">
-        <el-form-item label="服务目录" required>
-          <el-input :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].artifact_dirs" type="textarea" :rows="12" placeholder="每行一个服务目录（相对代码根目录），如：&#10;ysh-gateway&#10;ysh-modules/ysh-app" />
+        <el-form-item label="服务目录">
+          <el-input :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].artifact_dirs" type="textarea" :rows="12" placeholder="每行一个服务目录（相对代码根目录），如：&#10;ysh-gateway&#10;ysh-modules/ysh-app&#10;留空=编译成功后跳过收集/打镜像，部署步骤等待勾选配置" />
+          <div class="cicd-field-hint" style="font-size:12px;color:#909399;line-height:1.6;margin-top:4px">留空则构建在 clone+编译成功后跳过产物收集/打镜像/推送，部署步骤进入等待状态，可在构建面板点「配置服务目录」浏览编译后目录勾选回填到模板，然后重新触发构建。</div>
         </el-form-item>
-        <el-form-item label="产物目录" required>
-          <el-input :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].artifact_dir" placeholder="各服务内统一的产物相对路径，如 target/pkg" />
+        <el-form-item label="产物目录">
+          <el-input :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].artifact_dir" placeholder="产物相对路径，支持 | 多候选与 * 通配，如：target/pkg | target/*.jar" />
         </el-form-item>
       </template>
       <template v-else>
@@ -150,12 +198,10 @@ const CicdConfigPage = {
       </template>
 
       <template v-if="tplForm.project_type==='backend'">
-        <el-divider content-position="left">
-          <div style="display:flex;align-items:center;gap:8px;width:100%">
-            <span>镜像构建</span>
-            <span style="font-size:12px;color:#909399;font-weight:normal">镜像名自动生成：{Harbor}/{项目}-{环境}/{服务名}:{tag}，无需填写；Harbor 凭据在添加 Agent 时配置</span>
-          </div>
-        </el-divider>
+        <div class="cicd-section-title">
+          镜像构建
+          <div class="cicd-section-hint">镜像名自动生成：{Harbor}/{项目}-{环境}/{服务名}:{tag}，无需填写；Harbor 凭据在添加 Agent 时配置</div>
+        </div>
         <el-form-item label="Dockerfile模板">
           <el-select :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].dockerfile_template_id" clearable placeholder="选择模板" style="width:100%">
             <el-option v-for="d in dockerfiles" :key="d.id" :label="d.name" :value="d.id" />
@@ -292,6 +338,11 @@ const CicdConfigPage = {
       const v = cfg[key];
       return (v === null || v === undefined || v === '') ? '-' : v;
     },
+    // 流程模板卡片：统计服务目录数量（按换行拆分 artifact_dirs）
+    tplServiceCount(t) {
+      const cfg = (t && t.configs && t.configs[t.project_type]) || {};
+      return (cfg.artifact_dirs || '').split('\n').map(s => s.trim()).filter(Boolean).length;
+    },
     credName(id) {
       const c = this.credentials.find(x => String(x.id) === String(id));
       return c ? c.name : (id || '-');
@@ -313,13 +364,13 @@ const CicdConfigPage = {
         this.tplFormVisible = true;
         return;
       }
-      // 编辑：列表为精简字段，拉详情全量回填
+      // 编辑/查看：列表为精简字段，拉详情全量回填
       ajax('GET', '/api/cicd/templates/' + row.id, null, res => {
         if (res.code !== 200) { ElementPlus.ElMessage.error(res.msg || '加载模板失败'); return; }
         const full = res.data;
         const configs = this.normalizeConfigs(full.configs);
-        const ptype = full.project_type === 'frontend' ? 'frontend' : 'backend';
-        this.tplForm = { ...full, project_type: ptype, configs: configs };
+        // 需求：弹窗默认以"后端"为起点（用户可手动切换查看前端配置）
+        this.tplForm = { ...full, project_type: 'backend', configs: configs };
         ensureLazy();
         this.tplFormVisible = true;
       });
@@ -347,7 +398,10 @@ const CicdConfigPage = {
         if (res.code !== 200) { ElementPlus.ElMessage.error(res.msg || '加载模板失败'); return; }
         const full = res.data;
         const { id, project_id, project_name, created_at, updated_at, ...rest } = full;
-        this.tplForm = { ...rest, project_id: '', description: '', project_type: 'backend', configs: this.normalizeConfigs(full.configs) };
+        const configs = this.normalizeConfigs(full.configs);
+        // 复制为新建：默认后端（需求：弹窗默认以"后端"为起点）
+        this.tplForm = { ...rest, project_id: '', description: '', project_type: 'backend', configs: configs };
+        if (!this.projects.length) this.loadProjects();
         if (!this.credentials.length) this.loadCredentials();
         if (!this.dockerfiles.length) this.loadDockerfiles();
         this.tplFormVisible = true;
@@ -357,9 +411,7 @@ const CicdConfigPage = {
       if (!this.tplForm.project_id) { ElementPlus.ElMessage.warning('请选择项目'); return; }
       const cfg = this.tplForm.configs[this.tplForm.project_type];
       if (!cfg.git_url) { ElementPlus.ElMessage.warning('请填写Git地址'); return; }
-      if (this.tplForm.project_type === 'backend' && !cfg.artifact_dirs) {
-        ElementPlus.ElMessage.warning('后端项目必须配置产物目录'); return;
-      }
+      // 服务目录允许留空：编译成功后跳过收集/打镜像，部署步骤等待平台勾选回填后重新构建
       this.saving = true;
       const isEdit = !!this.tplForm.id;
       const url = isEdit ? '/api/cicd/templates/' + this.tplForm.id : '/api/cicd/templates';

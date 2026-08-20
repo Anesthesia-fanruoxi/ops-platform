@@ -68,7 +68,7 @@ class ScheduleLog(db.Model):
     __tablename__ = 'cicd_schedule_logs'
 
     id = db.Column(db.Integer, primary_key=True)
-    build_id = db.Column(db.Integer, db.ForeignKey('cicd_builds.id'), nullable=True)
+    build_id = db.Column(db.Integer, nullable=True)
     build_no = db.Column(db.String(50), default='')
     project_name = db.Column(db.String(100), default='')
     environment_name = db.Column(db.String(100), default='')
@@ -107,7 +107,7 @@ class CicdFlowTemplate(db.Model):
     __tablename__ = 'cicd_flow_templates'
 
     id = db.Column(db.Integer, primary_key=True)
-    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), unique=True, nullable=False)
+    project_id = db.Column(db.Integer, unique=True, nullable=False)
 
     # Step1: 基本信息
     project_type = db.Column(db.String(20), default='backend')  # frontend | backend
@@ -121,8 +121,9 @@ class CicdFlowTemplate(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
-    # 关联
-    project = db.relationship('Project', backref=db.backref('cicd_template', uselist=False, lazy=True))
+    # 关联（DB 层无外键，ORM 显式 primaryjoin）
+    project = db.relationship('Project', backref=db.backref('cicd_template', uselist=False, lazy=True),
+                              primaryjoin='foreign(CicdFlowTemplate.project_id) == Project.id')
 
     def to_dict(self):
         """configs 为唯一数据源；language/git_url/build_docker_image 从当前类型配置派生（列表/详情展示用）"""
@@ -230,9 +231,9 @@ class Build(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     build_no = db.Column(db.String(50), unique=True, nullable=False, index=True)
-    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
-    environment_id = db.Column(db.Integer, db.ForeignKey('environments.id'), nullable=True)
-    agent_id = db.Column(db.Integer, db.ForeignKey('cicd_agents.id'), nullable=True)
+    project_id = db.Column(db.Integer, nullable=False)
+    environment_id = db.Column(db.Integer, nullable=True)
+    agent_id = db.Column(db.Integer, nullable=True)
     branch = db.Column(db.String(200), default='master')
     project_type = db.Column(db.String(20), default='backend')  # frontend | backend
     language = db.Column(db.String(30), default='')  # 快照
@@ -250,10 +251,10 @@ class Build(db.Model):
     duration = db.Column(db.Float, nullable=True)  # 秒
     created_at = db.Column(db.DateTime, default=datetime.now)
 
-    # 关联（仅用于联表展示）
-    project = db.relationship('Project', lazy=True)
-    environment = db.relationship('Environment', lazy=True)
-    agent = db.relationship('BuildAgent', lazy=True)
+    # 关联（仅用于联表展示；DB 层无外键，ORM 显式 primaryjoin）
+    project = db.relationship('Project', lazy=True, primaryjoin='foreign(Build.project_id) == Project.id')
+    environment = db.relationship('Environment', lazy=True, primaryjoin='foreign(Build.environment_id) == Environment.id')
+    agent = db.relationship('BuildAgent', lazy=True, primaryjoin='foreign(Build.agent_id) == BuildAgent.id')
 
     def get_steps_snapshot(self):
         """解析步骤快照 JSON"""

@@ -72,6 +72,12 @@ def _run(app, build_id):
             auto_deploy_build(build)
         except Exception as e:
             logger.exception(f'[AutoDeploy] 构建#{build_id} 自动部署异常: {e}')
+            # 兜底结束部署步骤：异常路径未走 finish()，避免部署步骤永久 running（时间一直累加）
+            try:
+                from modules.cicd.services.build_service import update_deploy_step
+                update_deploy_step(build.build_no, 'failed', f'自动部署异常: {e}')
+            except Exception:
+                pass
 
 
 def auto_deploy_build(build):
@@ -86,9 +92,11 @@ def auto_deploy_build(build):
     new_tag = build.image_tag or ''
     snapshot = build.get_steps_snapshot()
 
-    # 实际构建并推送的服务名 = artifact_dirs 的 basename；selected 为空表示全部
+    # 实际构建并推送的服务名 = artifact_dirs 的 basename；selected 为空或覆盖全部服务 = 全部构建
     all_names = [d.strip().rstrip('/').split('/')[-1] for d in snapshot.get('artifact_dirs', []) if d.strip()]
     selected = snapshot.get('services') or []
+    # 全选（selected 覆盖全部服务）与未选（空）都按「全部构建」处理；只有真正的部分选择才逐文件 apply
+    is_full = (not selected) or set(selected) >= set(all_names)
     target = selected if selected else all_names
 
     log_path = _deploy_log_path(build.build_no)
@@ -113,7 +121,13 @@ def auto_deploy_build(build):
         else:
             update_deploy_step(build.build_no, 'success')
 
-    log('INFO', f'开始自动部署：环境={env_full} tag={new_tag} 范围={"全部" if not selected else "部分"} 服务={target}')
+    log('INFO', f'开始自动部署：环境={env_full} tag={new_tag} 范围={"全部" if is_full else "部分"} 服务={target}')
+
+    if build.project_type == 'backend' and not all_names:
+        # 后端未配置服务目录：编译完成但未收集产物/打镜像，部署步骤等待平台勾选回填后重新构建
+        log('WARN', '未配置服务目录，无法部署：请在部署步骤点「配置服务目录」勾选后重新构建')
+        update_deploy_step(build.build_no, 'waiting', '未配置服务目录，请配置后重新构建')
+        return
 
     if not new_tag:
         log('WARN', '构建无镜像 tag，跳过自动部署')
@@ -145,22 +159,33 @@ def auto_deploy_build(build):
     env_lock = _env_lock(env_full)
     lock_mode, lock_token = _acquire_env_lock(env_full, env_lock, log)
     try:
-        # 1. 逐服务修改镜像 tag（仅命中主容器镜像行 /{env_full}/{svc}:）
+        # 1. 修改镜像 tag：全部构建一次 sed 整目录替换；部分构建逐服务替换
         applied_files = []
-        for svc in target:
-            yaml_path = f'{deploy_dir}/{svc}.yaml'
-            r = k8s.exec_command(f'test -f {yaml_path} && echo EXISTS')
-            if r['stdout'] != 'EXISTS':
-                log('WARN', f'部署文件不存在，跳过: {svc}.yaml')
-                continue
-            sed = f'sed -i "s#{env_full}/{svc}:[^[:space:]]*#{env_full}/{svc}:{new_tag}#g" {yaml_path}'
+        if is_full:
+            # 一次替换目录下所有 YAML 里的 {env_full}/<svc>:<old> -> {env_full}/<svc>:<new>
+            sed = f"sed -i 's#\\({env_full}/[^:[:space:]]*\\):[^[:space:]]*#\\1:{new_tag}#g' {deploy_dir}/*.yaml"
             r = k8s.exec_command(sed)
             if r['exit_code'] != 0:
-                log('ERROR', f'修改 tag 失败: {svc}.yaml - {r["stderr"]}')
-                continue
-            log('OK', f'已修改 tag: {svc}.yaml -> {env_full}/{svc}:{new_tag}')
-            _sync_local_yaml_tag(env_full, svc, new_tag, log)
-            applied_files.append(svc)
+                log('ERROR', f'批量修改 tag 失败: {r["stderr"]}')
+            else:
+                log('OK', f'已批量修改全部服务 tag -> {env_full}/<svc>:{new_tag}')
+                _sync_local_dir_tags(env_full, new_tag, log)
+                applied_files = list(all_names)
+        else:
+            for svc in target:
+                yaml_path = f'{deploy_dir}/{svc}.yaml'
+                r = k8s.exec_command(f'test -f {yaml_path} && echo EXISTS')
+                if r['stdout'] != 'EXISTS':
+                    log('WARN', f'部署文件不存在，跳过: {svc}.yaml')
+                    continue
+                sed = f'sed -i "s#{env_full}/{svc}:[^[:space:]]*#{env_full}/{svc}:{new_tag}#g" {yaml_path}'
+                r = k8s.exec_command(sed)
+                if r['exit_code'] != 0:
+                    log('ERROR', f'修改 tag 失败: {svc}.yaml - {r["stderr"]}')
+                    continue
+                log('OK', f'已修改 tag: {svc}.yaml -> {env_full}/{svc}:{new_tag}')
+                _sync_local_yaml_tag(env_full, svc, new_tag, log)
+                applied_files.append(svc)
 
         if not applied_files:
             log('WARN', '无可应用的部署文件，结束自动部署')
@@ -168,7 +193,7 @@ def auto_deploy_build(build):
             return
 
         # 2. apply：部分构建逐个文件，全部构建整个 deployment 目录
-        if selected:
+        if not is_full:
             for svc in applied_files:
                 r = k8s.exec_command(f'kubectl apply -f {deploy_dir}/{svc}.yaml', timeout=120)
                 if r['exit_code'] == 0:
@@ -214,6 +239,36 @@ def _sync_local_yaml_tag(env_full, svc, new_tag, log):
         log('INFO', f'已同步本地 tag: {svc}.yaml -> {env_full}/{svc}:{new_tag}')
     except OSError as e:
         log('WARN', f'同步本地 {svc}.yaml 失败: {e}')
+
+
+def _sync_local_dir_tags(env_full, new_tag, log):
+    """批量同步本地 YAML 目录的镜像 tag（全部构建用）：
+    遍历 {output_dir}/{env_full}/deployment/*.yaml，把 {env_full}/<svc>:<old> 统一替换为 {env_full}/<svc>:<new>。
+    best-effort：失败仅 WARN，不影响远程部署流程。"""
+    from modules.deploy.api.shared import get_output_dir
+    local_dir = os.path.join(get_output_dir(), env_full, 'deployment')
+    if not os.path.isdir(local_dir):
+        log('WARN', f'本地部署目录不存在，跳过同步: {local_dir}')
+        return
+    pattern = '(' + re.escape(env_full) + r'/[^:\s]*):[^\s]*'
+    changed = 0
+    for fname in sorted(os.listdir(local_dir)):
+        if not (fname.endswith('.yaml') or fname.endswith('.yml')):
+            continue
+        path = os.path.join(local_dir, fname)
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            new_content, n = re.subn(pattern, f'\\1:{new_tag}', content)
+            if n == 0:
+                continue
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            changed += n
+        except OSError as e:
+            log('WARN', f'同步本地 {fname} 失败: {e}')
+    if changed:
+        log('INFO', f'已批量同步本地 tag：{changed} 处 -> {env_full}/<svc>:{new_tag}')
 
 
 def _deploy_log_path(build_no):

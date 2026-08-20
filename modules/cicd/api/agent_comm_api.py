@@ -145,8 +145,8 @@ def agent_build_step(build_id):
     if not build:
         return _agent_error('构建不存在', 404)
 
-    if status not in ('running', 'success', 'failed'):
-        return _agent_error('status 必须为 running/success/failed')
+    if status not in ('running', 'success', 'failed', 'skipped'):
+        return _agent_error('status 必须为 running/success/failed/skipped')
 
     # 更新步骤状态文件（SSE 端通过监听 build.json mtime 感知变化）
     build_service.update_step_status(
@@ -176,7 +176,7 @@ def agent_build_result(build_id):
     status = data.get('status', '')
 
     if status not in ('success', 'failed'):
-        return _agent_error('status 必须为 success 或 failed')
+        return _agent_error('status 必须为 success/failed')
 
     build = build_service.complete_build(
         build_id,
@@ -187,8 +187,8 @@ def agent_build_result(build_id):
     if not build:
         return _agent_error('构建不存在', 404)
 
-    # 构建成功后自动触发部署（Master 侧改远程 YAML 镜像 tag + kubectl apply，后台线程不阻塞响应）
-    if status == 'success':
+    # 构建成功后自动触发部署（仅当回调未被拒绝——已取消的构建不触发，防误部署）
+    if build.status == 'success':
         from modules.cicd.services.auto_deploy import trigger_auto_deploy
         trigger_auto_deploy(build.id)
 

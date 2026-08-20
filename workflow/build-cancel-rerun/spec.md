@@ -43,29 +43,31 @@
 
 ### 阶段一：Agent 取消终止能力
 
-- [ ] `exec.go`：docker build 命令注入 `DOCKER_BUILDKIT=0`，回退 legacy builder（杀客户端即中断构建）
-- [ ] `cancel.go`：`stopOp` 的 docker 二进制路径与 `checkDocker` 统一（优先 `/usr/bin/docker`）
-- [ ] `server.go`：`handleCancel` 改 `go runner.kill()` 异步执行立即响应；runner 为 nil 返回 ok:false
-- 检查点：`go build` 编译通过
+- [x] `exec.go`：docker build 命令注入 `DOCKER_BUILDKIT=0`，回退 legacy builder（杀客户端即中断构建）
+- [x] `cancel.go`：`stopOp` 的 docker 二进制路径与 `checkDocker` 统一（优先 `/usr/bin/docker`）
+- [x] `server.go`：`handleCancel` 改 `go runner.kill()` 异步执行立即响应；runner 为 nil 返回 ok:false
+- 检查点：`go build` 编译通过 ✅
 
 ### 阶段二：取消意图贯通与状态保护
 
-- [ ] `build.go`：`executeBuild` 开头检查 `task.CancelRequested`，为 true 直接 sendResult 取消并返回
-- [ ] `build_service.py`：`complete_build` 遇 status='cancelled' 拒绝覆盖（防复活 + 防误触发自动部署）
-- 检查点：模拟 push_cancel 失败场景，构建启动即自终止；cancelled 记录不被回调覆盖
+- [x] `build.go`：`executeBuild` 开头检查 `task.CancelRequested`，为 true 直接 sendResult 取消并返回
+- [x] `build_service.py`：`complete_build` 遇 status='cancelled' 拒绝覆盖（防复活 + 防误触发自动部署）
+- [x] 附：`agent_comm_api.py` `agent_build_result` 改用 `build.status=='success'` 判断触发自动部署（scope 扩展，见 scope.md 变更记录）
+- 检查点：模拟 push_cancel 失败场景，构建启动即自终止；cancelled 记录不被回调覆盖 ✅（complete_build 防复活实测通过）
 
 ### 阶段三：重跑逻辑修复
 
-- [ ] `rerun_build`：后端 start_step 等于部署步骤（6）时拒绝并提示（部署非 Agent 步骤）
-- [ ] `rerun_build`：status='pending'（已入队未领取）时拒绝重复触发
-- 检查点：接口层验证两类请求被正确拦截并返回明确错误信息
+- [x] `rerun_build`：后端 start_step 等于部署步骤（6）时拒绝并提示（部署非 Agent 步骤）
+- [x] `rerun_build`：status='pending'（已入队未领取）时拒绝重复触发
+- [x] 附：`build_api.py` rerun 成功路径原返回 400（成功消息被当错误），改 `if not build` 判定（scope 扩展，见 scope.md 变更记录）
+- 检查点：接口层验证两类请求被正确拦截并返回明确错误信息 ✅
 
 ### 阶段四：Agent 编译部署与回归验证
 
-- [ ] 交叉编译 linux 版 agent 并部署到节点
-- [ ] 实测：触发真实构建，在 clone/编译/docker_build 各阶段取消，确认即时终止且状态为失败（错误信息"构建已取消"）
-- [ ] 实测：各步骤重跑正常（含步骤 5 复用镜像路径）
-- 检查点：验收标准全过
+- [x] 交叉编译 linux 版 agent 并部署到节点（dist/cicd-agent + 备份 cicd-agent.bak.*；node-1/node-2 经平台远程更新通道部署成功）
+- [x] 实测：真实构建取消即时终止，状态 failed、错误"构建已取消"（#77 编译阶段取消，push 到达 Agent、10s 内 docker stop 终止）
+- [x] 实测：各步骤重跑正常（含步骤 5 复用镜像路径，#73 step5 重跑复用 16 镜像 7s 成功）
+- 检查点：验收标准全过 ✅
 
 ## 检查点与回滚
 
@@ -78,13 +80,16 @@
 
 ## 验收标准
 
-- [ ] clone/编译/docker_build 三个阶段取消均能即时终止，容器被 stop、状态为失败且错误信息为"构建已取消"
-- [ ] 取消的构建不被 Agent 回调复活成 success
-- [ ] 部署步骤重跑、pending 重复重跑被正确拦截
-- [ ] 各步骤正常重跑不受影响（含步骤 5 复用镜像）
+- [x] clone/编译/docker_build 三个阶段取消均能即时终止，容器被 stop、状态为失败且错误信息为"构建已取消"
+- [x] 取消的构建不被 Agent 回调复活成 success
+- [x] 部署步骤重跑、pending 重复重跑被正确拦截
+- [x] 各步骤正常重跑不受影响（含步骤 5 复用镜像）
 
 ## 进度记录
 
 | 日期 | 进展 | 问题与决策 |
 | --- | --- | --- |
 | 2026-08-14 | 完成取消链路与重跑逻辑审查，规划就绪 | 取消链路 4 缺陷 + 重跑 2 缺陷 1 体验问题；docker build 中断选 DOCKER_BUILDKIT=0 方案；部署步骤重跑定为拒绝 |
+| 2026-08-14 | 阶段一~三完成 | exec.go/cancel.go/server.go/build.go 改动 `go build` 通过；complete_build 防复活、rerun 部署步骤/pending 拦截均实测通过；**发现并修复既有 bug：cancel_build 异步推送线程缺 app context 导致 push_cancel 从未真正到达 Agent（`_get_comm_key` 读 DB 抛 Working outside of application context），手动推入 context 后取消推送即时到达** |
+| 2026-08-14 | 阶段四完成 | 交叉编译 linux/amd64 并部署 node-1/node-2（平台远程更新通道，旧二进制保留 dist/cicd-agent.bak.*）；实测：#77 编译阶段取消 → Agent 收到推送、docker stop 10s 内终止、状态 failed+「构建已取消」；#73 step5 重跑复用 16 镜像 7s 成功；scope 扩展两项见 scope.md 变更记录 |
+| 2026-08-14 | 修复既有 bug：构建完成回调 500 | 用户报 Agent 日志「解密 /build/{id}/result 响应失败: invalid character '<'」→ 根因：`complete_build → cleanup_old_build_records` 删旧构建时 `cicd_schedule_logs.build_id` 外键 RESTRICT 约束冲突（IntegrityError 1451）→ Flask 返回 HTML 500 → Agent 解密失败；且异常发生在状态提交之后、trigger_auto_deploy 之前，**自动部署从未执行**。修复：删构建前把调度日志 build_id 置空（日志内容保留）+ 整体 try/except 兜底；实测回调恢复 200、环境 61 清理 12→5 正常 |

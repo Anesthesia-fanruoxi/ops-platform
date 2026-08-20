@@ -8,6 +8,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -75,13 +76,16 @@ func (r *buildRunner) nextContainerName() string {
 	return fmt.Sprintf("cicd_%d_%d", r.buildID, time.Now().UnixNano())
 }
 
-// stopOp 终止单个命令：命名容器先 docker stop（仅杀客户端进程不会停止容器），再杀进程
+// stopOp 终止单个命令：命名容器先 docker stop（仅杀客户端进程不会停止容器），再发 SIGINT 让进程优雅退出
+// docker build 场景：SIGINT 会被 docker CLI 捕获，CLI 通知 buildkitd 取消构建后退出（与 Ctrl+C 行为一致）
 func stopOp(cmd *exec.Cmd, container string) {
 	if container != "" {
-		exec.Command("docker", "stop", container).Run()
+		// 与 checkDocker/dockerBinPath 统一 docker 二进制路径（systemd 精简 PATH 下裸 docker 可能找不到）
+		exec.Command(dockerBinPath(), "stop", container).Run()
 	}
 	if cmd != nil && cmd.Process != nil {
-		cmd.Process.Kill()
+		// 发 SIGINT（与 Ctrl+C 一致），让 docker CLI 有机会通知 buildkitd 取消构建
+		cmd.Process.Signal(os.Interrupt)
 	}
 }
 

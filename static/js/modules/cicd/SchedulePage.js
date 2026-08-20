@@ -63,14 +63,14 @@ const SchedulePage = {
             <span class="metric-label" style="width:auto; white-space:nowrap">Docker 缓存</span>
             <span class="cache-size" :style="{ color: cacheColor(a.docker_cache_size), whiteSpace: 'nowrap', fontWeight: 'bold', flexShrink: 0 }">[[ formatCache(a.docker_cache_size) ]]</span>
           </div>
-          <div class="agent-meta" style="margin-top:6px;display:flex;justify-content:space-between;align-items:center">
+          <div class="agent-meta" style="margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
             <span>心跳 [[ a.last_heartbeat || '-' ]]</span>
-            <template v-if="a.state !== 'server_offline'">
-              <div style="display:flex;gap:4px">
-                <el-button v-if="agentOpAllowed" size="small" @click.stop="openEditAgent(a)">编辑</el-button>
-                <el-button v-if="['idle','running','disabled'].includes(a.state) && agentOpAllowed" size="small" @click.stop="openUpdateDialog(a)">更新</el-button>
-                <el-button v-if="agentOpAllowed" size="small" @click.stop="a.state === 'stopped' ? reinstallAgent(a) : openCleanupDialog(a, 'reset')">[[ a.state === 'stopped' ? '安装' : '重置' ]]</el-button>
-                <el-button v-if="agentOpAllowed" size="small" @click.stop="openCleanupDialog(a, 'uninstall')">卸载</el-button>
+            <template v-if="a.state !== 'server_offline' && agentOpAllowed">
+              <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+                <el-button size="small" @click.stop="openEditAgent(a)">编辑</el-button>
+                <el-button v-if="['idle','running','disabled'].includes(a.state)" size="small" @click.stop="openUpdateDialog(a)">更新</el-button>
+                <el-button size="small" @click.stop="(a.state === 'stopped' ? reinstallAgent(a) : openCleanupDialog(a, 'reset'))">[[ a.state === 'stopped' ? '安装' : '重置' ]]</el-button>
+                <el-button size="small" type="danger" plain @click.stop="openCleanupDialog(a, 'uninstall')">卸载</el-button>
               </div>
             </template>
           </div>
@@ -93,9 +93,9 @@ const SchedulePage = {
           </template>
         </el-table-column>
         <el-table-column prop="build_no" label="构建编号" width="170" />
-        <el-table-column prop="project_name" label="项目" min-width="110" />
-        <el-table-column prop="environment_name" label="环境" min-width="100" show-overflow-tooltip />
-        <el-table-column prop="branch" label="分支" width="110" show-overflow-tooltip />
+        <el-table-column prop="project_name" label="项目" min-width="80" show-overflow-tooltip />
+        <el-table-column prop="environment_name" label="环境" min-width="70" show-overflow-tooltip />
+        <el-table-column prop="branch" label="分支" min-width="160" show-overflow-tooltip />
         <el-table-column label="状态" width="100" align="center">
           <template #default="s">
             <el-tag :type="logStatusType(s.row.status)" size="small">[[ logStatusLabel(s.row.status) ]]</el-tag>
@@ -376,6 +376,8 @@ const SchedulePage = {
       <el-button type="primary" :loading="saving" @click="confirmUpdate">确认更新</el-button>
     </template>
   </el-dialog>
+
+  <!-- ═══ 节点目录浏览弹窗已移除（目录功能下线，操作入口移至卡片平铺按钮）═══ -->
 </div>
 `,
   data() {
@@ -455,6 +457,7 @@ const SchedulePage = {
         if (res.code === 200) this.applyOverview(res.data);
       });
     },
+    // ─── 节点目录浏览（已移除）─────────────────────
     connectStream() {
       const token = localStorage.getItem('auth_token');
       const url = '/api/cicd/schedule/stream?token=' + encodeURIComponent(token || '');

@@ -10,7 +10,26 @@ const ServiceInfoPage = {
   name: 'ServiceInfoPage',
   compilerOptions: { delimiters: ['[[', ']]'] },
   template: `
-<div>
+<div class="serviceinfo-layout">
+  <aside class="serviceinfo-favbar" :class="{ collapsed: favCollapsed }">
+    <div class="serviceinfo-favhead">
+      <span class="serviceinfo-favtitle">环境收藏</span>
+      <el-button link size="small" class="serviceinfo-favtoggle" @click="toggleFavBar">[[ favCollapsed ? '»' : '«' ]]</el-button>
+    </div>
+    <div class="serviceinfo-favlist" v-if="!favCollapsed">
+      <div v-if="!favorites.length" class="serviceinfo-favempty">暂无收藏，选好环境后点「收藏此环境」</div>
+      <div v-for="f in favorites" :key="f.id" class="serviceinfo-favcard"
+           :class="{ 'is-active': f.project_name === selectedProject && f.env_name === selectedEnv }"
+           @click="selectFavorite(f)">
+        <div class="serviceinfo-favmain">
+          <div class="serviceinfo-favproj">[[ f.project_name ]]</div>
+          <div class="serviceinfo-favenv"><span class="serviceinfo-favdot">●</span> [[ f.env_name ]]</div>
+        </div>
+        <el-button link size="small" class="serviceinfo-favdel" @click.stop="removeFavorite(f.id)">✕</el-button>
+      </div>
+    </div>
+  </aside>
+  <div class="serviceinfo-main">
   <div class="toolbar" style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
     <el-select v-model="selectedProject" placeholder="选择项目" size="default" style="width:180px;"
                @change="onProjectChange" filterable>
@@ -20,7 +39,8 @@ const ServiceInfoPage = {
                @change="loadServices" :disabled="!selectedProject" filterable>
       <el-option v-for="e in envs" :key="e" :label="e" :value="e"></el-option>
     </el-select>
-    <el-button plain @click="loadServices" :disabled="!selectedProject || !selectedEnv">刷新</el-button>
+    <!-- SSE 实时推送无需手动刷新；仅当 SSE 回退/K8s 不可用（k8sError）时提供「重新连接」入口 -->
+    <el-button v-if="k8sError" type="warning" plain @click="loadServices">重新连接</el-button>
     <!-- 未选择环境时不显示（避免不可用按钮占位） -->
     <el-button v-if="selectedProject && selectedEnv" type="primary" plain @click="openGlobalNacos">全局 Nacos 配置</el-button>
     <el-button v-if="selectedProject && selectedEnv && canDeploy" type="success" plain
@@ -45,6 +65,7 @@ const ServiceInfoPage = {
       <span class="svc-lb-branch">[[ lastBuild.branch || '-' ]]</span>
       <span class="svc-lb-time">[[ lastBuild.created_at || '' ]]</span>
     </span>
+    <el-button v-if="selectedProject && selectedEnv" type="primary" plain size="small" @click="addFavorite">★ 收藏此环境</el-button>
   </div>
 
   <!-- 工具栏与内容区之间的虚线分割线 -->
@@ -116,7 +137,7 @@ const ServiceInfoPage = {
             <el-switch :model-value="allServicesChecked" @change="toggleAllServices" active-text="全部勾选" size="small" />
           </div>
           <div class="svc-service-list">
-            <div v-if="!serviceOptions.length" class="svc-col-loading">加载服务中...</div>
+            <div v-if="!serviceOptions.length" class="svc-col-loading">[[ servicesLoaded ? '暂未配置服务' : '加载服务中...' ]]</div>
             <div v-for="s in serviceOptions" :key="s" class="svc-service-item">
               <span style="font-family:monospace;font-size:13px">[[ s ]]</span>
               <el-switch v-model="serviceToggles[s]" size="small" />
@@ -142,7 +163,8 @@ const ServiceInfoPage = {
         <span style="font-weight:600;font-size:15px">[[ bpBuild?.build_no || '' ]]</span>
         <el-tag :type="bpStatusType(bpBuild?.status)" size="small">[[ bpStatusText(bpBuild?.status) ]]</el-tag>
         <span style="flex:1"></span>
-        <el-button v-if="bpBuild && (bpBuild.status === 'running' || bpBuild.status === 'pending')"
+        <el-button v-if="bpBuild && bpDeployWaiting" type="warning" size="small" plain @click="openSelectDirsDialog">配置服务目录</el-button>
+        <el-button v-if="bpBuild && ['running', 'pending'].includes(bpBuild.status)"
                    type="danger" size="small" plain @click="cancelBuild">取消构建</el-button>
         <el-dropdown v-if="bpBuild && ['success', 'failed', 'cancelled'].includes(bpBuild.status) && bpSteps.length"
                      @command="rerunFromStep">
@@ -171,7 +193,7 @@ const ServiceInfoPage = {
     </el-steps>
     <el-alert v-if="bpBuild && bpBuild.status === 'failed' && bpBuild.error_msg"
               :title="bpBuild.error_msg" type="error" :closable="false" show-icon style="margin-bottom:12px" />
-    <div ref="bpLogContainer" class="bp-log-box">[[ bpLog || '等待日志输出...' ]]</div>
+    <div ref="bpLogContainer" class="bp-log-box">[[ bpLogView() || '等待日志输出...' ]]</div>
   </el-drawer>
 
   <el-alert v-if="k8sError" type="warning" :closable="false" style="margin-bottom:12px;"
@@ -179,7 +201,12 @@ const ServiceInfoPage = {
 
 
   <div class="svc-card-grid" v-loading="loading">
-    <div v-if="!services.length && !loading" class="svc-empty">
+    <div v-if="!selectedProject || !selectedEnv" class="svc-empty svc-empty-hint">
+      <div class="svc-empty-icon">📁</div>
+      <div class="svc-empty-text">请先选择一个环境来查看内容</div>
+      <div class="svc-empty-sub">或从左侧收藏栏中选择一个已收藏的环境</div>
+    </div>
+    <div v-else-if="!services.length && !loading" class="svc-empty">
       <span style="color:#909399;font-size:13px">暂无服务（该环境未生成部署配置）</span>
     </div>
     <div v-for="svc in services" :key="svc.name" class="svc-card">
@@ -239,8 +266,8 @@ const ServiceInfoPage = {
           <el-option :value="1000" label="最近 1000 行"></el-option>
         </el-select>
         <span class="svc-log-status">
-          <span :style="{ width:'8px',height:'8px',borderRadius:'50%',background: streamConnected ? '#67c23a' : '#f56c6c' }"></span>
-          [[ streamConnected ? '实时跟随中' : '未连接' ]]
+          <span :style="{ width:'8px',height:'8px',borderRadius:'50%',background: streamConnected ? '#67c23a' : (logPaused ? '#e6a23c' : '#f56c6c') }"></span>
+          [[ streamConnected ? '实时跟随中' : (logPaused ? '已暂停追踪' : '未连接') ]]
         </span>
         <span class="svc-log-header-tools">
           <el-input v-model="logSearchWord" ref="logSearch" size="small" style="width:200px;" clearable
@@ -252,6 +279,7 @@ const ServiceInfoPage = {
           <el-button v-if="logSearchWord" size="small" :disabled="!logSearchMatches.length" @click="logSearchJump(1)">↓</el-button>
           <span v-if="logFullscreen" class="svc-log-fs-tip">按 ESC 退出全屏</span>
           <el-button size="small" @click="toggleLogFullscreen">[[ logFullscreen ? '退出全屏' : '⛶ 全屏' ]]</el-button>
+          <el-button size="small" :type="logPaused ? 'warning' : ''" @click="toggleLogPause">[[ logPaused ? '▶ 恢复追踪' : '⏸ 暂停追踪' ]]</el-button>
           <el-button size="small" @click="connectLogStream">重连</el-button>
           <el-button size="small" plain @click="clearLogScreen">清屏</el-button>
         </span>
@@ -381,6 +409,55 @@ const ServiceInfoPage = {
       <el-button type="primary" :loading="publishing" @click="doPublish">确认发布</el-button>
     </template>
   </el-dialog>
+
+  <!-- 选择服务目录弹窗（部署步骤 waiting 时勾选回填模板，需重新构建） -->
+  <el-dialog v-model="selectDirsVisible" :title="'选择服务目录 - ' + (bpBuild?.build_no || '')" width="760px" :close-on-click-modal="false">
+    <el-alert type="warning" :closable="false" show-icon style="margin-bottom:10px">
+      模板未配置服务目录，本次构建已跳过产物收集/打镜像/推送。请浏览该构建编译后的代码目录，勾选要构建的服务目录保存到模板，然后重新触发构建。
+    </el-alert>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <span style="font-size:13px;white-space:nowrap">
+        <el-link type="primary" :underline="false" @click="loadCodeDirs('')">code目录</el-link>
+        <template v-for="(seg, i) in selectDirsSegments" :key="i">
+          <span style="margin:0 3px;color:#c0c4cc">/</span>
+          <el-link type="primary" :underline="false" @click="loadCodeDirs(selectDirsSegments.slice(0, i + 1).join('/'))">[[ seg ]]</el-link>
+        </template>
+      </span>
+      <span style="flex:1"></span>
+      <el-button size="small" :disabled="!selectDirsPath" @click="loadCodeDirs(selectDirsParent)">上级</el-button>
+      <el-button size="small" @click="loadCodeDirs(selectDirsPath)">刷新</el-button>
+      </div>
+      <div style="font-size:12px;color:#909399;margin:4px 0 8px">产物目录：<b style="color:#303133">[[ selectDirsArtifactDir || '未设置（收集整服务目录）' ]]</b>（点目录行「设为产物」/文件行「设为该类产物」快速设置）</div>
+    <el-table :data="selectDirsEntries" size="small" border stripe v-loading="selectDirsLoading" style="width:100%" max-height="40vh">
+      <el-table-column label="名称" min-width="320">
+        <template #default="s">
+          <span v-if="s.row.type === 'dir'" style="display:inline-flex;align-items:center;gap:6px">
+            <el-checkbox :model-value="!!selectDirsChecked[selectDirJoin(s.row.name)]"
+                         @change="(v) => toggleSelectDir(selectDirJoin(s.row.name), v)" />
+            <span style="cursor:pointer;color:#409eff" @click="loadCodeDirs(selectDirJoin(s.row.name))">📁 [[ s.row.name ]]</span>
+            <el-link type="success" :underline="false" style="font-size:12px" @click="setDirAsArtifact(s.row.name)">设为产物</el-link>
+          </span>
+          <span v-else style="display:inline-flex;align-items:center;gap:6px">
+            📄 [[ s.row.name ]]
+            <el-link type="success" :underline="false" style="font-size:12px" @click="setFileAsArtifact(s.row.name)">设为该类产物</el-link>
+          </span>
+        </template>
+      </el-table-column>
+      <el-table-column label="类型" width="80" align="center">
+        <template #default="s"><el-tag size="small" :type="s.row.type === 'dir' ? 'primary' : 'info'">[[ s.row.type ]]</el-tag></template>
+      </el-table-column>
+    </el-table>
+    <div style="margin-top:10px">
+      <div style="font-size:13px;color:#606266;margin-bottom:6px">已选服务目录（[[ selectDirsList.length ]]）：</div>
+      <div v-if="!selectDirsList.length" style="color:#c0c4cc;font-size:12px">尚未选择，至少勾选一个目录</div>
+      <el-tag v-for="(d, i) in selectDirsList" :key="d" size="small" closable style="margin:0 6px 6px 0" @close="removeSelectDir(i)">[[ d ]]</el-tag>
+    </div>
+    <template #footer>
+      <el-button @click="selectDirsVisible = false">取消</el-button>
+      <el-button type="primary" :loading="selectDirsSaving" :disabled="!selectDirsList.length" @click="confirmSelectDirs">保存配置</el-button>
+    </template>
+  </el-dialog>
+  </div><!-- /serviceinfo-main -->
 </div>
 `,
   data() {
@@ -391,6 +468,8 @@ const ServiceInfoPage = {
       envs: [],
       envList: [],  // [{id, environment}] 保留 id 供快捷部署触发
       selectedEnv: '',
+      favorites: [],          // 当前用户的环境收藏（来自后端，按 user_id 隔离）
+      favCollapsed: false,    // 收藏栏是否收起
       services: [],
       loading: false,
       k8sError: '',
@@ -410,12 +489,13 @@ const ServiceInfoPage = {
       recentBranchesFiltered: [],
       serviceToggles: {},
       serviceOptions: [],
+      servicesLoaded: false,
       buildTriggering: false,
       // 构建进度抽屉
       bpDrawerVisible: false,
       bpBuild: null,
       bpSteps: [],
-      bpLog: '',
+      bpLogFull: '',  // 全量日志缓冲（仅 all 模式 SSE 累积）
       bpLogMode: 'all',
       bpStepES: null,
       bpES: null,
@@ -439,6 +519,7 @@ const ServiceInfoPage = {
       logSearchWord: '', logSearchMatches: [], logSearchIdx: -1,
       logStream: null,
       streamConnected: false,
+      logPaused: false,  // 暂停追踪：断开 SSE 但保留已加载日志，供手动翻找
 
       // 部署配置弹窗
       envVisible: false, envRows: [], envServiceName: '', envSearchWord: '',
@@ -458,6 +539,16 @@ const ServiceInfoPage = {
       matchCount: 0,
       configOriginal: '',
       publishing: false,
+      // 选择服务目录弹窗（部署等待时勾选回填模板）
+      selectDirsVisible: false,
+      selectDirsPath: '',
+      selectDirsEntries: [],
+      selectDirsLoading: false,
+      selectDirsChecked: {},
+      selectDirsList: [],
+      selectDirsArtifactDir: '',   // 全局产物目录（各服务内统一子路径），随服务目录一并回填模板
+      selectDirsFirstLoad: true,   // 仅首次加载目录时预填产物目录，避免浏览子目录时覆盖用户输入
+      selectDirsSaving: false,
       // 发布对比
       diffVisible: false,
       diffRows: [],
@@ -465,6 +556,15 @@ const ServiceInfoPage = {
     };
   },
   computed: {
+    // 部署步骤 waiting：后端未配置服务目录，需勾选回填后重新构建
+    bpDeployWaiting() {
+      return (this.bpSteps || []).some(s => s.key === 'deploy' && s.status === 'waiting');
+    },
+    selectDirsSegments() { return this.selectDirsPath ? this.selectDirsPath.split('/').filter(Boolean) : []; },
+    selectDirsParent() {
+      const segs = this.selectDirsSegments;
+      return segs.length > 1 ? segs.slice(0, -1).join('/') : '';
+    },
     cfgLineCount() { return (this.configContent || '').split(String.fromCharCode(10)).length; },
     filteredEnvRows() {
       if (!this.envSearchWord) return this.envRows;
@@ -568,7 +668,107 @@ const ServiceInfoPage = {
       else this.renderConfigView();
     },
   },
+  mounted() {
+    this.loadFavorites();
+    this.restoreLastSelection();
+  },
   methods: {
+    // ─── 环境收藏（按用户落库） ──────────────────────────────
+    loadFavorites() {
+      ajax('GET', '/api/deploy/service-info/favorites', null, (r) => {
+        if (r.code === 200) this.favorites = r.data || [];
+      });
+    },
+    // ─── 上次选择回填（localStorage 持久化，刷新后自动恢复） ──
+    persistSelection() {
+      if (!this.selectedProject || !this.selectedEnv) return;
+      try {
+        localStorage.setItem('svc_last_selection', JSON.stringify({
+          project: this.selectedProject,
+          env: this.selectedEnv,
+        }));
+      } catch (e) { /* 忽略存储异常 */ }
+    },
+    restoreLastSelection() {
+      let saved = null;
+      try {
+        saved = JSON.parse(localStorage.getItem('svc_last_selection') || 'null');
+      } catch (e) { saved = null; }
+      if (!saved || !saved.project) return;
+      this.selectedProject = saved.project;
+      // 环境列表需异步加载（与 onProjectChange 相同逻辑，但不能直接调它——它会清空 selectedEnv）
+      ajax('GET', '/api/manage/environments/list?project=' + encodeURIComponent(saved.project), null, (r) => {
+        this.envList = ((r.data || {}).list || []);
+        this.envs = this.envList.map(e => e.environment);
+        this.syncSelectedEnvData();
+        if (saved.env && this.envs.includes(saved.env)) {
+          this.selectedEnv = saved.env;
+          this.loadServices();
+        } else if (saved.env) {
+          // 环境已被删除：保留项目，仅提示重新选择环境
+          ElementPlus.ElMessage.warning('上次选择的环境已不存在，请重新选择');
+        }
+      });
+    },
+    addFavorite() {
+      if (!this.selectedProject || !this.selectedEnv) {
+        ElementPlus.ElMessage.warning('请先选择项目与环境');
+        return;
+      }
+      const proj = this.projectList.find(p => p.name === this.selectedProject);
+      const env = this.envList.find(e => e.environment === this.selectedEnv) || this.selectedEnvData;
+      if (!proj || !env || !env.id) {
+        ElementPlus.ElMessage.warning('无法识别当前项目/环境');
+        return;
+      }
+      if (this.favorites.some(f => f.project_name === this.selectedProject && f.env_name === this.selectedEnv)) {
+        ElementPlus.ElMessage.info('已收藏');
+        return;
+      }
+      ajax('POST', '/api/deploy/service-info/favorites', { project_id: proj.id, env_id: env.id }, (r) => {
+        if (r.code === 200) {
+          if (!this.favorites.some(f => f.id === r.data.id)) this.favorites.unshift(r.data);
+          ElementPlus.ElMessage.success('已收藏');
+        } else {
+          ElementPlus.ElMessage.warning(r.msg || '收藏失败');
+        }
+      });
+    },
+    removeFavorite(id) {
+      ajax('DELETE', '/api/deploy/service-info/favorites/' + id, null, (r) => {
+        if (r.code === 200) {
+          this.favorites = this.favorites.filter(f => f.id !== id);
+        } else {
+          ElementPlus.ElMessage.warning(r.msg || '取消收藏失败');
+        }
+      });
+    },
+    selectFavorite(item) {
+      // 跨项目：重置并加载目标项目环境列表后回填；同项目：仅换环境
+      if (this.selectedProject !== item.project_name) {
+        this.closeEnvBuildStream();
+        this.closeSvcStream();
+        this.activeBuild = null;
+        this.selectedEnv = '';
+        this.services = [];
+        this.envs = [];
+        this.selectedProject = item.project_name;
+      }
+      ajax('GET', '/api/manage/environments/list?project=' + encodeURIComponent(item.project_name), null, (r) => {
+        this.envList = ((r.data || {}).list || []);
+        this.envs = this.envList.map(e => e.environment);
+        this.syncSelectedEnvData();
+        if (this.envs.includes(item.env_name)) {
+          this.selectedEnv = item.env_name;
+          this.loadServices();
+        } else {
+          ElementPlus.ElMessage.warning('该环境已不存在，请重新选择');
+        }
+      });
+    },
+    toggleFavBar() {
+      this.favCollapsed = !this.favCollapsed;
+    },
     loadProjects() {
       ajax('GET', '/api/admin/projects', null, (r) => {
         this.projectList = r.data || [];
@@ -660,6 +860,7 @@ const ServiceInfoPage = {
       this.recentBranchesFiltered = [];
       this.serviceToggles = {};
       this.serviceOptions = [];
+      this.servicesLoaded = false;
       if (row.id) {
         ajax('GET', '/api/cicd/builds?environment_id=' + row.id, null, (r) => {
           if (r.code === 200) {
@@ -678,6 +879,7 @@ const ServiceInfoPage = {
     _loadBuildServices(row) {
       const pref = this._buildPrefLoad(row.id);
       ajax('GET', '/api/cicd/builds/services?project_id=' + row.project_id, null, (r) => {
+        this.servicesLoaded = true;
         if (r.code === 200) {
           this.serviceOptions = r.data || [];
           const toggles = {};
@@ -691,7 +893,7 @@ const ServiceInfoPage = {
           }
           this.serviceToggles = toggles;
         }
-      });
+      }, () => { this.servicesLoaded = true; });
     },
     subsequenceMatch(text, keyword) {
       let i = 0;
@@ -766,7 +968,6 @@ const ServiceInfoPage = {
           this.buildDialogVisible = false;
           this.loadEnvs();
           this.loadServices();
-          this.openProgressDrawer(res.data);
         } else {
           ElementPlus.ElMessage.error(res.msg || '触发失败');
         }
@@ -776,7 +977,7 @@ const ServiceInfoPage = {
     openProgressDrawer(build) {
       this.bpBuild = build;
       this.bpSteps = [];
-      this.bpLog = '';
+      this.bpLogFull = '';
       this.bpLogMode = 'all';
       this.bpDrawerVisible = true;
       this.stopBpTimer();
@@ -793,7 +994,7 @@ const ServiceInfoPage = {
       es.onmessage = (evt) => {
         const data = JSON.parse(evt.data);
         this.bpSteps = data.steps || [];
-        if (this.bpLogMode === 'all' && !this.bpES) {
+        if (!this.bpES) {
           this.connectBuildLog('all');
         }
         const buildStatus = data.build_status;
@@ -829,13 +1030,14 @@ const ServiceInfoPage = {
       });
     },
     connectBuildLog(type) {
+      // 始终只维持 1 条 all 模式 SSE；切换步骤只改本地视图，不重连
       this.disconnectBpLog();
       const token = localStorage.getItem('auth_token') || '';
-      const url = '/api/cicd/builds/' + this.bpBuild.id + '/log?type=' + type + '&follow=true&token=' + encodeURIComponent(token);
+      const url = '/api/cicd/builds/' + this.bpBuild.id + '/log?type=all&follow=true&token=' + encodeURIComponent(token);
       const es = new EventSource(url);
       this.bpES = es;
       es.onmessage = (evt) => {
-        this.bpLog += evt.data.replace(/\\n/g, '\n');
+        this.bpLogFull += evt.data.replace(/\\n/g, '\n');
         this.$nextTick(() => {
           const c = this.$refs.bpLogContainer;
           if (c) c.scrollTop = c.scrollHeight;
@@ -861,9 +1063,102 @@ const ServiceInfoPage = {
     bpStepStatus(step) {
       if (!step) return 'wait';
       if (step.status === 'success') return 'success';
-      if (step.status === 'running') return 'process';
+      if (step.status === 'running' || step.status === 'waiting') return 'process';
       if (step.status === 'failed') return 'error';
       return 'wait';
+    },
+    // ─── 选择服务目录（部署等待时勾选回填模板）─────────────────────────
+    openSelectDirsDialog() {
+      this.selectDirsChecked = {};
+      this.selectDirsList = [];
+      this.selectDirsArtifactDir = '';
+      this.selectDirsFirstLoad = true;
+      this.selectDirsVisible = true;
+      this.loadCodeDirs('');
+    },
+    loadCodeDirs(path) {
+      if (!this.bpBuild) return;
+      this.selectDirsPath = path || '';
+      this.selectDirsLoading = true;
+      const params = new URLSearchParams({ path: this.selectDirsPath });
+      ajax('GET', '/api/cicd/builds/' + this.bpBuild.id + '/code-dirs?' + params.toString(), null, (r) => {
+        this.selectDirsLoading = false;
+        if (r.code === 200 && r.data) {
+          this.selectDirsEntries = r.data.entries || [];
+          if (this.selectDirsFirstLoad) {
+            this.selectDirsArtifactDir = r.data.artifact_dir || '';
+            this.selectDirsFirstLoad = false;
+          }
+        } else {
+          this.selectDirsEntries = [];
+          ElementPlus.ElMessage.error(r.msg || '读取目录失败');
+        }
+      }, () => { this.selectDirsLoading = false; });
+    },
+    selectDirJoin(name) {
+      return this.selectDirsPath ? this.selectDirsPath + '/' + name : name;
+    },
+    // 计算 fullPath 相对于「已勾选服务目录」的子路径；无匹配时用首段（服务目录）兜底
+    relFromService(fullPath) {
+      let rel = fullPath, best = '';
+      for (const svc of this.selectDirsList) {
+        if (fullPath === svc) { best = svc; rel = ''; break; }
+        if (fullPath.startsWith(svc + '/') && svc.length > best.length) { best = svc; rel = fullPath.slice(svc.length + 1); }
+      }
+      if (!best) {
+        const segs = fullPath.split('/');
+        rel = segs.length > 1 ? segs.slice(1).join('/') : '';
+      }
+      return rel;
+    },
+    // 目录行：设定该目录为产物目录（相对服务目录的子路径）
+    setDirAsArtifact(name) {
+      const rel = this.relFromService(this.selectDirJoin(name));
+      this.selectDirsArtifactDir = rel;
+      ElementPlus.ElMessage.success(rel ? ('已设定产物目录：' + rel) : '已设定：收集服务根目录全部内容');
+    },
+    // 文件行：设定此类文件为产物，按扩展名填入通配符（*.ext 或 *）
+    setFileAsArtifact(name) {
+      const dirRel = this.relFromService(this.selectDirsPath);
+      const dot = name.lastIndexOf('.');
+      const wc = dot > 0 ? '*' + name.slice(dot) : '*';
+      const val = dirRel ? dirRel + '/' + wc : wc;
+      ElementPlus.ElMessageBox.confirm('设定此类文件（' + wc + '）为产物？将填入：' + val, '设定产物', {
+        confirmButtonText: '确定', cancelButtonText: '取消', type: 'info'
+      }).then(() => {
+        this.selectDirsArtifactDir = val;
+        ElementPlus.ElMessage.success('已设定产物：' + val);
+      }).catch(() => {});
+    },
+    toggleSelectDir(name, v) {
+      if (v) {
+        this.selectDirsChecked[name] = true;
+        if (!this.selectDirsList.includes(name)) this.selectDirsList.push(name);
+      } else {
+        delete this.selectDirsChecked[name];
+        const i = this.selectDirsList.indexOf(name);
+        if (i > -1) this.selectDirsList.splice(i, 1);
+      }
+    },
+    removeSelectDir(i) {
+      const name = this.selectDirsList[i];
+      this.selectDirsList.splice(i, 1);
+      if (name) delete this.selectDirsChecked[name];
+    },
+    confirmSelectDirs() {
+      if (!this.selectDirsList.length) { ElementPlus.ElMessage.warning('请至少勾选一个服务目录'); return; }
+      this.selectDirsSaving = true;
+      ajax('POST', '/api/cicd/builds/' + this.bpBuild.id + '/configure-dirs',
+        { artifact_dirs: this.selectDirsList.slice(), artifact_dir: (this.selectDirsArtifactDir || '').trim() }, (res) => {
+        this.selectDirsSaving = false;
+        if (res.code === 200) {
+          ElementPlus.ElMessage.success(res.msg || '服务目录已回填到流程模板，请重新触发构建');
+          this.selectDirsVisible = false;
+          this.loadEnvs();
+        } else {
+          ElementPlus.ElMessage.error(res.msg || '保存失败');
+        }
+      }, () => { this.selectDirsSaving = false; });
     },
     parseStepTime(str) {
       const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?/.exec(str || '');
@@ -890,15 +1185,48 @@ const ServiceInfoPage = {
       if (s.duration) return this.fmtDuration(s.duration);
       return '';
     },
+    // 按步骤标记从全量日志中提取对应段落（起始取最后一次出现，兼容重跑；结束取下一标记）
+    bpLogSection(mode) {
+      const log = this.bpLogFull;
+      if (!log) return '';
+      // 步骤日志标记（与 Agent stepMarkers + Master 部署段一致）
+      const MARKERS = {
+        git: '=== Git Clone ===',
+        mvn: '=== 编译构建 ===',
+        product: '=== 产物收集 ===',
+        build: '=== Docker Build ===',
+        push: '=== Docker Push ===',
+        deploy: '=== 部署 ==='
+      };
+      const marker = MARKERS[mode];
+      if (!marker) return log;
+      const start = log.lastIndexOf(marker);
+      if (start < 0) return '';
+      // 从 marker 后找下一个步骤标记作为结束
+      let end = log.length;
+      for (const m of Object.values(MARKERS)) {
+        if (m === marker) continue;
+        const idx = log.indexOf(m, start + marker.length);
+        if (idx > 0 && idx < end) end = idx;
+      }
+      return log.substring(start, end);
+    },
+    // 当前视图日志（按模式切分 + 渲染限量 500KB）
+    bpLogView() {
+      let text = this.bpLogMode === 'all' ? this.bpLogFull : this.bpLogSection(this.bpLogMode);
+      if (!text) return '';
+      const MAX = 512000;  // 500KB
+      if (text.length > MAX) {
+        return '...（日志过长，仅显示尾部 ' + Math.round(MAX / 1024) + 'KB）...\n' + text.slice(-MAX);
+      }
+      return text;
+    },
     switchBpLog(stepNo) {
+      // 切换步骤只改本地视图，不重连 SSE
       this.bpLogMode = this.bpStepType(stepNo);
-      this.bpLog = '';
-      this.connectBuildLog(this.bpLogMode);
     },
     switchBpLogAll() {
       this.bpLogMode = 'all';
-      this.bpLog = '';
-      this.connectBuildLog('all');
     },
     stopBpPolling() {
       this.disconnectBpSteps();
@@ -932,9 +1260,9 @@ const ServiceInfoPage = {
           if (res.code === 200) {
             ElementPlus.ElMessage.success(res.msg || '已加入重跑队列');
             this.bpBuild = Object.assign({}, this.bpBuild, res.data || {}, { error_msg: '' });
-            this.bpLog = '';
+            this.bpLogFull = '';
             this.connectBuildSteps();
-            this.connectBuildLog(this.bpLogMode);
+            this.connectBuildLog('all');
           } else {
             ElementPlus.ElMessage.error(res.msg || '重跑失败');
           }
@@ -982,7 +1310,21 @@ const ServiceInfoPage = {
           if (wasRunning && !run) this.loadEnvs();
         } catch (e) { /* 忽略解析错误 */ }
       };
-      es.onerror = () => { es.close(); this.envBuildStream = null; };
+      es.onerror = () => {
+        es.close();
+        this.envBuildStream = null;
+        // 流断开时清掉残留的「构建中」指示，避免 SSE 断开后 UI 卡死在构建态
+        if (this.activeBuild) {
+          this.activeBuild = null;
+          this.loadEnvs();
+        }
+        // 自动重连：10s 后重建 SSE（仅当环境未切换、未主动关闭）
+        setTimeout(() => {
+          if (this.selectedEnvData && this.selectedEnvData.id === envId && !this.envBuildStream) {
+            this.subscribeEnvBuilds();
+          }
+        }, 10000);
+      };
     },
     closeEnvBuildStream() {
       if (this.envBuildStream) { this.envBuildStream.close(); this.envBuildStream = null; }
@@ -990,6 +1332,7 @@ const ServiceInfoPage = {
     loadServices() {
       // 主数据源：SSE 实时流（快照 + 增量，滚动更新实时可见）；断连/出错自动回退 HTTP
       if (!this.selectedProject || !this.selectedEnv) return;
+      this.persistSelection();  // 记录"上次选择"，供页面刷新后回填
       this.syncSelectedEnvData();
       this.closeSvcStream();
       this.k8sError = '';
@@ -1171,6 +1514,7 @@ const ServiceInfoPage = {
 
     connectLogStream() {
       this.closeLogStream();
+      this.logPaused = false;  // 重连即恢复实时追踪
       if (!this.logPod) return;
       this.logLines = [];
       this.streamConnected = false;
@@ -1214,6 +1558,15 @@ const ServiceInfoPage = {
         es.close();
         this.logStream = null;
       };
+    },
+    // 暂停/恢复追踪：暂停直接断开 SSE（不积压日志，保留已加载内容供手动翻找）；恢复则重新加载日志并继续 follow
+    toggleLogPause() {
+      if (this.logPaused) {
+        this.connectLogStream();
+      } else {
+        this.closeLogStream();
+        this.logPaused = true;
+      }
     },
     closeLogStream() {
       if (this.logStream) {
@@ -1721,7 +2074,9 @@ const ServiceInfoPage = {
 
 // ── 服务信息页样式 ──
 (function() {
-  if (document.getElementById('service-info-style')) return;
+  // 带版本号：样式改动后强制覆盖旧节点，避免硬刷新后旧 CSS 缓存不更新
+  const OLD = document.getElementById('service-info-style');
+  if (OLD) OLD.remove();
   const style = document.createElement('style');
   style.id = 'service-info-style';
   style.textContent = `
@@ -2096,6 +2451,14 @@ const ServiceInfoPage = {
 .svc-card-image { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .svc-card-actions { border-top: 1px dashed #ebeef5; margin-top: 8px; padding-top: 8px; display: flex; gap: 4px; }
 .svc-empty { padding: 40px 0; text-align: center; }
+/* 首次进入、未选环境时的引导提示 */
+.svc-empty-hint {
+  grid-column: 1 / -1; padding: 80px 0;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.svc-empty-icon { font-size: 44px; line-height: 1; opacity: .7; margin-bottom: 8px; }
+.svc-empty-text { font-size: 15px; color: #606266; font-weight: 500; }
+.svc-empty-sub { font-size: 13px; color: #c0c4cc; }
 .svc-config-pre code { background: transparent; font-family: inherit; font-size: inherit; }
 /* hljs 深青蓝底配色（与部署日志同款护眼色） */
 .svc-config-pre .hljs-comment, .svc-config-pre .hljs-meta { color: #6a9955; }
@@ -2127,6 +2490,44 @@ const ServiceInfoPage = {
   text-align: center; padding: 4px 0; font-size: 12px;
   color: #909399; background: #fafafa; border-top: 1px solid #ebeef5; border-bottom: 1px solid #ebeef5;
 }
+
+/* ═══ 环境收藏栏（按用户落库，页面专属前缀 serviceinfo-）═══ */
+/* .main 可视高 = 100vh - topbar(56) - padding上下(48)；收藏栏铺满该高度，主区仍可滚动 */
+.serviceinfo-layout {
+  display: flex; width: 100%; gap: 16px; align-items: stretch;
+  min-height: calc(100vh - 104px);
+}
+.serviceinfo-favbar {
+  flex: 0 0 220px; width: 220px;
+  background: #fafbfc; border: 1px solid #ebeef5; border-radius: 8px;
+  padding: 12px; display: flex; flex-direction: column;
+  transition: flex-basis .2s ease, width .2s ease, padding .2s ease;
+}
+.serviceinfo-favbar.collapsed { flex: 0 0 44px; width: 44px; padding: 12px 6px; }
+.serviceinfo-favhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.serviceinfo-favbar.collapsed .serviceinfo-favhead { justify-content: center; }
+.serviceinfo-favtitle { font-size: 14px; font-weight: 600; color: #303133; white-space: nowrap; }
+.serviceinfo-favbar.collapsed .serviceinfo-favtitle { display: none; }
+.serviceinfo-favtoggle { font-size: 14px; color: #909399; padding: 2px 4px; }
+.serviceinfo-favlist { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; overflow-y: auto; }
+.serviceinfo-favempty { color: #c0c4cc; font-size: 12px; text-align: center; padding: 24px 8px; line-height: 1.6; flex: 1; display: flex; align-items: center; justify-content: center; }
+.serviceinfo-favcard {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  background: #fff; border: 1px solid #ebeef5; border-radius: 8px;
+  padding: 8px 10px; cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.serviceinfo-favcard:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(64, 158, 255, .10); }
+.serviceinfo-favcard.is-active { border-left: 4px solid #409eff; background: #ecf5ff; }
+.serviceinfo-favmain { min-width: 0; flex: 1; }
+.serviceinfo-favproj { font-weight: 600; font-size: 13px; color: #303133; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.serviceinfo-favenv { font-size: 12px; color: #909399; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.serviceinfo-favdot { color: #c0c4cc; margin-right: 4px; }
+.serviceinfo-favcard.is-active .serviceinfo-favdot { color: #409eff; }
+.serviceinfo-favdel { color: #c0c4cc; opacity: 0; transition: opacity .15s, color .15s; flex-shrink: 0; padding: 2px 4px; }
+.serviceinfo-favcard:hover .serviceinfo-favdel { opacity: 1; color: #f56c6c; }
+.serviceinfo-main { flex: 1; min-width: 0; }
 `;
+
   document.head.appendChild(style);
 })();

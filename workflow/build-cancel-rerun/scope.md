@@ -26,3 +26,5 @@
 | 日期 | 变更内容 | 原因 |
 | --- | --- | --- |
 | 2026-08-14 | 初始范围确定 | 取消链路审查发现 4 缺陷、重跑审查发现 2 缺陷 1 体验问题；体验问题（节点离线 pending）定为本次不做 |
+| 2026-08-14 | scope 扩展：`modules/cicd/api/agent_comm_api.py`（1 行） | complete_build 防复活后，`agent_build_result` 仍按原始 status 判断触发自动部署，竞态下已取消构建会被误部署；改按 `build.status=='success'` 判定（验收标准「防误触发自动部署」必需） |
+| 2026-08-14 | scope 扩展：`modules/cicd/api/build_api.py`（1 行） | rerun 成功路径原把成功消息当错误返回 400，前端重跑成功后误报红字错误；改 `if not build` 判定（验收标准「各步骤正常重跑不受影响」必需） |

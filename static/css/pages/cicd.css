@@ -349,5 +349,178 @@
 .df-detail-title { font-size: 13px; font-weight: 600; color: #303133; margin: 14px 0 6px; }
 .df-detail-pre { background: #f5f7fa; color: #606266; border: 1px solid #ebeef5; padding: 10px 12px; border-radius: 6px; font-size: 12px; overflow: auto; max-height: 40vh; white-space: pre-wrap; word-break: break-all; font-family: Consolas, Menlo, monospace; }
 /* CI/CD 弹窗：垂直水平居中（覆盖默认 15vh 偏上） */
-.el-overlay:has(.cicd-dialog) { display: flex; align-items: center; justify-content: center; }
-.cicd-dialog .el-dialog { margin: 0 !important; }
+.el-overlay:has(.el-dialog.cicd-dialog) { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.el-dialog.cicd-dialog {
+  margin: 5vh auto !important;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.el-dialog.cicd-dialog .el-dialog__header {
+  flex-shrink: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f2f5;
+  margin: 0;
+}
+.el-dialog.cicd-dialog .el-dialog__body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 20px;
+}
+.el-dialog.cicd-dialog .el-dialog__footer {
+  flex-shrink: 0;
+  padding-top: 12px;
+  border-top: 1px solid #f0f2f5;
+}
+
+/* ═══ Tab 页签美化 ═══ */
+.cicd-page .el-tabs__header { margin-bottom: 16px; }
+.cicd-page .el-tabs__item {
+  font-size: 14px;
+  font-weight: 500;
+  padding: 0 20px;
+  height: 40px;
+  line-height: 40px;
+  transition: all .2s;
+}
+.cicd-page .el-tabs__item.is-active { font-weight: 600; }
+.cicd-page .el-tabs__active-bar {
+  height: 3px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #1c4a5e, #409eff);
+}
+
+/* ═══ 标签页工具栏 ═══ */
+.tpl-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f2f5;
+}
+.tpl-toolbar-count {
+  font-size: 13px;
+  color: #909399;
+}
+.tpl-toolbar-count strong {
+  color: #1c4a5e;
+  font-weight: 600;
+}
+
+/* ═══ 流程模板卡片美化 ═══ */
+.tpl-card, .cred-card, .df-card {
+  position: relative;
+  border: 1px solid #ebeef5;
+  border-left: 4px solid #409eff;
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
+  transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease;
+}
+.tpl-card--be { border-left-color: #409eff; }
+.tpl-card:hover, .cred-card:hover, .df-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(64, 158, 255, 0.14);
+  border-color: #c6e2ff;
+}
+
+/* 顶部：徽标 + 标题 + 类型标签 */
+.tpl-card-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid #f2f4f7;
+}
+.tpl-card-logo {
+  width: 38px; height: 38px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; color: #fff;
+  letter-spacing: .5px;
+  background: linear-gradient(135deg, #409eff, #1c4a5e);
+  box-shadow: 0 2px 6px rgba(64, 158, 255, 0.3);
+}
+.tpl-card-titlebox { flex: 1; min-width: 0; }
+.tpl-card-name {
+  font-size: 15px; font-weight: 600; color: #1f2329;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tpl-card-sub { font-size: 12px; color: #909399; margin-top: 2px; }
+.tpl-card-type { flex-shrink: 0; }
+
+/* 中部信息区 */
+.tpl-card-meta {
+  padding: 12px 16px 6px;
+  display: flex; flex-direction: column; gap: 8px;
+  flex: 1; min-height: 0;
+}
+.tpl-meta-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.tpl-meta-label { color: #a0a4ab; flex-shrink: 0; min-width: 38px; }
+.tpl-meta-val { color: #4e5969; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tpl-meta-row.tpl-desc .tpl-meta-val { color: #8a8f99; }
+.tpl-truncate { font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; }
+
+/* 底部：更新时间 + 操作 */
+.tpl-card-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 10px 14px 12px;
+  border-top: 1px solid #f2f4f7;
+  margin-top: auto;
+}
+.tpl-card-time {
+  font-size: 11.5px; color: #c0c4cc;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tpl-card-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.tpl-card-actions .el-button { padding: 4px 8px; font-size: 12px; margin-left: 0; }
+
+/* 凭据 / Dockerfile 卡片与流程模板统一视觉，仅配色区分（凭据蓝 / Dockerfile 绿） */
+.df-card { border-left-color: #67c23a; }
+.df-card .tpl-card-logo { background: linear-gradient(135deg, #67c23a, #4aa32a); box-shadow: 0 2px 6px rgba(103, 194, 58, 0.3); }
+.df-card:hover { border-left-color: #67c23a; box-shadow: 0 8px 24px rgba(103, 194, 58, 0.16); border-color: #b3e19d; }
+
+/* ═══ 弹窗分节标题（左竖条风格） ═══ */
+.cicd-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin: 22px 0 16px;
+  padding-left: 10px;
+  border-left: 3px solid #1c4a5e;
+  line-height: 1.4;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+.cicd-section-title:first-of-type { margin-top: 4px; }
+.cicd-section-hint {
+  font-size: 12px;
+  color: #909399;
+  font-weight: normal;
+  line-height: 1.6;
+  border-left: none;
+  padding-left: 0;
+  margin: 0;
+  flex-basis: 100%;
+}
+
+/* 弹窗表单间距 */
+.cicd-dialog .el-form-item { margin-bottom: 18px; }
+.cicd-dialog .el-form-item__label { font-weight: 500; }
+.cicd-dialog .el-form { padding: 0 4px; }
+
+/* 必填星号对齐 */
+.cicd-dialog .el-form-item.is-required .el-form-item__label::before {
+  margin-right: 2px;
+}
+
+/* 响应式宽度兜底 */
+@media (max-width: 1200px) {
+  .el-dialog.cicd-dialog { width: 95vw !important; }
+}

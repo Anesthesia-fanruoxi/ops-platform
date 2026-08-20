@@ -32,6 +32,15 @@ deploy_bp.add_url_rule('/batch-permanent-delete', 'batch_permanent_delete_async'
 deploy_bp.add_url_rule('/batch-recycle', 'batch_recycle_async', batch_recycle_async, methods=['POST'])
 deploy_bp.add_url_rule('/batch-restore', 'batch_restore_async', batch_restore_async, methods=['POST'])
 
+# ─── 环境收藏（按用户隔离：列表/新增/删除） ───────────────────
+from modules.deploy.api.favorite_api import (
+    list_favorites, add_favorite, delete_favorite
+)
+
+deploy_bp.add_url_rule('/service-info/favorites', 'list_favorites', list_favorites, methods=['GET'])
+deploy_bp.add_url_rule('/service-info/favorites', 'add_favorite', add_favorite, methods=['POST'])
+deploy_bp.add_url_rule('/service-info/favorites/<int:fid>', 'delete_favorite', delete_favorite, methods=['DELETE'])
+
 # ─── harbor 路由 ─────────────────────────────────────────────
 from modules.deploy.api.harbor_api import (
     create_project as harbor_create_project,

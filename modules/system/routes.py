@@ -81,7 +81,7 @@ audit_bp.add_url_rule('/list', 'list_audit_logs', list_audit_logs, methods=['GET
 audit_bp.add_url_rule('/modules', 'audit_modules', audit_modules, methods=['GET'])
 
 
-# ── 首页动态数据（SSE 实时健康检查，登录即可；归入 dashboard 域供首页/后续动态数据复用） ──
+# ── 监控 SSE 流（登录即可；EventSource 无法带 Header，token 走 query）──
 monitor_bp = Blueprint('monitor', __name__)
 monitor_bp.add_url_rule('/stream', 'monitor_stream', monitor_stream, methods=['GET'])
 
@@ -95,5 +95,5 @@ def register(app):
     app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
     app.register_blueprint(menus_bp, url_prefix='/api/menus')
     app.register_blueprint(audit_bp, url_prefix='/api/audit')
-    app.register_blueprint(monitor_bp, url_prefix='/api/dashboard')
+    app.register_blueprint(monitor_bp, url_prefix='/api/monitor')
     # 健康检查不再公开探测（改为系统管理 → 监控信息，SSE 实时展示）

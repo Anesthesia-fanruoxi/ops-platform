@@ -61,12 +61,7 @@ def create_template():
 
     configs = _normalize_configs(data)
 
-    # 后端类型校验：产物目录必填
-    backend_cfg = configs['backend']
-    if project_type == 'backend':
-        artifact_dirs = (backend_cfg.get('artifact_dirs') or '').strip()
-        if not artifact_dirs:
-            return error_response('后端项目必须配置产物目录', 400)
+    # 后端服务目录允许留空：编译成功后跳过收集/打镜像，部署步骤等待平台勾选回填后重新构建（见 build-waiting-dirs）
 
     tpl = CicdFlowTemplate(
         project_id=project_id,
@@ -98,11 +93,7 @@ def update_template(template_id):
         if field in data:
             setattr(tpl, field, data[field])
 
-    # 后端类型校验（以 configs.backend 为准）
-    backend_cfg = tpl.configs_dict()['backend']
-    if tpl.project_type == 'backend':
-        if not (backend_cfg.get('artifact_dirs') or '').strip():
-            return error_response('后端项目必须配置产物目录', 400)
+    # 后端服务目录允许留空：编译成功后跳过收集/打镜像，部署步骤等待平台勾选回填后重新构建
 
     db.session.commit()
     _ptype = tpl.project_type or 'backend'

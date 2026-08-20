@@ -81,7 +81,8 @@ agent_bp.add_url_rule('/<int:agent_id>/docker-cache', 'get_docker_cache_size', g
 # ─── 构建 ─────────────────────────────────────────────────────
 from modules.cicd.api.build_api import (
     list_builds, trigger_build, get_build,
-    cancel_build, rerun_build, stream_build, stream_build_steps_sse,
+    cancel_build, rerun_build, build_code_dirs, build_configure_dirs,
+    stream_build, stream_build_steps_sse,
     proxy_build_log, env_cicd_view, list_branches, list_services, env_builds_stream
 )
 
@@ -90,6 +91,8 @@ build_bp.add_url_rule('/trigger', 'trigger_build', trigger_build, methods=['POST
 build_bp.add_url_rule('/<int:build_id>', 'get_build', get_build, methods=['GET'])
 build_bp.add_url_rule('/<int:build_id>/cancel', 'cancel_build', cancel_build, methods=['POST'])
 build_bp.add_url_rule('/<int:build_id>/rerun', 'rerun_build', rerun_build, methods=['POST'])
+build_bp.add_url_rule('/<int:build_id>/code-dirs', 'build_code_dirs', build_code_dirs, methods=['GET'])
+build_bp.add_url_rule('/<int:build_id>/configure-dirs', 'build_configure_dirs', build_configure_dirs, methods=['POST'])
 build_bp.add_url_rule('/<int:build_id>/steps', 'stream_build', stream_build, methods=['GET'])
 build_bp.add_url_rule('/<int:build_id>/steps/stream', 'stream_build_steps', stream_build_steps_sse, methods=['GET'])
 build_bp.add_url_rule('/<int:build_id>/log', 'proxy_build_log', proxy_build_log, methods=['GET'])
@@ -112,7 +115,7 @@ agent_comm_bp.add_url_rule('/build/<int:build_id>/result', 'build_result', agent
 
 # ─── 调度中心（JWT 鉴权，SSE 用 query token）───────────────────
 from modules.cicd.api.schedule_api import (
-    schedule_overview, schedule_stream, schedule_logs, schedule_log_detail, schedule_scores,
+    schedule_overview, schedule_stream, schedule_logs, schedule_log_detail, schedule_scores, schedule_dirs,
 )
 
 schedule_bp.add_url_rule('/overview', 'overview', schedule_overview, methods=['GET'])
@@ -120,6 +123,7 @@ schedule_bp.add_url_rule('/stream', 'stream', schedule_stream, methods=['GET'])
 schedule_bp.add_url_rule('/logs', 'logs', schedule_logs, methods=['GET'])
 schedule_bp.add_url_rule('/logs/<int:log_id>', 'log_detail', schedule_log_detail, methods=['GET'])
 schedule_bp.add_url_rule('/scores', 'scores', schedule_scores, methods=['GET'])
+schedule_bp.add_url_rule('/dirs', 'dirs', schedule_dirs, methods=['GET'])
 
 
 def register(app):

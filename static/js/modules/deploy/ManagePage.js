@@ -287,7 +287,7 @@ const ManagePage = {
               <el-switch :model-value="allServicesChecked" @change="toggleAllServices" active-text="全部勾选" size="small" />
             </div>
             <div class="svc-service-list">
-              <div v-if="!serviceOptions.length" class="svc-col-loading">加载服务中...</div>
+              <div v-if="!serviceOptions.length" class="svc-col-loading">[[ servicesLoaded ? '暂未配置服务' : '加载服务中...' ]]</div>
               <div v-for="s in serviceOptions" :key="s" class="svc-service-item">
                 <span style="font-family:monospace;font-size:13px">[[ s ]]</span>
                 <el-switch v-model="serviceToggles[s]" size="small" />
@@ -313,7 +313,8 @@ const ManagePage = {
           <span style="font-weight:600;font-size:15px">[[ bpBuild?.build_no || '' ]]</span>
           <el-tag :type="bpStatusType(bpBuild?.status)" size="small">[[ bpStatusText(bpBuild?.status) ]]</el-tag>
           <span style="flex:1"></span>
-          <el-button v-if="bpBuild && (bpBuild.status === 'running' || bpBuild.status === 'pending')"
+          <el-button v-if="bpBuild && bpDeployWaiting" type="warning" size="small" plain @click="openSelectDirsDialog">配置服务目录</el-button>
+          <el-button v-if="bpBuild && ['running', 'pending'].includes(bpBuild.status)"
                      type="danger" size="small" plain @click="cancelBuild">取消构建</el-button>
           <el-dropdown v-if="bpBuild && ['success', 'failed', 'cancelled'].includes(bpBuild.status) && bpSteps.length"
                        @command="rerunFromStep">
@@ -345,7 +346,7 @@ const ManagePage = {
       <el-alert v-if="bpBuild && bpBuild.status === 'failed' && bpBuild.error_msg"
                 :title="bpBuild.error_msg" type="error" :closable="false" show-icon style="margin-bottom:12px" />
       <!-- 日志区域 -->
-      <div ref="bpLogContainer" class="bp-log-box">[[ bpLog || '等待日志输出...' ]]</div>
+      <div ref="bpLogContainer" class="bp-log-box">[[ bpLogView() || '等待日志输出...' ]]</div>
     </el-drawer>
 
     <!-- 详情对话框 -->
@@ -472,6 +473,54 @@ const ManagePage = {
         <span style="color:#909399;font-size:12px;margin-left:12px">共 [[ progressLogs.length ]] 行</span>
       </template>
     </el-dialog>
+
+    <!-- 选择服务目录弹窗（部署步骤 waiting 时勾选回填模板，需重新构建） -->
+    <el-dialog v-model="selectDirsVisible" :title="'选择服务目录 - ' + (bpBuild?.build_no || '')" width="760px" :close-on-click-modal="false">
+      <el-alert type="warning" :closable="false" show-icon style="margin-bottom:10px">
+        模板未配置服务目录，本次构建已跳过产物收集/打镜像/推送。请浏览该构建编译后的代码目录，勾选要构建的服务目录保存到模板，然后重新触发构建。
+      </el-alert>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+        <span style="font-size:13px;white-space:nowrap">
+          <el-link type="primary" :underline="false" @click="loadCodeDirs('')">code目录</el-link>
+          <template v-for="(seg, i) in selectDirsSegments" :key="i">
+            <span style="margin:0 3px;color:#c0c4cc">/</span>
+            <el-link type="primary" :underline="false" @click="loadCodeDirs(selectDirsSegments.slice(0, i + 1).join('/'))">[[ seg ]]</el-link>
+          </template>
+        </span>
+        <span style="flex:1"></span>
+        <el-button size="small" :disabled="!selectDirsPath" @click="loadCodeDirs(selectDirsParent)">上级</el-button>
+        <el-button size="small" @click="loadCodeDirs(selectDirsPath)">刷新</el-button>
+      </div>
+      <div style="font-size:12px;color:#909399;margin:4px 0 8px">产物目录：<b style="color:#303133">[[ selectDirsArtifactDir || '未设置（收集整服务目录）' ]]</b>（点目录行「设为产物」/文件行「设为该类产物」快速设置）</div>
+      <el-table :data="selectDirsEntries" size="small" border stripe v-loading="selectDirsLoading" style="width:100%" max-height="40vh">
+        <el-table-column label="名称" min-width="320">
+          <template #default="s">
+            <span v-if="s.row.type === 'dir'" style="display:inline-flex;align-items:center;gap:6px">
+              <el-checkbox :model-value="!!selectDirsChecked[selectDirJoin(s.row.name)]"
+                           @change="(v) => toggleSelectDir(selectDirJoin(s.row.name), v)" />
+              <span style="cursor:pointer;color:#409eff" @click="loadCodeDirs(selectDirJoin(s.row.name))">📁 [[ s.row.name ]]</span>
+              <el-link type="success" :underline="false" style="font-size:12px" @click="setDirAsArtifact(s.row.name)">设为产物</el-link>
+            </span>
+            <span v-else style="display:inline-flex;align-items:center;gap:6px">
+              📄 [[ s.row.name ]]
+              <el-link type="success" :underline="false" style="font-size:12px" @click="setFileAsArtifact(s.row.name)">设为该类产物</el-link>
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="类型" width="80" align="center">
+          <template #default="s"><el-tag size="small" :type="s.row.type === 'dir' ? 'primary' : 'info'">[[ s.row.type ]]</el-tag></template>
+        </el-table-column>
+      </el-table>
+      <div style="margin-top:10px">
+        <div style="font-size:13px;color:#606266;margin-bottom:6px">已选服务目录（[[ selectDirsList.length ]]）：</div>
+        <div v-if="!selectDirsList.length" style="color:#c0c4cc;font-size:12px">尚未选择，至少勾选一个目录</div>
+        <el-tag v-for="(d, i) in selectDirsList" :key="d" size="small" closable style="margin:0 6px 6px 0" @close="removeSelectDir(i)">[[ d ]]</el-tag>
+      </div>
+      <template #footer>
+        <el-button @click="selectDirsVisible = false">取消</el-button>
+        <el-button type="primary" :loading="selectDirsSaving" :disabled="!selectDirsList.length" @click="confirmSelectDirs">保存配置</el-button>
+      </template>
+    </el-dialog>
   `,
   data() {
     return {
@@ -534,12 +583,13 @@ const ManagePage = {
       recentBranchesFiltered: [],
       serviceToggles: {},
       serviceOptions: [],
+      servicesLoaded: false,
       buildTriggering: false,
       // 构建进度抽屉
       bpDrawerVisible: false,
       bpBuild: null,
       bpSteps: [],
-      bpLog: '',
+      bpLogFull: '',  // 全量日志缓冲（仅 all 模式 SSE 累积）
       bpLogMode: 'all',
       bpStepES: null,
       bpES: null,
@@ -547,10 +597,29 @@ const ManagePage = {
       bpNow: Date.now(),
       bpTimer: null,
       // 构建记录
-      envBuilds: []
+      envBuilds: [],
+      // 选择服务目录弹窗（部署等待时勾选回填模板）
+      selectDirsVisible: false,
+      selectDirsPath: '',
+      selectDirsEntries: [],
+      selectDirsLoading: false,
+      selectDirsChecked: {},
+      selectDirsList: [],
+      selectDirsArtifactDir: '',   // 全局产物目录（各服务内统一子路径），随服务目录一并回填模板
+      selectDirsFirstLoad: true,   // 仅首次加载目录时预填产物目录，避免浏览子目录时覆盖用户输入
+      selectDirsSaving: false,
     };
   },
   computed: {
+    selectDirsSegments() { return this.selectDirsPath ? this.selectDirsPath.split('/').filter(Boolean) : []; },
+    selectDirsParent() {
+      const segs = this.selectDirsSegments;
+      return segs.length > 1 ? segs.slice(0, -1).join('/') : '';
+    },
+    // 部署步骤 waiting：后端未配置服务目录，需勾选回填后重新构建
+    bpDeployWaiting() {
+      return (this.bpSteps || []).some(s => s.key === 'deploy' && s.status === 'waiting');
+    },
     // 全部勾选状态：所有服务开关都开启时为 true（供「全部勾选」开关联动）
     allServicesChecked() {
       return this.serviceOptions.length > 0 && this.serviceOptions.every(s => this.serviceToggles[s]);
@@ -1097,6 +1166,7 @@ const ManagePage = {
       this.recentBranchesFiltered = [];
       this.serviceToggles = {};
       this.serviceOptions = [];
+      this.servicesLoaded = false;
       // 加载最近构建分支（下拉“最近使用”分组，按时间降序取5个）
       if (row.id) {
         ajax('GET', '/api/cicd/builds?environment_id=' + row.id, null, (r) => {
@@ -1117,6 +1187,7 @@ const ManagePage = {
     _loadBuildServices(row) {
       const pref = this._buildPrefLoad(row.id);
       ajax('GET', '/api/cicd/builds/services?project_id=' + row.project_id, null, (r) => {
+        this.servicesLoaded = true;
         if (r.code === 200) {
           this.serviceOptions = r.data || [];
           const toggles = {};
@@ -1132,7 +1203,7 @@ const ManagePage = {
           }
           this.serviceToggles = toggles;
         }
-      });
+      }, () => { this.servicesLoaded = true; });
     },
     filterBranches(query) {
       const kw = (query || '').trim().toLowerCase();
@@ -1223,7 +1294,7 @@ const ManagePage = {
     openProgressDrawer(build) {
       this.bpBuild = build;
       this.bpSteps = [];
-      this.bpLog = '';
+      this.bpLogFull = '';
       this.bpLogMode = 'all';
       this.bpDrawerVisible = true;
       // 启动实时计时器（每 100ms 更新 bpNow 触发步骤耗时重算）
@@ -1242,8 +1313,8 @@ const ManagePage = {
       es.onmessage = (evt) => {
         const data = JSON.parse(evt.data);
         this.bpSteps = data.steps || [];
-        // 总览模式：后端 type=all 自动拼接全部步骤日志，只需确保 SSE 已连接
-        if (this.bpLogMode === 'all' && !this.bpES) {
+        // 始终只维持 1 条 all 模式 SSE；切换步骤只改本地视图，不重连
+        if (!this.bpES) {
           this.connectBuildLog('all');
         }
         const buildStatus = data.build_status;
@@ -1283,13 +1354,14 @@ const ManagePage = {
       });
     },
     connectBuildLog(type) {
+      // 始终只维持 1 条 all 模式 SSE；切换步骤只改本地视图，不重连
       this.disconnectBpLog();
       const token = localStorage.getItem('auth_token') || '';
-      const url = '/api/cicd/builds/' + this.bpBuild.id + '/log?type=' + type + '&follow=true&token=' + encodeURIComponent(token);
+      const url = '/api/cicd/builds/' + this.bpBuild.id + '/log?type=all&follow=true&token=' + encodeURIComponent(token);
       const es = new EventSource(url);
       this.bpES = es;
       es.onmessage = (evt) => {
-        this.bpLog += evt.data.replace(/\\n/g, '\n');
+        this.bpLogFull += evt.data.replace(/\\n/g, '\n');
         this.$nextTick(() => {
           const c = this.$refs.bpLogContainer;
           if (c) c.scrollTop = c.scrollHeight;
@@ -1336,17 +1408,48 @@ const ManagePage = {
       }
       return '';
     },
-    // 点击步骤圈：只看该步骤日志
+    // 按步骤标记从全量日志中提取对应段落（起始取最后一次出现，兼容重跑；结束取下一标记）
+    bpLogSection(mode) {
+      const log = this.bpLogFull;
+      if (!log) return '';
+      // 步骤日志标记（与 Agent stepMarkers + Master 部署段一致）
+      const MARKERS = {
+        git: '=== Git Clone ===',
+        mvn: '=== 编译构建 ===',
+        product: '=== 产物收集 ===',
+        build: '=== Docker Build ===',
+        push: '=== Docker Push ===',
+        deploy: '=== 部署 ==='
+      };
+      const marker = MARKERS[mode];
+      if (!marker) return log;
+      const start = log.lastIndexOf(marker);
+      if (start < 0) return '';
+      let end = log.length;
+      for (const m of Object.values(MARKERS)) {
+        if (m === marker) continue;
+        const idx = log.indexOf(m, start + marker.length);
+        if (idx > 0 && idx < end) end = idx;
+      }
+      return log.substring(start, end);
+    },
+    // 当前视图日志（按模式切分 + 渲染限量 500KB）
+    bpLogView() {
+      let text = this.bpLogMode === 'all' ? this.bpLogFull : this.bpLogSection(this.bpLogMode);
+      if (!text) return '';
+      const MAX = 512000;  // 500KB
+      if (text.length > MAX) {
+        return '...（日志过长，仅显示尾部 ' + Math.round(MAX / 1024) + 'KB）...\n' + text.slice(-MAX);
+      }
+      return text;
+    },
+    // 点击步骤圈：只看该步骤日志（本地切分，不重连）
     switchBpLog(stepNo) {
       this.bpLogMode = this.bpStepType(stepNo);
-      this.bpLog = '';
-      this.connectBuildLog(this.bpLogMode);
     },
-    // 总览模式：后端 type=all 自动拼接全部步骤日志
+    // 总览模式（本地切分，不重连）
     switchBpLogAll() {
       this.bpLogMode = 'all';
-      this.bpLog = '';
-      this.connectBuildLog('all');
     },
     stopBpPolling() {
       this.disconnectBpSteps();
@@ -1382,10 +1485,10 @@ const ManagePage = {
             ElementPlus.ElMessage.success(res.msg || '已加入重跑队列');
             // 用后端返回的真实状态刷新（重跑进入调度队列，可能为 pending 等待派发）
             this.bpBuild = Object.assign({}, this.bpBuild, res.data || {}, { error_msg: '' });
-            this.bpLog = '';
+            this.bpLogFull = '';
             // 重新拉取步骤 SSE 获取真实状态（首帧即重置后的快照）
             this.connectBuildSteps();
-            this.connectBuildLog(this.bpLogMode);
+            this.connectBuildLog('all');
           } else {
             ElementPlus.ElMessage.error(res.msg || '重跑失败');
           }
@@ -1411,9 +1514,103 @@ const ManagePage = {
     },
     bpStepStatus(step) {
       if (step.status === 'success') return 'success';
-      if (step.status === 'running') return 'process';
+      if (step.status === 'running' || step.status === 'waiting') return 'process';
       if (step.status === 'failed') return 'error';
       return 'wait';
+    },
+    // ─── 选择服务目录（部署等待时勾选回填模板）─────────────────────────
+    openSelectDirsDialog() {
+      this.selectDirsChecked = {};
+      this.selectDirsList = [];
+      this.selectDirsArtifactDir = '';
+      this.selectDirsFirstLoad = true;
+      this.selectDirsVisible = true;
+      this.loadCodeDirs('');
+    },
+    loadCodeDirs(path) {
+      if (!this.bpBuild) return;
+      this.selectDirsPath = path || '';
+      this.selectDirsLoading = true;
+      const params = new URLSearchParams({ path: this.selectDirsPath });
+      ajax('GET', '/api/cicd/builds/' + this.bpBuild.id + '/code-dirs?' + params.toString(), null, (r) => {
+        this.selectDirsLoading = false;
+        if (r.code === 200 && r.data) {
+          this.selectDirsEntries = r.data.entries || [];
+          if (this.selectDirsFirstLoad) {
+            this.selectDirsArtifactDir = r.data.artifact_dir || '';
+            this.selectDirsFirstLoad = false;
+          }
+        } else {
+          this.selectDirsEntries = [];
+          ElementPlus.ElMessage.error(r.msg || '读取目录失败');
+        }
+      }, () => { this.selectDirsLoading = false; });
+    },
+    selectDirJoin(name) {
+      return this.selectDirsPath ? this.selectDirsPath + '/' + name : name;
+    },
+    // 计算 fullPath 相对于「已勾选服务目录」的子路径；无匹配时用首段（服务目录）兜底
+    relFromService(fullPath) {
+      let rel = fullPath, best = '';
+      for (const svc of this.selectDirsList) {
+        if (fullPath === svc) { best = svc; rel = ''; break; }
+        if (fullPath.startsWith(svc + '/') && svc.length > best.length) { best = svc; rel = fullPath.slice(svc.length + 1); }
+      }
+      if (!best) {
+        const segs = fullPath.split('/');
+        rel = segs.length > 1 ? segs.slice(1).join('/') : '';
+      }
+      return rel;
+    },
+    // 目录行：设定该目录为产物目录（相对服务目录的子路径）
+    setDirAsArtifact(name) {
+      const rel = this.relFromService(this.selectDirJoin(name));
+      this.selectDirsArtifactDir = rel;
+      ElementPlus.ElMessage.success(rel ? ('已设定产物目录：' + rel) : '已设定：收集服务根目录全部内容');
+    },
+    // 文件行：设定此类文件为产物，按扩展名填入通配符（*.ext 或 *）
+    setFileAsArtifact(name) {
+      const dirRel = this.relFromService(this.selectDirsPath);
+      const dot = name.lastIndexOf('.');
+      const wc = dot > 0 ? '*' + name.slice(dot) : '*';
+      const val = dirRel ? dirRel + '/' + wc : wc;
+      ElementPlus.ElMessageBox.confirm('设定此类文件（' + wc + '）为产物？将填入：' + val, '设定产物', {
+        confirmButtonText: '确定', cancelButtonText: '取消', type: 'info'
+      }).then(() => {
+        this.selectDirsArtifactDir = val;
+        ElementPlus.ElMessage.success('已设定产物：' + val);
+      }).catch(() => {});
+    },
+    toggleSelectDir(name, v) {
+      if (v) {
+        this.selectDirsChecked[name] = true;
+        if (!this.selectDirsList.includes(name)) this.selectDirsList.push(name);
+      } else {
+        delete this.selectDirsChecked[name];
+        const i = this.selectDirsList.indexOf(name);
+        if (i > -1) this.selectDirsList.splice(i, 1);
+      }
+    },
+    removeSelectDir(i) {
+      const name = this.selectDirsList[i];
+      this.selectDirsList.splice(i, 1);
+      if (name) delete this.selectDirsChecked[name];
+    },
+    confirmSelectDirs() {
+      if (!this.selectDirsList.length) { ElementPlus.ElMessage.warning('请至少勾选一个服务目录'); return; }
+      this.selectDirsSaving = true;
+      ajax('POST', '/api/cicd/builds/' + this.bpBuild.id + '/configure-dirs',
+        { artifact_dirs: this.selectDirsList.slice(), artifact_dir: (this.selectDirsArtifactDir || '').trim() }, (res) => {
+        this.selectDirsSaving = false;
+        if (res.code === 200) {
+          ElementPlus.ElMessage.success(res.msg || '服务目录已回填到流程模板，请重新触发构建');
+          this.selectDirsVisible = false;
+          // 抽屉状态由步骤 SSE 自动更新；刷新环境表格同步状态
+          this.loadEnvs();
+        } else {
+          ElementPlus.ElMessage.error(res.msg || '保存失败');
+        }
+      }, () => { this.selectDirsSaving = false; });
     },
     onDetailTabChange(tab) {
       if (tab === 'builds_frontend' || tab === 'builds_backend') {
