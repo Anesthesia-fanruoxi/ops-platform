@@ -317,14 +317,16 @@ const ServiceInfoPage = {
   <el-dialog v-model="lfVisible" :title="'日志目录 - ' + (lfServiceName || '')" width="70%" top="10vh">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
       <span style="color:#909399;font-size:12px;word-break:break-all;">[[ lfShortPath() ]]</span>
+      <span style="color:#c0c4cc;font-size:12px;white-space:nowrap;">共 [[ lfFiles.length ]] 个文件（点击文件名可直接查看）</span>
       <el-button size="small" style="margin-left:auto;" @click="loadLogFiles">刷新</el-button>
     </div>
     <el-table :data="lfFiles" size="small" border stripe max-height="65vh" style="width:100%" v-loading="lfLoading">
       <el-table-column type="index" label="#" width="50" align="center"></el-table-column>
       <el-table-column label="文件名" min-width="320">
         <template #default="scope">
-          <span :style="lfRunningPod(scope.row.name) ? { color: '#67c23a', fontWeight: 600 } : {}"
-                :title="lfRunningPod(scope.row.name) ? ('运行中 Pod: ' + lfRunningPod(scope.row.name)) : scope.row.name">[[ scope.row.name ]]</span>
+          <span class="svc-logfile-name" :class="{ 'is-running': !!lfRunningPod(scope.row.name) }"
+                :title="lfRunningPod(scope.row.name) ? ('运行中 Pod: ' + lfRunningPod(scope.row.name) + '，点击查看内容') : '点击查看内容'"
+                @click="viewLogfile(scope.row)">[[ scope.row.name ]]</span>
         </template>
       </el-table-column>
       <el-table-column prop="size_str" label="大小" width="100" align="right"></el-table-column>
@@ -342,7 +344,8 @@ const ServiceInfoPage = {
   </el-dialog>
 
   <!-- 日志文件内容查看弹窗 -->
-  <el-dialog v-model="lfContentVisible" :title="'日志内容 - ' + (lfContentFile || '')" width="80%" top="10vh" append-to-body>
+  <el-dialog v-model="lfContentVisible" :title="'日志内容 - ' + (lfContentFile || '')" width="80%" top="10vh"
+             class="svc-logfile-dialog" append-to-body>
     <pre class="svc-logfile-pre" ref="lfContentBox" v-loading="lfContentLoading">[[ lfContent ]]</pre>
     <template #footer>
       <el-button type="primary" @click="lfContentVisible = false">关闭</el-button>
@@ -2644,6 +2647,18 @@ const ServiceInfoPage = {
 .serviceinfo-main { flex: 1; min-width: 0; }
 
 /* ═══ 日志目录弹窗 ═══ */
+.svc-logfile-name { cursor: pointer; transition: color .15s; }
+.svc-logfile-name:hover { color: #409eff; text-decoration: underline; }
+.svc-logfile-name.is-running { color: #67c23a; font-weight: 600; }
+.svc-logfile-name.is-running:hover { color: #85ce61; }
+/* 内容查看弹窗暗色主题（与运行日志弹窗风格一致） */
+.svc-logfile-dialog .el-dialog { background: #0a2e3c; }
+.svc-logfile-dialog .el-dialog__header { background: #0a2e3c !important; border-bottom: 1px solid #1c4a5e; }
+.svc-logfile-dialog .el-dialog__title { color: #a8bcc0 !important; }
+.svc-logfile-dialog .el-dialog__headerbtn .el-dialog__close { color: #7fa3ad; }
+.svc-logfile-dialog .el-dialog__headerbtn .el-dialog__close:hover { color: #d4e6ea; }
+.svc-logfile-dialog .el-dialog__body { background: #0a2e3c !important; padding-top: 12px; }
+.svc-logfile-dialog .el-dialog__footer { background: #0a2e3c; border-top: 1px solid #1c4a5e; }
 .svc-logfile-pre {
   max-height: 70vh; overflow: auto; margin: 0; padding: 12px 14px;
   background: #0a2e3c; color: #a8bcc0; border-radius: 6px;
