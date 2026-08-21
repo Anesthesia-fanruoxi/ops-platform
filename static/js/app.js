@@ -277,6 +277,13 @@ const app = Vue.createApp({
     },
     openPwdDialog() {
       this.pwdForm = { new_password: '', confirm_password: '' };
+      // 打开前刷新一次密码策略：登录后长时间未同步（未刷新页面/未切标签）时，
+      // authState.passwordPolicy 可能仍是初始默认（min_length=6），导致随机密码长度不符
+      ajax('GET', '/api/auth/me', null, (res) => {
+        if (res.code === 200 && res.data && res.data.password_policy) {
+          authState.passwordPolicy = res.data.password_policy;
+        }
+      });
       this.pwdDialogVisible = true;
     },
     handleChangePwd() {

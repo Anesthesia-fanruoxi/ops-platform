@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 构建后自动部署：构建成功（镜像已推送 Harbor）后，由 Master 经 SSH 修改远程部署 YAML 的
-镜像 tag 并 kubectl apply。全程在 Master 侧完成，Agent 无需安装 k8s 工具。
+镜像 tag 并 kubectl apply（远程为主，随后同步本地副本）。全程在 Master 侧完成，Agent 无需安装 k8s 工具。
 
 - 全部构建：修改所有已构建服务的 tag，kubectl apply 整个 deployment 目录
 - 部分构建：仅修改指定服务的 tag，kubectl apply 对应单个 YAML 文件
@@ -149,66 +149,60 @@ def auto_deploy_build(build):
         return
 
     deploy_dir = f'{get_k8s_yaml_remote_dir()}/{env_full}/deployment'
-    if not k8s.remote_directory_exists(deploy_dir):
-        log('WARN', f'远程部署目录不存在（环境未部署）：{deploy_dir}，跳过自动部署')
-        update_deploy_step(build.build_no, 'success')
-        return
 
     # 同环境串行化：sed+apply 非原子，避免并发构建竞态。
     # 跨 worker 用 Redis 分布式锁，Redis 不可用降级进程内锁；获取失败等待重试。
     env_lock = _env_lock(env_full)
     lock_mode, lock_token = _acquire_env_lock(env_full, env_lock, log)
     try:
-        # 1. 修改镜像 tag：全部构建一次 sed 整目录替换；部分构建逐服务替换
+        # SSH 全程复用一次连接（connect 建在获锁后，避免等锁期间空闲断连）
+        k8s.connect()
+        if not k8s.remote_directory_exists(deploy_dir):
+            log('WARN', f'远程部署目录不存在（环境未部署）：{deploy_dir}，跳过自动部署')
+            update_deploy_step(build.build_no, 'success')
+            return
+
+        # 1. 修改镜像 tag：远程为主（远程文件可能是最新变更，不能用本地覆盖），
+        #    复用同一 SSH 连接逐文件 sed，随后同步本地副本保持一致；
+        #    不批量 sed 整个目录 —— 各服务 tag 可能不一致，未构建服务的 tag 必须保持不动
         applied_files = []
-        if is_full:
-            # 一次替换目录下所有 YAML 里的 {env_full}/<svc>:<old> -> {env_full}/<svc>:<new>
-            sed = f"sed -i 's#\\({env_full}/[^:[:space:]]*\\):[^[:space:]]*#\\1:{new_tag}#g' {deploy_dir}/*.yaml"
+        for svc in target:
+            yaml_path = f'{deploy_dir}/{svc}.yaml'
+            r = k8s.exec_command(f'test -f {yaml_path} && echo EXISTS')
+            if r['stdout'] != 'EXISTS':
+                log('WARN', f'部署文件不存在，跳过: {svc}.yaml')
+                continue
+            sed = f'sed -i "s#{env_full}/{svc}:[^[:space:]]*#{env_full}/{svc}:{new_tag}#g" {yaml_path}'
             r = k8s.exec_command(sed)
             if r['exit_code'] != 0:
-                log('ERROR', f'批量修改 tag 失败: {r["stderr"]}')
-            else:
-                log('OK', f'已批量修改全部服务 tag -> {env_full}/<svc>:{new_tag}')
-                _sync_local_dir_tags(env_full, new_tag, log)
-                applied_files = list(all_names)
-        else:
-            for svc in target:
-                yaml_path = f'{deploy_dir}/{svc}.yaml'
-                r = k8s.exec_command(f'test -f {yaml_path} && echo EXISTS')
-                if r['stdout'] != 'EXISTS':
-                    log('WARN', f'部署文件不存在，跳过: {svc}.yaml')
-                    continue
-                sed = f'sed -i "s#{env_full}/{svc}:[^[:space:]]*#{env_full}/{svc}:{new_tag}#g" {yaml_path}'
-                r = k8s.exec_command(sed)
-                if r['exit_code'] != 0:
-                    log('ERROR', f'修改 tag 失败: {svc}.yaml - {r["stderr"]}')
-                    continue
-                log('OK', f'已修改 tag: {svc}.yaml -> {env_full}/{svc}:{new_tag}')
-                _sync_local_yaml_tag(env_full, svc, new_tag, log)
-                applied_files.append(svc)
+                log('ERROR', f'修改 tag 失败: {svc}.yaml - {r["stderr"]}')
+                continue
+            log('OK', f'已修改 tag: {svc}.yaml -> {env_full}/{svc}:{new_tag}')
+            _sync_local_yaml_tag(env_full, svc, new_tag, log)
+            applied_files.append(svc)
 
         if not applied_files:
             log('WARN', '无可应用的部署文件，结束自动部署')
             finish()
             return
 
-        # 2. apply：部分构建逐个文件，全部构建整个 deployment 目录
-        if not is_full:
+        # 2. apply：全部构建 apply 整个目录（所有服务 tag 均为本次新 tag，一条命令高效应用）；
+        #    部分构建只 apply 涉及的文件（未构建服务不触碰）
+        if is_full:
+            r = k8s.exec_command(f'kubectl apply -f {deploy_dir}/', timeout=120)
+            if r['exit_code'] == 0:
+                log('OK', f'已应用部署目录: {deploy_dir}/')
+            else:
+                log('ERROR', f'应用部署目录失败: {deploy_dir} - {r["stderr"]}')
+        else:
             for svc in applied_files:
                 r = k8s.exec_command(f'kubectl apply -f {deploy_dir}/{svc}.yaml', timeout=120)
                 if r['exit_code'] == 0:
                     log('OK', f'已应用: {svc}.yaml')
                 else:
                     log('ERROR', f'应用失败: {svc}.yaml - {r["stderr"]}')
-        else:
-            r = k8s.exec_command(f'kubectl apply -f {deploy_dir}/', timeout=180)
-            if r['exit_code'] == 0:
-                log('OK', f'已应用整个部署目录: {deploy_dir}/')
-                if r['stdout']:
-                    log('INFO', r['stdout'])
-            else:
-                log('ERROR', f'应用部署目录失败: {r["stderr"]}')
     finally:
+        k8s.close()
         if lock_mode is not None:
             from core.redis_client import release_lock_mixed
             release_lock_mixed(f'lock:deploy:{env_full}', lock_mode, lock_token, env_lock)
@@ -239,36 +233,6 @@ def _sync_local_yaml_tag(env_full, svc, new_tag, log):
         log('INFO', f'已同步本地 tag: {svc}.yaml -> {env_full}/{svc}:{new_tag}')
     except OSError as e:
         log('WARN', f'同步本地 {svc}.yaml 失败: {e}')
-
-
-def _sync_local_dir_tags(env_full, new_tag, log):
-    """批量同步本地 YAML 目录的镜像 tag（全部构建用）：
-    遍历 {output_dir}/{env_full}/deployment/*.yaml，把 {env_full}/<svc>:<old> 统一替换为 {env_full}/<svc>:<new>。
-    best-effort：失败仅 WARN，不影响远程部署流程。"""
-    from modules.deploy.api.shared import get_output_dir
-    local_dir = os.path.join(get_output_dir(), env_full, 'deployment')
-    if not os.path.isdir(local_dir):
-        log('WARN', f'本地部署目录不存在，跳过同步: {local_dir}')
-        return
-    pattern = '(' + re.escape(env_full) + r'/[^:\s]*):[^\s]*'
-    changed = 0
-    for fname in sorted(os.listdir(local_dir)):
-        if not (fname.endswith('.yaml') or fname.endswith('.yml')):
-            continue
-        path = os.path.join(local_dir, fname)
-        try:
-            with open(path, 'r', encoding='utf-8', errors='replace') as f:
-                content = f.read()
-            new_content, n = re.subn(pattern, f'\\1:{new_tag}', content)
-            if n == 0:
-                continue
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write(new_content)
-            changed += n
-        except OSError as e:
-            log('WARN', f'同步本地 {fname} 失败: {e}')
-    if changed:
-        log('INFO', f'已批量同步本地 tag：{changed} 处 -> {env_full}/<svc>:{new_tag}')
 
 
 def _deploy_log_path(build_no):

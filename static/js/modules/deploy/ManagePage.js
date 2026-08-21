@@ -590,6 +590,7 @@ const ManagePage = {
       bpBuild: null,
       bpSteps: [],
       bpLogFull: '',  // 全量日志缓冲（仅 all 模式 SSE 累积）
+      bpLogByStep: {},  // 步骤归属日志缓冲（后端帧带 step，前端纯渲染）
       bpLogMode: 'all',
       bpStepES: null,
       bpES: null,
@@ -1295,6 +1296,7 @@ const ManagePage = {
       this.bpBuild = build;
       this.bpSteps = [];
       this.bpLogFull = '';
+      this.bpLogByStep = {};
       this.bpLogMode = 'all';
       this.bpDrawerVisible = true;
       // 启动实时计时器（每 100ms 更新 bpNow 触发步骤耗时重算）
@@ -1321,9 +1323,12 @@ const ManagePage = {
         if (buildStatus) {
           const prevStatus = this.bpBuild.status;
           this.bpBuild = Object.assign({}, this.bpBuild, { status: buildStatus });
-          if (['success', 'failed', 'cancelled'].includes(buildStatus)) {
-            // 构建结束：关闭步骤 SSE，保留日志流继续传输（避免初始数据被截断）
+          // 构建终态但部署步骤可能仍在执行（Master 自动部署），不能立即断开；
+          // 等后端发 done 帧（构建终态 + 部署步骤终态）再断开步骤流
+          if (data.done) {
             this.disconnectBpSteps();
+          }
+          if (['success', 'failed', 'cancelled'].includes(buildStatus)) {
             // 仅当构建从运行中转为终态时刷新环境表格（历史构建查看不触发）
             if (prevStatus === 'running' || prevStatus === 'pending') {
               this.loadEnvs();
@@ -1361,7 +1366,14 @@ const ManagePage = {
       const es = new EventSource(url);
       this.bpES = es;
       es.onmessage = (evt) => {
-        this.bpLogFull += evt.data.replace(/\\n/g, '\n');
+        let obj;
+        try { obj = JSON.parse(evt.data); } catch (e) { return; }
+        const text = obj.text || '';
+        if (!text) return;
+        this.bpLogFull += text;
+        if (obj.step) {
+          this.bpLogByStep[obj.step] = (this.bpLogByStep[obj.step] || '') + text;
+        }
         this.$nextTick(() => {
           const c = this.$refs.bpLogContainer;
           if (c) c.scrollTop = c.scrollHeight;
@@ -1408,34 +1420,9 @@ const ManagePage = {
       }
       return '';
     },
-    // 按步骤标记从全量日志中提取对应段落（起始取最后一次出现，兼容重跑；结束取下一标记）
-    bpLogSection(mode) {
-      const log = this.bpLogFull;
-      if (!log) return '';
-      // 步骤日志标记（与 Agent stepMarkers + Master 部署段一致）
-      const MARKERS = {
-        git: '=== Git Clone ===',
-        mvn: '=== 编译构建 ===',
-        product: '=== 产物收集 ===',
-        build: '=== Docker Build ===',
-        push: '=== Docker Push ===',
-        deploy: '=== 部署 ==='
-      };
-      const marker = MARKERS[mode];
-      if (!marker) return log;
-      const start = log.lastIndexOf(marker);
-      if (start < 0) return '';
-      let end = log.length;
-      for (const m of Object.values(MARKERS)) {
-        if (m === marker) continue;
-        const idx = log.indexOf(m, start + marker.length);
-        if (idx > 0 && idx < end) end = idx;
-      }
-      return log.substring(start, end);
-    },
-    // 当前视图日志（按模式切分 + 渲染限量 500KB）
+    // 当前视图日志（后端已按步骤归属拆分，前端仅取缓冲 + 渲染限量 500KB）
     bpLogView() {
-      let text = this.bpLogMode === 'all' ? this.bpLogFull : this.bpLogSection(this.bpLogMode);
+      let text = this.bpLogMode === 'all' ? this.bpLogFull : (this.bpLogByStep[this.bpLogMode] || '');
       if (!text) return '';
       const MAX = 512000;  // 500KB
       if (text.length > MAX) {
@@ -1486,6 +1473,7 @@ const ManagePage = {
             // 用后端返回的真实状态刷新（重跑进入调度队列，可能为 pending 等待派发）
             this.bpBuild = Object.assign({}, this.bpBuild, res.data || {}, { error_msg: '' });
             this.bpLogFull = '';
+            this.bpLogByStep = {};
             // 重新拉取步骤 SSE 获取真实状态（首帧即重置后的快照）
             this.connectBuildSteps();
             this.connectBuildLog('all');

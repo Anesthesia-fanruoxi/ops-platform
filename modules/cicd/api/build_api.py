@@ -143,13 +143,15 @@ def stream_build(build_id):
     return success_response(steps)
 
 
-def _deploy_step_done(steps):
-    """部署步骤是否已达终态；无部署步骤（前端构建）视为已完成。
-    用于 SSE done 判定：构建终态 且 部署步骤终态 才真正结束。"""
-    for st in (steps or {}).get('steps', []):
-        if st.get('key') == 'deploy':
-            return st.get('status') in ('success', 'failed', 'skipped')
-    return True
+def _deploy_step_done(steps, build_status):
+    """部署步骤是否已结束：终态（含 waiting=未配置服务目录）即结束；构建已失败/取消（非 success）
+    且部署未执行也视为结束，避免步骤 SSE 永久挂着；仅构建成功时等待部署步骤推进（pending → running → 终态）。"""
+    deploy = next((st for st in (steps or {}).get('steps', []) if st.get('key') == 'deploy'), None)
+    if deploy is None:
+        return True
+    if deploy.get('status') in ('success', 'failed', 'skipped', 'waiting'):
+        return True
+    return build_status != 'success'
 
 
 @require_any_permission('page:cicd', 'op:cicd_build')
@@ -174,7 +176,7 @@ def stream_build_steps_sse(build_id):
             'build_status': build.status,
             'steps': steps.get('steps', []),
         }
-        if build.status in ('success', 'failed', 'cancelled') and _deploy_step_done(steps):
+        if build.status in ('success', 'failed', 'cancelled') and _deploy_step_done(steps, build.status):
             snapshot['done'] = True
         yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
         if snapshot.get('done'):
@@ -195,7 +197,9 @@ def stream_build_steps_sse(build_id):
                 last_mtime = cur_mtime
                 changed = True
 
-            # DB 状态变化（取消 / 终态落库）
+            # DB 状态变化（取消 / 终态落库）；expire 后重查，确保读到其他线程提交的最新状态
+            from core.db import db
+            db.session.expire_all()
             b = Build.query.get(build_id)
             if not b:
                 break
@@ -210,7 +214,7 @@ def stream_build_steps_sse(build_id):
                     'build_status': b.status,
                     'steps': steps.get('steps', []),
                 }
-                if b.status in ('success', 'failed', 'cancelled') and _deploy_step_done(steps):
+                if b.status in ('success', 'failed', 'cancelled') and _deploy_step_done(steps, b.status):
                     evt['done'] = True
                 yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
                 if evt.get('done'):
@@ -226,6 +230,87 @@ def stream_build_steps_sse(build_id):
         content_type='text/event-stream',
         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
     )
+
+
+# ─── 构建日志 SSE：步骤归属拆分 + 统一终止判定 ─────────────────────
+# 步骤标记 → step key（与 agent server.go stepMarkers + Master 部署段严格对齐）
+_LOG_STEP_MARKERS = {
+    '=== Git Clone ===': 'git',
+    '=== 编译构建 ===': 'mvn',
+    '=== 产物收集 ===': 'product',
+    '=== Docker Build ===': 'build',
+    '=== Docker Push ===': 'push',
+    '=== 部署 ===': 'deploy',
+}
+
+
+def _log_frame(step, text):
+    """SSE 帧：step 归属 + text；json.dumps 保证单行且 \n 转义，前端解析后直接渲染"""
+    return 'data: ' + json.dumps({'step': step, 'text': text}, ensure_ascii=False) + '\n\n'
+
+
+class _AgentSseParser:
+    """解析 Agent SSE 字节流：按 \n\n 切帧，忽略注释帧（: xxx），
+    去 data: 前缀并反转义 \\n → \n，还原原始日志文本"""
+
+    def __init__(self):
+        self._buf = b''
+
+    def feed(self, chunk):
+        self._buf += chunk
+        texts = []
+        while b'\n\n' in self._buf:
+            frame, self._buf = self._buf.split(b'\n\n', 1)
+            line = frame.strip()
+            if not line or line.startswith(b':') or not line.startswith(b'data:'):
+                continue
+            texts.append(line[5:].lstrip().decode('utf-8', errors='replace').replace('\\n', '\n'))
+        return texts
+
+
+class _StepLineSplitter:
+    """原始日志文本按 marker 行拆分为 (step, text) 序列；
+    不完整尾行留缓冲（字节切行安全）；marker 前文本 step=''（仅总览展示）"""
+
+    def __init__(self):
+        self._buf = ''
+        self._cur = ''
+
+    def feed(self, text):
+        self._buf += text
+        out = []
+        while '\n' in self._buf:
+            line, self._buf = self._buf.split('\n', 1)
+            key = _LOG_STEP_MARKERS.get(line.strip())
+            if key:
+                self._cur = key
+            out.append((self._cur, line + '\n'))
+        return out
+
+
+def _merge_step_segments(segments):
+    """合并相邻同 step 段，减少帧数"""
+    merged = []
+    for step, text in segments:
+        if merged and merged[-1][0] == step:
+            merged[-1] = (step, merged[-1][1] + text)
+        else:
+            merged.append((step, text))
+    return merged
+
+
+def _should_stop_log_stream(build_no, agent_done=False):
+    """日志流统一终止判定：
+    ① deploy 终态(success/failed/skipped/waiting) 且 (Agent 流已毕 或 构建终态)；
+    ② 构建 failed 且 deploy 未开始（只认 failed，不捕 running）"""
+    steps = build_service.get_build_steps(build_no) or {}
+    step_list = steps.get('steps', [])
+    deploy_status = next((st.get('status') for st in step_list if st.get('key') == 'deploy'), None)
+    build_st = steps.get('status')
+    deploy_done = deploy_status in ('success', 'failed', 'skipped', 'waiting')
+    if deploy_done and (agent_done or build_st in ('success', 'failed')):
+        return True
+    return build_st == 'failed' and deploy_status in (None, 'pending')
 
 
 @require_any_permission('page:cicd', 'op:cicd_build')
@@ -265,7 +350,7 @@ def proxy_build_log(build_id):
             resp = None
             try:
                 resp = http_requests.get(agent_url, stream=True, timeout=(5, 300))
-                for chunk in resp.iter_content(chunk_size=None):
+                for chunk in resp.iter_content(chunk_size=1024):
                     if chunk:
                         yield chunk
             except Exception as e:
@@ -297,6 +382,12 @@ def _stream_all_log(build, agent_url):
     import queue
     import threading
 
+    # 构建已终态：Agent 日志不再变化，一次性拉全量（follow=false）+ 部署日志全文后立即结束，
+    # 不走 follow 流 —— Agent 端 follow 连接 5 分钟才超时，且异步流在途数据易被提前 break 截断导致日志丢失
+    steps = build_service.get_build_steps(build.build_no) or {}
+    if steps.get('status') in ('success', 'failed'):
+        return _stream_final_log(build, agent_url)
+
     deploy_path = os.path.join('logs', 'cicd', f'{build.build_no}.deploy.log')
     q = queue.Queue()
     stop_pump = threading.Event()  # 退出信号
@@ -306,7 +397,7 @@ def _stream_all_log(build, agent_url):
         resp = None
         try:
             resp = http_requests.get(agent_url, stream=True, timeout=(5, 300))
-            for chunk in resp.iter_content(chunk_size=None):
+            for chunk in resp.iter_content(chunk_size=1024):
                 if stop_pump.is_set():  # 检查是否应停止
                     break
                 if chunk:
@@ -329,49 +420,56 @@ def _stream_all_log(build, agent_url):
         except OSError:
             return ''
 
-    def sse_escape(text):
-        return text.replace('\r', '').replace('\n', '\\n')
-
     def generate():
         sent = 0
         idle = 0
         agent_done = False
-        header_sent = False
+        parser = _AgentSseParser()
+        splitter = _StepLineSplitter()
+
+        def drain_agent_queue():
+            """排空 Agent 队列：SSE 帧解析 → 切行步骤归属 → 出归属帧"""
+            nonlocal agent_done, idle
+            while True:
+                try:
+                    kind, payload = q.get_nowait()
+                except queue.Empty:
+                    return
+                if kind == 'agent':
+                    for raw in parser.feed(payload):
+                        for step, seg in _merge_step_segments(splitter.feed(raw)):
+                            yield _log_frame(step, seg)
+                    idle = 0
+                elif kind == 'agent_err':
+                    yield payload
+                    idle = 0
+                elif kind == 'agent_done':
+                    agent_done = True
+
         try:
             while True:
-                # 1. 排空 Agent 流队列（非阻塞；Agent 数据优先进帧，心跳帧也照常转发）
-                while True:
-                    try:
-                        kind, payload = q.get_nowait()
-                    except queue.Empty:
-                        break
-                    if kind in ('agent', 'agent_err'):
-                        yield payload
-                        idle = 0
-                    elif kind == 'agent_done':
-                        agent_done = True
+                # 1. 排空 Agent 流队列，出带步骤归属帧（前端直接渲染，不再本地切分）
+                yield from drain_agent_queue()
 
-                # 2. 每轮追加部署日志增量（构建中文件未生成时为空，不影响 Agent 转发）
+                # 2. 每轮追加部署日志增量（step=deploy；构建中文件未生成时为空）
                 content = read_deploy()
-                if content and not header_sent:
-                    yield 'data: ' + sse_escape('\n=== 部署 ===\n') + '\n\n'
-                    header_sent = True
-                    idle = 0
                 if len(content) > sent:
-                    yield f'data: {sse_escape(content[sent:])}\n\n'
+                    chunk_text = content[sent:]
+                    if sent == 0:
+                        chunk_text = '\n=== 部署 ===\n' + chunk_text
+                    yield _log_frame('deploy', chunk_text)
                     sent = len(content)
                     idle = 0
                 else:
                     idle += 1
 
-                # 3. 结束判定：Agent 流结束且部署无新内容（部署已终态，或部署未开始且构建步骤已失败）
-                steps = build_service.get_build_steps(build.build_no) or {}
-                step_list = steps.get('steps', [])
-                deploy_status = next((st.get('status') for st in step_list if st.get('key') == 'deploy'), None)
-                deploy_done = deploy_status in ('success', 'failed', 'skipped')
-                deploy_never = deploy_status in (None, 'pending')
-                any_failed = any(st.get('status') == 'failed' for st in step_list)
-                if agent_done and (deploy_done or (deploy_never and any_failed)):
+                # 3. 统一终止判定；终止前排空 Agent 在途数据（≤3s）
+                if _should_stop_log_stream(build.build_no, agent_done):
+                    wait = 0
+                    while not agent_done and wait < 3:
+                        time.sleep(1)
+                        wait += 1
+                        yield from drain_agent_queue()
                     break
                 if idle >= 300:
                     break
@@ -379,6 +477,39 @@ def _stream_all_log(build, agent_url):
         finally:
             # 主生成器退出时通知 pump 线程停止，释放 Agent 连接
             stop_pump.set()
+
+    return Response(
+        stream_with_context(generate()),
+        content_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
+
+
+def _stream_final_log(build, agent_url):
+    """构建已终态时的一次性总览日志：Agent 全量日志（follow=false）+ Master 部署日志全文，
+    包装为 SSE 帧推送后立即结束（不挂连接，避免 follow 流 5 分钟空挂 / 在途数据被截断）。"""
+    import re as _re
+    url = _re.sub(r'follow=true', 'follow=false', agent_url)
+    deploy_path = os.path.join('logs', 'cicd', f'{build.build_no}.deploy.log')
+
+    def generate():
+        # 1. Agent 全量构建日志：按步骤归属拆帧逐段推送（帧格式与 follow 流一致）
+        splitter = _StepLineSplitter()
+        try:
+            resp = http_requests.get(url, timeout=30)
+            if resp.status_code == 200 and resp.content:
+                for step, seg in _merge_step_segments(splitter.feed(resp.content.decode('utf-8', errors='replace'))):
+                    yield _log_frame(step, seg)
+        except Exception as e:
+            yield f'data: {{"error": "{str(e)}"}}\n\n'
+        # 2. Master 部署日志全文（部署由 Master 执行，不经 Agent）
+        try:
+            with open(deploy_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+        except OSError:
+            content = ''
+        if content:
+            yield _log_frame('deploy', '\n=== 部署 ===\n' + content)
 
     return Response(
         stream_with_context(generate()),
@@ -417,11 +548,11 @@ def _stream_deploy_log(build, follow):
                 idle += 1
             steps = build_service.get_build_steps(build.build_no) or {}
             deploy_status = next((st.get('status') for st in steps.get('steps', []) if st.get('key') == 'deploy'), None)
-            deploy_done = deploy_status in ('success', 'failed', 'skipped')
+            deploy_done = deploy_status in ('success', 'failed', 'skipped', 'waiting')
             deploy_never = deploy_status in (None, 'pending')
-            any_failed = any(st.get('status') == 'failed' for st in steps.get('steps', []))
-            # 部署终态且日志无新增 → 结束；部署未开始且构建步骤已失败（不会触发部署）→ 直接结束
-            if (deploy_done and len(content) <= sent) or (deploy_never and any_failed):
+            build_st = steps.get('status')  # build.json 总状态；部署未开始且构建未成功 → 不会触发部署
+            # 部署终态（含 waiting）且日志无新增 → 结束；构建失败且部署未开始（不会触发部署）→ 直接结束
+            if (deploy_done and len(content) <= sent) or (deploy_never and build_st == 'failed'):
                 break
             if idle >= 300:
                 break

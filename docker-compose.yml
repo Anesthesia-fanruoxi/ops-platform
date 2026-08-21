@@ -1,38 +1,35 @@
-# 运维平台 - 服务器部署（复用现有 192.168.6.2 MySQL/Redis，不启动自带中间件）
-# 用法：docker compose up -d --build   →  http://<服务器IP>:8050
-# 首次部署前：docker compose 宿主机需能访问 192.168.6.2:3306 / 192.168.6.2:6380
+# 运维平台 - 服务器部署（复用现有 192.168.6.2 MySQL/Redis）
+# 先手动构建镜像：docker build -t ops-platform:latest .
+# 再启动：docker compose up -d    →  http://<服务器IP>:8050
 services:
   app:
-    build: .
+    image: hub.hzbxhd.com/middleware/ops-platform:1.0
     container_name: ops-platform
     restart: unless-stopped
     environment:
-      # ── 应用 ──
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "8050"
-      SECRET_KEY: ${SECRET_KEY:-please-change-me}   # 生产必须设置
       # ── MySQL（现有生产库）──
-      MYSQL_HOST: ${MYSQL_HOST:-192.168.6.2}
-      MYSQL_PORT: ${MYSQL_PORT:-3306}
-      MYSQL_DB: ${MYSQL_DB:-ops-platform}
-      MYSQL_USER: ${MYSQL_USER:-root}
-      MYSQL_PASS: ${MYSQL_PASS:-root}
-      # ── Redis（现有实例；db 与 key_prefix 必须与本地一致，否则 Agent 心跳/同环境锁/会话对不上）──
-      REDIS_HOST: ${REDIS_HOST:-192.168.6.2}
-      REDIS_PORT: ${REDIS_PORT:-6380}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis}
+      MYSQL_HOST: 192.168.6.2
+      MYSQL_PORT: "3306"
+      MYSQL_DB: ops-platform
+      MYSQL_USER: root
+      MYSQL_PASS: root
+      # ── Redis（db 与 key_prefix 必须与本地一致，否则 Agent 心跳/同环境锁/会话对不上）──
+      REDIS_HOST: 192.168.6.2
+      REDIS_PORT: "6380"
+      REDIS_PASSWORD: redis
       REDIS_DB: "1"
       REDIS_KEY_PREFIX: "ops:platform:"
-      # ── 超管（仅首次初始化使用；现有库已有用户，可不配）──
-      SUPER_ADMIN_USERNAME: ${SUPER_ADMIN_USERNAME:-admin}
-      SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:-admin123}
     ports:
-      - "${APP_PORT:-8050}:8050"
+      - "8050:8050"
     volumes:
       - app_logs:/app/logs
       - product:/app/product
       - nginx_configs:/app/nginx_configs
       - recycle:/app/recycle
+      # Agent 二进制（安装/更新 Agent 时上传用）：宿主机替换文件即生效，无需重建镜像
+      - ./agent/dist:/app/agent/dist
 
 volumes:
   app_logs:

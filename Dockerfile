@@ -8,6 +8,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# git：构建弹窗拉取远程分支列表（git ls-remote）依赖；openssh-client：ssh_key 凭据走 GIT_SSH_COMMAND
+RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
 # 先装依赖（利用 Docker 层缓存）
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple

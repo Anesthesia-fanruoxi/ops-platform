@@ -350,6 +350,10 @@ def complete_build(build_id, status, image_digest='', error=''):
     # 补齐未回调步骤为 skipped（Agent 跳过产物收集等无回调，避免 UI 永久 pending）
     fill_skipped_steps(build.build_no)
 
+    # 构建失败：部署不会执行，明确标记部署步骤（构建成功时保持 pending，由 auto_deploy 推进）
+    if status == 'failed':
+        update_deploy_step(build.build_no, 'skipped', '构建未成功，未执行部署')
+
     # 清除领取标记（终态由 status 兜底）
     from core.redis_client import cache_delete
     cache_delete(f'build:claim:{build.id}')
@@ -560,7 +564,8 @@ def update_deploy_step(build_no, status, error=''):
 
 
 def fill_skipped_steps(build_no):
-    """构建终态后补齐未回调步骤（Agent 跳过的步骤无回调），避免步骤永久 pending"""
+    """构建终态后补齐未回调步骤（Agent 跳过的步骤无回调），避免步骤永久 pending。
+    跳过部署步骤：部署由 Master 自动部署推进（Agent 不回调），不能补成 skipped。"""
     bdir = _build_dir(build_no)
     with _build_json_lock:
         data = _read_build_json(bdir)
@@ -569,6 +574,8 @@ def fill_skipped_steps(build_no):
         changed = False
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
         for step in data['steps']:
+            if step.get('key') == 'deploy':
+                continue
             if step['status'] not in ('success', 'failed', 'skipped'):
                 step['status'] = 'skipped'
                 step['finished_at'] = now_str

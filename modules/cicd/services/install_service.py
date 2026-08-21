@@ -498,7 +498,8 @@ def _run_uninstall(task_id, app):
         # Step 3: 删除工作目录
         workdir = p.get('work_dir', '/data/cicd')
         _emit(task_id, 3, '删除工作目录', 'running', f'正在删除 {workdir} ...')
-        _exec(ssh, f'rm -rf {workdir}')
+        # 构建产物小文件海量（.git/node_modules/target），rm 耗时可能分钟级，超时放宽到 10 分钟
+        _exec(ssh, f'rm -rf {workdir}', timeout=600)
         _emit(task_id, 3, '删除工作目录', 'success', f'{workdir} 已删除')
 
         # Step 4: 卸载 NFS 挂载（可选：重置勾选/卸载默认）

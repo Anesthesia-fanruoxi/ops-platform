@@ -35,6 +35,22 @@ class K8sService:
         self.port = int(port or _get_setting('nfs_ssh_port', '') or 22)
         self.username = username or _get_setting('k8s_ssh_user', '')
         self.password = password or _get_setting('k8s_ssh_pass', '')
+        self._ssh = None  # 复用的 SSH 连接（connect() 后生效，未 connect 时每次调用单独建连）
+
+    def connect(self):
+        """建立可复用的 SSH 连接；后续 exec_command 等直接复用，需配合 close() 释放"""
+        if self._ssh is None:
+            self._ssh = self._get_ssh_client()
+        return self._ssh
+
+    def close(self):
+        """释放复用的 SSH 连接（未 connect 时为 no-op）"""
+        if self._ssh is not None:
+            try:
+                self._ssh.close()
+            except Exception:
+                pass
+            self._ssh = None
 
     def _get_ssh_client(self):
         """获取SSH客户端"""
@@ -61,7 +77,8 @@ class K8sService:
         Returns:
             dict: {exit_code, stdout, stderr}
         """
-        ssh = self._get_ssh_client()
+        reused = self._ssh is not None
+        ssh = self._ssh if reused else self._get_ssh_client()
         try:
             stdin, stdout, stderr = ssh.exec_command(cmd, timeout=timeout)
             exit_code = stdout.channel.recv_exit_status()
@@ -69,19 +86,22 @@ class K8sService:
             err = stderr.read().decode().strip()
             return {'exit_code': exit_code, 'stdout': out, 'stderr': err}
         finally:
-            ssh.close()
+            if not reused:
+                ssh.close()
 
     # ─── 远程目录/文件操作 ─────────────────────────────────
 
     def remote_directory_exists(self, remote_path):
         """检查远程目录是否存在"""
-        ssh = self._get_ssh_client()
+        reused = self._ssh is not None
+        ssh = self._ssh if reused else self._get_ssh_client()
         try:
             stdin, stdout, stderr = ssh.exec_command(f"test -d {remote_path} && echo 'exists'")
             output = stdout.read().decode().strip()
             return output == 'exists'
         finally:
-            ssh.close()
+            if not reused:
+                ssh.close()
 
     def list_remote_dirs(self, remote_path):
         """列出远程目录下的子目录"""

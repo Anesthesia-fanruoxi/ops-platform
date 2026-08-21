@@ -39,10 +39,12 @@ def _finish_login(user, username, action='login'):
     from modules.system.session_cache import clear_login_fail
     clear_login_fail(username)
     record_auth_event(action, 'success', f'用户 {username} 登录成功', username=username)
+    from modules.system.settings_service import get_password_policy
     return success_response({
         'token': token_str,
         'expires_at': expires_at.strftime('%Y-%m-%d %H:%M:%S'),
         'user': user.to_dict(include_permissions=True),
+        'password_policy': get_password_policy(),
     }, '登录成功')
 
 
