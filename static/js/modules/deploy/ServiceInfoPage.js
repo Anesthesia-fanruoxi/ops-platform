@@ -2663,7 +2663,12 @@ const ServiceInfoPage = {
   background: #0a2e3c; color: #a8bcc0; border-radius: 6px;
   font-family: Consolas, Menlo, monospace; font-size: 12.5px; line-height: 1.7;
   white-space: pre-wrap; word-break: break-all; min-height: 120px;
+  scrollbar-color: #2f5a6b #0a2e3c; scrollbar-width: thin;
 }
+.svc-logfile-pre::-webkit-scrollbar { width: 8px; height: 8px; }
+.svc-logfile-pre::-webkit-scrollbar-track { background: #0a2e3c; }
+.svc-logfile-pre::-webkit-scrollbar-thumb { background: #2f5a6b; border-radius: 4px; }
+.svc-logfile-pre::-webkit-scrollbar-thumb:hover { background: #3f7a8f; }
 `;
 
   document.head.appendChild(style);
