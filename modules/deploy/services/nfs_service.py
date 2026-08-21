@@ -75,6 +75,40 @@ class NFSService:
         finally:
             ssh.close()
 
+    def list_files(self, remote_path):
+        """列出远程目录下的文件（跳过子目录），返回 [{name, size, mtime}]"""
+        import stat as _stat
+        ssh = self._get_ssh_client()
+        try:
+            sftp = ssh.open_sftp()
+            try:
+                files = []
+                for attr in sftp.listdir_attr(remote_path):
+                    if _stat.S_ISDIR(attr.st_mode or 0):
+                        continue
+                    files.append({
+                        'name': attr.filename,
+                        'size': attr.st_size or 0,
+                        'mtime': attr.st_mtime or 0,
+                    })
+                return files
+            finally:
+                sftp.close()
+        finally:
+            ssh.close()
+
+    def open_sftp(self, remote_path):
+        """打开远程目录的 SFTP 通道，返回 (ssh, sftp)；目录不存在抛异常
+        调用方负责依次 close sftp / ssh"""
+        if not self.directory_exists(remote_path):
+            raise Exception(f'目录不存在: {remote_path}')
+        ssh = self._get_ssh_client()
+        try:
+            return ssh, ssh.open_sftp()
+        except Exception:
+            ssh.close()
+            raise
+
     def remove_directory(self, remote_path):
         """删除远程目录"""
         ssh = self._get_ssh_client()

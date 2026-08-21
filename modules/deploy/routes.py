@@ -132,6 +132,7 @@ from modules.deploy.api.service_info_api import (
     nacos_config_detail, nacos_config_publish
 )
 from modules.deploy.api.service_info_stream_api import service_info_stream, service_envs
+from modules.deploy.api.service_info_logfile_api import logfile_list, logfile_content, logfile_download
 
 deploy_bp.add_url_rule('/service-info/list', 'service_info_list', list_services, methods=['GET'])
 deploy_bp.add_url_rule('/service-info/stream', 'service_info_stream', service_info_stream, methods=['GET'])
@@ -140,6 +141,9 @@ deploy_bp.add_url_rule('/service-info/log/stream', 'service_info_log_stream', po
 deploy_bp.add_url_rule('/service-info/yaml', 'service_info_yaml', service_yaml, methods=['GET'])
 deploy_bp.add_url_rule('/service-info/nacos/config', 'service_info_nacos_config', nacos_config_detail, methods=['GET'])
 deploy_bp.add_url_rule('/service-info/nacos/config', 'service_info_nacos_publish', nacos_config_publish, methods=['POST'])
+deploy_bp.add_url_rule('/service-info/logfiles', 'service_info_logfiles', logfile_list, methods=['GET'])
+deploy_bp.add_url_rule('/service-info/logfile/content', 'service_info_logfile_content', logfile_content, methods=['GET'])
+deploy_bp.add_url_rule('/service-info/logfile/download', 'service_info_logfile_download', logfile_download, methods=['GET'])
 
 
 def register(app):
