@@ -16,8 +16,9 @@ from core.security import require_permission
 from modules.deploy.services.nfs_service import NFSService
 from modules.system.settings_service import get_setting
 
-# 内容查看上限，超出引导下载
-CONTENT_LIMIT = 10 * 1024 * 1024
+# 全文读取上限；超出改为读末尾 TAIL_BYTES（大文件全量渲染前端会卡）
+FULL_LIMIT = 20 * 1024 * 1024
+TAIL_BYTES = 2 * 1024 * 1024
 
 
 def _log_dir(project, env, service):
@@ -100,11 +101,20 @@ def logfile_content():
         ssh, sftp = nfs.open_sftp(log_dir)
         remote_file = f'{log_dir}/{filename}'
         size = sftp.stat(remote_file).st_size or 0
-        if size > CONTENT_LIMIT:
-            return error_response('文件超过 10MB，请使用下载功能', 400)
+        truncated = False
         with sftp.open(remote_file, 'rb') as fp:
-            content = fp.read().decode('utf-8', errors='replace')
-        return success_response({'file': filename, 'size': size, 'content': content})
+            if size <= FULL_LIMIT:
+                raw = fp.read()
+            else:
+                # 大文件只读末尾，丢弃首行残行
+                fp.seek(max(size - TAIL_BYTES, 0))
+                raw = fp.read()
+                nl = raw.find(b'\n')
+                if 0 <= nl < len(raw) - 1:
+                    raw = raw[nl + 1:]
+                truncated = True
+        content = raw.decode('utf-8', errors='replace')
+        return success_response({'file': filename, 'size': size, 'content': content, 'truncated': truncated})
     except Exception as e:
         return error_response(f'读取文件失败: {e}', 500)
     finally:

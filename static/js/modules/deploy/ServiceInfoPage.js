@@ -1750,6 +1750,7 @@ const ServiceInfoPage = {
         this.lfContentLoading = false;
         if (r.code === 200 && r.data) {
           this.lfContent = r.data.content || '';
+          if (r.data.truncated) ElementPlus.ElMessage.warning('文件较大，仅展示末尾 2MB 内容（完整内容请下载）');
           // 加载完成滚动到底部（日志最新内容在末尾）
           this.$nextTick(() => {
             const box = this.$refs.lfContentBox;
