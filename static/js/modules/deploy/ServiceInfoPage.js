@@ -346,10 +346,15 @@ const ServiceInfoPage = {
   <!-- 日志文件内容查看弹窗 -->
   <el-dialog v-model="lfContentVisible" :title="'日志内容 - ' + (lfContentFile || '')" width="80%" top="10vh"
              class="svc-logfile-dialog" :close-on-click-modal="false" append-to-body>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+      <el-input v-model="lfSearchWord" size="small" style="width:260px;" clearable placeholder="搜索（高亮匹配内容）">
+        <template #prefix><span style="font-size:13px">🔍</span></template>
+      </el-input>
+      <span style="color:#6f94a0;font-size:12px;white-space:nowrap;">共 [[ lfLines.length ]] 行[[ lfSearchWord ? '，匹配 ' + lfMatchCount + ' 行' : '' ]]</span>
+    </div>
     <pre class="svc-logfile-pre" ref="lfContentBox" v-loading="lfContentLoading"
-         element-loading-background="rgba(10, 46, 60, 0.9)">[[ lfContent ]]</pre>
+         element-loading-background="rgba(10, 46, 60, 0.9)"><div v-for="(line, i) in lfLines" :key="i" v-html="lfRenderLine(line)"></div></pre>
   </el-dialog>
-
   <!-- 部署配置弹窗 -->
   <el-dialog v-model="yamlVisible" :title="'部署配置 - ' + (yamlFile || '')" width="900px">
     <div style="position:relative;">
@@ -570,6 +575,7 @@ const ServiceInfoPage = {
       // 日志目录弹窗
       lfVisible: false, lfServiceName: '', lfPods: [], lfPath: '', lfFiles: [], lfLoading: false,
       lfContentVisible: false, lfContentFile: '', lfContent: '', lfContentLoading: false,
+      lfSearchWord: '',
       yamlVisible: false,
       yamlFile: '',
       yamlContent: '',
@@ -618,6 +624,16 @@ const ServiceInfoPage = {
     filteredEnvRows() {
       if (!this.envSearchWord) return this.envRows;
       return this.envRows.filter(r => this.isSubseqMatch(this.envSearchWord, r.name));
+    },
+
+    // 日志文件内容按行拆分（供行级渲染/搜索统计）
+    lfLines() {
+      return (this.lfContent || '').split('\n');
+    },
+    lfMatchCount() {
+      if (!this.lfSearchWord) return 0;
+      const q = this.lfSearchWord.toLowerCase();
+      return this.lfLines.filter(l => l.toLowerCase().includes(q)).length;
     },
 
     canUpdateNacos() {
@@ -1481,6 +1497,10 @@ const ServiceInfoPage = {
     },
     // ─── 日志搜索（Ctrl+F） ────────────────────────────────
     highlightLogLine(line) {
+      return this._highlightLine(line, this.logSearchWord);
+    },
+    // 通用行高亮：行首时间戳/Java方法着色 + 搜索词高亮
+    _highlightLine(line, searchWord) {
       let html = this._escapeHtml(String(line == null ? '' : line));
       // 行首时间戳着色（仅行首，其他地方的时间不特殊显示）：2026-08-12 13:57:47.101 或 13:57:47.101
       html = html.replace(/^(\s*)((\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?)/,
@@ -1489,8 +1509,8 @@ const ServiceInfoPage = {
       html = html.replace(/\[([^\],\[\s]+),(\d+)\]/g,
         '[<span class="svc-log-method">$1</span>,<span class="svc-log-line">$2</span>]');
       // 搜索高亮（split/join 方式，避免转义问题）
-      if (this.logSearchWord) {
-        const q = this._escapeHtml(this.logSearchWord);
+      if (searchWord) {
+        const q = this._escapeHtml(searchWord);
         if (q) html = html.split(q).join('<mark style="background:#e6a23c;color:#1e1e1e;border-radius:2px">' + q + '</mark>');
       }
       return html;
@@ -1690,6 +1710,10 @@ const ServiceInfoPage = {
       const parts = (this.lfPath || '').split('/').filter(Boolean);
       return parts.slice(-2).join('/');
     },
+    // 内容弹窗行渲染：复用通用高亮（时间/方法着色 + 搜索高亮）
+    lfRenderLine(line) {
+      return this._highlightLine(line, this.lfSearchWord);
+    },
     loadLogFiles() {
       this.lfLoading = true;
       const url = '/api/deploy/service-info/logfiles?project=' + encodeURIComponent(this.selectedProject)
@@ -1716,6 +1740,7 @@ const ServiceInfoPage = {
     viewLogfile(row) {
       this.lfContentFile = row.name;
       this.lfContent = '';
+      this.lfSearchWord = '';
       this.lfContentLoading = true;
       this.lfContentVisible = true;
       const url = '/api/deploy/service-info/logfile/content?project=' + encodeURIComponent(this.selectedProject)
@@ -2658,6 +2683,9 @@ const ServiceInfoPage = {
 .svc-logfile-dialog .el-dialog__headerbtn .el-dialog__close:hover { color: #d4e6ea; }
 .svc-logfile-dialog .el-dialog__body { background: #0a2e3c !important; padding: 12px; }
 .svc-logfile-dialog .el-dialog__footer { background: #0a2e3c !important; }
+.svc-logfile-dialog .el-input__wrapper { background: #0f3a4c; box-shadow: 0 0 0 1px #1c4a5e inset; }
+.svc-logfile-dialog .el-input__inner { color: #a8bcc0; }
+.svc-logfile-dialog .el-input__inner::placeholder { color: #4d6d78; }
 .svc-logfile-pre {
   height: 70vh; overflow: auto; margin: 0; padding: 12px 14px;
   background: #0a2e3c; color: #a8bcc0; border-radius: 6px;
