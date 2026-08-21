@@ -345,11 +345,9 @@ const ServiceInfoPage = {
 
   <!-- 日志文件内容查看弹窗 -->
   <el-dialog v-model="lfContentVisible" :title="'日志内容 - ' + (lfContentFile || '')" width="80%" top="10vh"
-             class="svc-logfile-dialog" append-to-body>
-    <pre class="svc-logfile-pre" ref="lfContentBox" v-loading="lfContentLoading">[[ lfContent ]]</pre>
-    <template #footer>
-      <el-button type="primary" @click="lfContentVisible = false">关闭</el-button>
-    </template>
+             class="svc-logfile-dialog" :close-on-click-modal="false" append-to-body>
+    <pre class="svc-logfile-pre" ref="lfContentBox" v-loading="lfContentLoading"
+         element-loading-background="rgba(10, 46, 60, 0.9)">[[ lfContent ]]</pre>
   </el-dialog>
 
   <!-- 部署配置弹窗 -->
@@ -2652,15 +2650,16 @@ const ServiceInfoPage = {
 .svc-logfile-name.is-running { color: #67c23a; font-weight: 600; }
 .svc-logfile-name.is-running:hover { color: #85ce61; }
 /* 内容查看弹窗暗色主题（与运行日志弹窗风格一致） */
-.svc-logfile-dialog .el-dialog { background: #0a2e3c; }
+.svc-logfile-dialog { --el-dialog-bg-color: #0a2e3c; }
+.svc-logfile-dialog .el-dialog { background: #0a2e3c !important; }
 .svc-logfile-dialog .el-dialog__header { background: #0a2e3c !important; border-bottom: 1px solid #1c4a5e; }
 .svc-logfile-dialog .el-dialog__title { color: #a8bcc0 !important; }
 .svc-logfile-dialog .el-dialog__headerbtn .el-dialog__close { color: #7fa3ad; }
 .svc-logfile-dialog .el-dialog__headerbtn .el-dialog__close:hover { color: #d4e6ea; }
-.svc-logfile-dialog .el-dialog__body { background: #0a2e3c !important; padding-top: 12px; }
-.svc-logfile-dialog .el-dialog__footer { background: #0a2e3c; border-top: 1px solid #1c4a5e; }
+.svc-logfile-dialog .el-dialog__body { background: #0a2e3c !important; padding: 12px; }
+.svc-logfile-dialog .el-dialog__footer { background: #0a2e3c !important; }
 .svc-logfile-pre {
-  max-height: 70vh; overflow: auto; margin: 0; padding: 12px 14px;
+  height: 70vh; overflow: auto; margin: 0; padding: 12px 14px;
   background: #0a2e3c; color: #a8bcc0; border-radius: 6px;
   font-family: Consolas, Menlo, monospace; font-size: 12.5px; line-height: 1.7;
   white-space: pre-wrap; word-break: break-all; min-height: 120px;
