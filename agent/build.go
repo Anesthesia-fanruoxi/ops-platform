@@ -21,18 +21,18 @@ const keepBuilds = 5
 // ─── 构建任务结构 ────────────────────────────────────────────────
 
 type BuildTask struct {
-	BuildID         int            `json:"build_id"`
-	BuildNo         string         `json:"build_no"`
-	ProjectEnv      string         `json:"project_env"` // "{project}-{env}-{type}" 工作子目录名
-	ImageNamespace  string         `json:"image_namespace"` // "{project}-{env}" 镜像命名空间（不含 type）
-	ProjectType     string         `json:"project_type"` // "frontend" | "backend"
-	Language        string         `json:"language"`
-	Branch          string         `json:"branch"`
-	Steps           StepConfig     `json:"steps"`
-	Harbor          HarborCfg      `json:"harbor"`
-	CancelRequested bool           `json:"cancel_requested"`
-	StartStep       int            `json:"start_step"` // 重跑起点：默认 1 从头执行；>1 复用已有目录从该步骤续跑
-	KeepBuilds      int            `json:"keep_builds"` // 构建保留数：Master 下发，用于清理旧构建目录；未设置(<1)回退默认值
+	BuildID         int        `json:"build_id"`
+	BuildNo         string     `json:"build_no"`
+	ProjectEnv      string     `json:"project_env"`     // "{project}-{env}-{type}" 工作子目录名
+	ImageNamespace  string     `json:"image_namespace"` // "{project}-{env}" 镜像命名空间（不含 type）
+	ProjectType     string     `json:"project_type"`    // "frontend" | "backend"
+	Language        string     `json:"language"`
+	Branch          string     `json:"branch"`
+	Steps           StepConfig `json:"steps"`
+	Harbor          HarborCfg  `json:"harbor"`
+	CancelRequested bool       `json:"cancel_requested"`
+	StartStep       int        `json:"start_step"`  // 重跑起点：默认 1 从头执行；>1 复用已有目录从该步骤续跑
+	KeepBuilds      int        `json:"keep_builds"` // 构建保留数：Master 下发，用于清理旧构建目录；未设置(<1)回退默认值
 }
 
 type StepConfig struct {
@@ -69,6 +69,17 @@ type StepDef struct {
 	Name string
 }
 
+func normalizeArtifactDirs(dirs []string) []string {
+	cleaned := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		dir = strings.TrimSpace(dir)
+		if dir != "" {
+			cleaned = append(cleaned, dir)
+		}
+	}
+	return cleaned
+}
+
 func getStepsDef(projectType string) []StepDef {
 	if projectType == "frontend" {
 		return []StepDef{
@@ -90,6 +101,7 @@ func getStepsDef(projectType string) []StepDef {
 // ─── 构建主流程 ──────────────────────────────────────────────────
 
 func executeBuild(task *BuildTask) {
+	task.Steps.ArtifactDirs = normalizeArtifactDirs(task.Steps.ArtifactDirs)
 	log.Printf("[Build#%d] 开始执行 type=%s branch=%s start_step=%d", task.BuildID, task.ProjectType, task.Branch, task.StartStep)
 
 	// 统一输出"完成构建任务"（正常/失败/取消都打印），status 在结尾或提前 return 分支确定
@@ -524,7 +536,7 @@ func execCollectArtifacts(logger *stepLogger, task *BuildTask, codeDir, productD
 	}
 
 	// 后端：服务目录列表 + 各服务统一的产物子目录
-	svcDirs := task.Steps.ArtifactDirs
+	svcDirs := normalizeArtifactDirs(task.Steps.ArtifactDirs)
 	if len(svcDirs) == 0 {
 		return fmt.Errorf("未配置服务目录")
 	}

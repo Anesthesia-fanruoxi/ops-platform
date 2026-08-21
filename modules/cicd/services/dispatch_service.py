@@ -66,6 +66,13 @@ def _frontend_web_dir(build, agent):
     envn = build.environment.name if build.environment else ''
     return f'{mount_root}/{proj}/{envn}/web'
 
+def _clean_artifact_dirs(value):
+    """Normalize service directories so blank entries mean no configured services."""
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
 def assemble_task(build, agent):
     """组装下发给 Agent 的完整任务体（凭据仅此刻解密）"""
     # 解析步骤快照
@@ -79,7 +86,7 @@ def assemble_task(build, agent):
 
     # 部分构建：下发前将 artifact_dirs 筛成仅选中的服务（按 basename 匹配），
     # Agent 收到的是自包含任务，照常遍历即可，无需感知“选择”逻辑。空=全部
-    artifact_dirs = steps.get('artifact_dirs', [])
+    artifact_dirs = _clean_artifact_dirs(steps.get('artifact_dirs'))
     services = steps.get('services', [])
     if services:
         selected = set(services)

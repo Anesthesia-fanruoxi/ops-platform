@@ -296,6 +296,7 @@ def rerun_build(build_id, start_step):
             s['finished_at'] = None
             s['duration'] = None
             s['error'] = ''
+            s['action'] = ''
     data['status'] = 'pending'
     _write_build_json(_build_dir(build.build_no), data)
 
@@ -457,6 +458,7 @@ def init_build_steps(build_no, project_type='backend'):
             'finished_at': None,
             'duration': None,
             'error': '',
+            'action': '',
         })
     data = {'build_no': build_no, 'status': 'pending', 'project_type': project_type, 'steps': steps}
     _write_build_json(bdir, data)
@@ -530,7 +532,7 @@ def get_build_steps(build_no):
     bdir = _build_dir(build_no)
     return _read_build_json(bdir)
 
-def update_deploy_step(build_no, status, error=''):
+def update_deploy_step(build_no, status, error='', action=''):
     """更新 build.json 中「部署」步骤（key='deploy'）的状态。
     由 Master 自动部署调用（Agent 不感知此步）；不重算 build 总状态，
     展示以 DB build.status 为准（部署失败不影响构建终态）。
@@ -548,14 +550,12 @@ def update_deploy_step(build_no, status, error=''):
                 step['status'] = 'running'
                 step['started_at'] = now_str
                 step['error'] = ''
-            elif status == 'waiting':
-                step['status'] = 'waiting'
-                step['started_at'] = now_str
-                step['error'] = error or ''
+                step['action'] = ''
             elif status in ('success', 'failed', 'skipped'):
                 step['status'] = status
                 step['finished_at'] = now_str
                 step['error'] = error or ''
+                step['action'] = action or ''
                 st = _parse_step_time(step.get('started_at'))
                 if st:
                     step['duration'] = round((datetime.now() - st).total_seconds(), 1)

@@ -93,7 +93,14 @@ def auto_deploy_build(build):
     snapshot = build.get_steps_snapshot()
 
     # 实际构建并推送的服务名 = artifact_dirs 的 basename；selected 为空或覆盖全部服务 = 全部构建
-    all_names = [d.strip().rstrip('/').split('/')[-1] for d in snapshot.get('artifact_dirs', []) if d.strip()]
+    artifact_dirs = snapshot.get('artifact_dirs')
+    if not isinstance(artifact_dirs, list):
+        artifact_dirs = []
+    all_names = [
+        d.strip().rstrip('/').split('/')[-1]
+        for d in artifact_dirs
+        if isinstance(d, str) and d.strip()
+    ]
     selected = snapshot.get('services') or []
     # 全选（selected 覆盖全部服务）与未选（空）都按「全部构建」处理；只有真正的部分选择才逐文件 apply
     is_full = (not selected) or set(selected) >= set(all_names)
@@ -124,9 +131,15 @@ def auto_deploy_build(build):
     log('INFO', f'开始自动部署：环境={env_full} tag={new_tag} 范围={"全部" if is_full else "部分"} 服务={target}')
 
     if build.project_type == 'backend' and not all_names:
-        # 后端未配置服务目录：编译完成但未收集产物/打镜像，部署步骤等待平台勾选回填后重新构建
+        # No artifact directory means there is no artifact to deploy; keep every later step skipped.
+        # The action marker preserves the directory-selection entry point in the UI.
         log('WARN', '未配置服务目录，无法部署：请在部署步骤点「配置服务目录」勾选后重新构建')
-        update_deploy_step(build.build_no, 'waiting', '未配置服务目录，请配置后重新构建')
+        update_deploy_step(
+            build.build_no,
+            'skipped',
+            '未配置服务目录，请配置后重新构建',
+            action='configure_artifact_dirs',
+        )
         return
 
     if not new_tag:

@@ -563,7 +563,9 @@ const ServiceInfoPage = {
   computed: {
     // 部署步骤 waiting：后端未配置服务目录，需勾选回填后重新构建
     bpDeployWaiting() {
-      return (this.bpSteps || []).some(s => s.key === 'deploy' && s.status === 'waiting');
+      return (this.bpSteps || []).some(s => s.key === 'deploy' && (
+        s.status === 'waiting' || s.action === 'configure_artifact_dirs'
+      ));
     },
     selectDirsSegments() { return this.selectDirsPath ? this.selectDirsPath.split('/').filter(Boolean) : []; },
     selectDirsParent() {

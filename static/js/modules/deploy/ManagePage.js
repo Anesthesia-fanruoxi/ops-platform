@@ -623,7 +623,9 @@ const ManagePage = {
     },
     // 部署步骤 waiting：后端未配置服务目录，需勾选回填后重新构建
     bpDeployWaiting() {
-      return (this.bpSteps || []).some(s => s.key === 'deploy' && s.status === 'waiting');
+      return (this.bpSteps || []).some(s => s.key === 'deploy' && (
+        s.status === 'waiting' || s.action === 'configure_artifact_dirs'
+      ));
     },
     // 全部勾选状态：所有服务开关都开启时为 true（供「全部勾选」开关联动）
     allServicesChecked() {
