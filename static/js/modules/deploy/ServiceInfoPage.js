@@ -324,8 +324,8 @@ const ServiceInfoPage = {
       <el-table-column type="index" label="#" width="50" align="center"></el-table-column>
       <el-table-column label="文件名" min-width="320">
         <template #default="scope">
-          <span class="svc-logfile-name" :class="{ 'is-running': !!lfRunningPod(scope.row.name) }"
-                :title="lfRunningPod(scope.row.name) ? ('运行中 Pod: ' + lfRunningPod(scope.row.name) + '，点击查看内容') : '点击查看内容'"
+          <span class="svc-logfile-name" :class="{ 'is-running': !!lfRunningPod(scope.row.name), 'is-disabled': lfTooLarge(scope.row) }"
+                :title="lfTooLarge(scope.row) ? '文件超过 20MB，仅支持下载' : (lfRunningPod(scope.row.name) ? ('运行中 Pod: ' + lfRunningPod(scope.row.name) + '，点击查看内容') : '点击查看内容')"
                 @click="viewLogfile(scope.row)">[[ scope.row.name ]]</span>
         </template>
       </el-table-column>
@@ -333,7 +333,8 @@ const ServiceInfoPage = {
       <el-table-column prop="mtime_str" label="修改时间" width="170"></el-table-column>
       <el-table-column label="操作" width="140" align="center">
         <template #default="scope">
-          <el-button link type="primary" size="small" @click="viewLogfile(scope.row)">查看</el-button>
+          <el-button link type="primary" size="small" :class="{ 'lf-view-disabled': lfTooLarge(scope.row) }"
+                     @click="viewLogfile(scope.row)">查看</el-button>
           <el-button link type="primary" size="small" @click="downloadLogfile(scope.row)">下载</el-button>
         </template>
       </el-table-column>
@@ -574,7 +575,7 @@ const ServiceInfoPage = {
 
       // 日志目录弹窗
       lfVisible: false, lfServiceName: '', lfPods: [], lfPath: '', lfFiles: [], lfLoading: false,
-      lfContentVisible: false, lfContentFile: '', lfContent: '', lfContentLoading: false,
+      lfContentVisible: false, lfContentFile: '', lfLines: [], lfContentLoading: false,
       lfSearchWord: '',
       yamlVisible: false,
       yamlFile: '',
@@ -626,10 +627,7 @@ const ServiceInfoPage = {
       return this.envRows.filter(r => this.isSubseqMatch(this.envSearchWord, r.name));
     },
 
-    // 日志文件内容按行拆分（供行级渲染/搜索统计）
-    lfLines() {
-      return (this.lfContent || '').split('\n');
-    },
+    // 日志文件内容行数组（流式增量填充）
     lfMatchCount() {
       if (!this.lfSearchWord) return 0;
       const q = this.lfSearchWord.toLowerCase();
@@ -1714,6 +1712,10 @@ const ServiceInfoPage = {
     lfRenderLine(line) {
       return this._highlightLine(line, this.lfSearchWord);
     },
+    // 超过 20MB 的文件不支持在线查看，仅下载
+    lfTooLarge(row) {
+      return (row.size || 0) > 20 * 1024 * 1024;
+    },
     loadLogFiles() {
       this.lfLoading = true;
       const url = '/api/deploy/service-info/logfiles?project=' + encodeURIComponent(this.selectedProject)
@@ -1738,28 +1740,56 @@ const ServiceInfoPage = {
       return '';
     },
     viewLogfile(row) {
+      if (this.lfTooLarge(row)) {
+        ElementPlus.ElMessage.warning('文件大小超过 20MB，不支持在线查看，请下载后查看');
+        return;
+      }
       this.lfContentFile = row.name;
-      this.lfContent = '';
+      this.lfLines = [];
       this.lfSearchWord = '';
       this.lfContentLoading = true;
       this.lfContentVisible = true;
       const url = '/api/deploy/service-info/logfile/content?project=' + encodeURIComponent(this.selectedProject)
         + '&env=' + encodeURIComponent(this.selectedEnv) + '&service=' + encodeURIComponent(this.lfServiceName)
         + '&file=' + encodeURIComponent(row.name);
-      ajax('GET', url, null, (r) => {
-        this.lfContentLoading = false;
-        if (r.code === 200 && r.data) {
-          this.lfContent = r.data.content || '';
-          if (r.data.truncated) ElementPlus.ElMessage.warning('文件较大，仅展示末尾 2MB 内容（完整内容请下载）');
-          // 加载完成滚动到底部（日志最新内容在末尾）
-          this.$nextTick(() => {
-            const box = this.$refs.lfContentBox;
-            if (box) box.scrollTop = box.scrollHeight;
-          });
-        } else {
+      const token = localStorage.getItem('auth_token') || '';
+      fetch(url, { headers: { 'Authorization': 'Bearer ' + token } }).then(async (resp) => {
+        const ct = resp.headers.get('Content-Type') || '';
+        if (!resp.ok || ct.indexOf('application/json') !== -1) {
+          // 错误响应为 JSON
+          let msg = '读取文件失败';
+          try { msg = (await resp.json()).msg || msg; } catch (e) { /* 忽略解析失败 */ }
+          this.lfContentLoading = false;
           this.lfContentVisible = false;
-          ElementPlus.ElMessage.error(r.msg || '读取文件失败');
+          ElementPlus.ElMessage.error(msg);
+          return;
         }
+        // 流式读取：边收边按行增量渲染
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let carry = '';
+        let first = true;
+        while (true) {
+          const r = await reader.read();
+          if (r.done) break;
+          carry += decoder.decode(r.value, { stream: true });
+          const idx = carry.lastIndexOf('\n');
+          if (idx === -1) continue;
+          this.lfLines.push(...carry.slice(0, idx).split('\n'));
+          carry = carry.slice(idx + 1);
+          if (first) { first = false; this.lfContentLoading = false; }
+        }
+        if (carry) this.lfLines.push(carry);
+        this.lfContentLoading = false;
+        // 加载完成滚动到底部（日志最新内容在末尾）
+        this.$nextTick(() => {
+          const box = this.$refs.lfContentBox;
+          if (box) box.scrollTop = box.scrollHeight;
+        });
+      }).catch(() => {
+        this.lfContentLoading = false;
+        this.lfContentVisible = false;
+        ElementPlus.ElMessage.error('读取文件失败');
       });
     },
     downloadLogfile(row) {
@@ -2675,6 +2705,9 @@ const ServiceInfoPage = {
 .svc-logfile-name:hover { color: #409eff; text-decoration: underline; }
 .svc-logfile-name.is-running { color: #67c23a; font-weight: 600; }
 .svc-logfile-name.is-running:hover { color: #85ce61; }
+.svc-logfile-name.is-disabled { cursor: not-allowed; color: #5c6b70; text-decoration: none; }
+.svc-logfile-name.is-disabled:hover { color: #5c6b70; text-decoration: none; }
+.lf-view-disabled { color: #a8abb2 !important; cursor: not-allowed !important; }
 /* 内容查看弹窗暗色主题（与运行日志弹窗风格一致） */
 .svc-logfile-dialog { --el-dialog-bg-color: #0a2e3c; }
 .svc-logfile-dialog .el-dialog { background: #0a2e3c !important; }

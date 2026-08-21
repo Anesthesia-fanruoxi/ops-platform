@@ -3,7 +3,7 @@
 服务信息-日志目录接口（SSH 直连 NFS 服务器）
 
 - GET /service-info/logfiles          列出服务日志目录文件
-- GET /service-info/logfile/content   读取日志文件全文（≤10MB）
+- GET /service-info/logfile/content   读取日志文件全文（≤20MB，超出仅下载）
 - GET /service-info/logfile/download  流式下载日志文件
 """
 import os
@@ -16,9 +16,8 @@ from core.security import require_permission
 from modules.deploy.services.nfs_service import NFSService
 from modules.system.settings_service import get_setting
 
-# 全文读取上限；超出改为读末尾 TAIL_BYTES（大文件全量渲染前端会卡）
+# 内容查看上限 20MB，超出仅支持下载
 FULL_LIMIT = 20 * 1024 * 1024
-TAIL_BYTES = 2 * 1024 * 1024
 
 
 def _log_dir(project, env, service):
@@ -81,7 +80,7 @@ def logfile_list():
 
 @require_permission('page:service_info')
 def logfile_content():
-    """读取日志文件全文；超过上限拒绝并提示下载"""
+    """读取日志文件全文（≤20MB，超出仅支持下载），流式返回"""
     project = request.args.get('project', '')
     env = request.args.get('env', '')
     service = request.args.get('service', '')
@@ -101,33 +100,44 @@ def logfile_content():
         ssh, sftp = nfs.open_sftp(log_dir)
         remote_file = f'{log_dir}/{filename}'
         size = sftp.stat(remote_file).st_size or 0
-        truncated = False
+        if size > FULL_LIMIT:
+            raise Exception(f'文件超过 {_format_size(FULL_LIMIT)}，请使用下载')
         with sftp.open(remote_file, 'rb') as fp:
-            if size <= FULL_LIMIT:
-                raw = fp.read()
-            else:
-                # 大文件只读末尾，丢弃首行残行
-                fp.seek(max(size - TAIL_BYTES, 0))
-                raw = fp.read()
-                nl = raw.find(b'\n')
-                if 0 <= nl < len(raw) - 1:
-                    raw = raw[nl + 1:]
-                truncated = True
-        content = raw.decode('utf-8', errors='replace')
-        return success_response({'file': filename, 'size': size, 'content': content, 'truncated': truncated})
+            data = fp.read()
     except Exception as e:
+        for c in (sftp, ssh):
+            if c is not None:
+                try:
+                    c.close()
+                except Exception:
+                    pass
         return error_response(f'读取文件失败: {e}', 500)
-    finally:
-        if sftp is not None:
+
+    # 流式返回：前端边收边渲染；元数据走响应头
+    def generate():
+        try:
+            for i in range(0, len(data), 65536):
+                yield data[i:i + 65536]
+        except GeneratorExit:
+            pass
+        finally:
             try:
                 sftp.close()
             except Exception:
                 pass
-        if ssh is not None:
             try:
                 ssh.close()
             except Exception:
                 pass
+
+    return Response(
+        generate(),
+        mimetype='text/plain; charset=utf-8',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Log-Size': str(size),
+        },
+    )
 
 
 @require_permission('page:service_info')
