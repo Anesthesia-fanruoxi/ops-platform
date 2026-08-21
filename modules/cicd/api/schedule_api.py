@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""调度中心 API：概览 + SSE 实时推送 + 调度日志 + 节点目录浏览"""
+"""Schedule center API: overview, multiplexed SSE, and schedule logs."""
 import json
 import time
 
-from flask import Response, stream_with_context, request
+from flask import Response, stream_with_context
 
-from core.response import success_response, error_response
+from core.response import success_response
 from core.security import require_permission
 from core.db import db
 from modules.cicd.models import BuildAgent, Build, ScheduleLog
@@ -47,43 +47,59 @@ def _overview():
     return result
 
 
-@require_permission('page:cicd')
+@require_permission('page:cicd_schedule')
 def schedule_overview():
     """GET /overview → 调度概览（首屏/兜底）"""
     return success_response(_overview())
 
 
-@require_permission('page:cicd')
+def _schedule_logs_snapshot():
+    """Return the schedule-log snapshot used by the multiplexed SSE stream."""
+    logs = ScheduleLog.query.order_by(ScheduleLog.created_at.desc()).limit(100).all()
+    return [log.to_detail_dict() for log in logs]
+
+
+def _sse_event(event, data):
+    """Build a named SSE frame so one connection can carry multiple data types."""
+    payload = json.dumps(data, ensure_ascii=False)
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+@require_permission('page:cicd_schedule')
 def schedule_stream():
-    """GET /stream?token= → SSE 每 5s 推送调度概览"""
+    """GET /stream?token= -> SSE overview and schedule-log events."""
     def generate():
+        last_logs_signature = None
         while True:
             try:
-                payload = json.dumps(_overview(), ensure_ascii=False)
-                yield f"data: {payload}\n\n"
+                overview = _overview()
+                logs = _schedule_logs_snapshot()
+                logs_signature = tuple(
+                    (item['id'], item['status'], item['selected_agent'], item['created_at'], item['detail_logs'])
+                    for item in logs
+                )
+                yield _sse_event('overview', overview)
+                if logs_signature != last_logs_signature:
+                    yield _sse_event('schedule_logs', logs)
+                    last_logs_signature = logs_signature
             except Exception as e:
-                # 异常后必须回滚：否则 SSE 线程的写事务悬挂，
-                # 所有 Agent 心跳写入都会被阻塞（曾导致全部节点误判离线）
+                # Roll back after an exception so the long-lived request does not keep a stale transaction.
                 db.session.rollback()
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
-            time.sleep(5)
+                yield _sse_event('error', {'message': str(e)})
+            time.sleep(2)
 
     return Response(
         stream_with_context(generate()),
         content_type='text/event-stream',
-        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive',
+        },
     )
 
 
-# ─── 调度日志 ─────────────────────────────────────────
-@require_permission('page:cicd')
-def schedule_logs():
-    """GET /logs → 调度日志列表（基本信息）"""
-    logs = ScheduleLog.query.order_by(ScheduleLog.created_at.desc()).limit(100).all()
-    return success_response([l.to_dict() for l in logs])
-
-
-@require_permission('page:cicd')
+@require_permission('page:cicd_schedule')
 def schedule_log_detail(log_id):
     """GET /logs/<id> → 调度日志详情（含完整日志）"""
     slog = ScheduleLog.query.get(log_id)
@@ -93,7 +109,7 @@ def schedule_log_detail(log_id):
     return success_response(slog.to_detail_dict())
 
 
-@require_permission('page:cicd')
+@require_permission('page:cicd_schedule')
 def schedule_scores():
     """GET /scores → 节点调度评分查询（独立接口，不依赖 SSE/概览缓存）。
     读取 MySQL 配置 + Redis 心跳，计算每个节点的负载评分（越低越优），
@@ -125,24 +141,3 @@ def schedule_scores():
     # 在线且有评分在前，按评分升序（越低越优）；离线排在最后
     result.sort(key=lambda x: (x['score'] is None, x['score'] if x['score'] is not None else 0))
     return success_response(result)
-
-
-# ─── 节点目录浏览（op:agent_dir，只读、仅工作目录内）─────────────────
-@require_permission('op:agent_dir')
-def schedule_dirs():
-    """GET /dirs?agent_id=&path= → 单层列举 Agent 工作目录（节点侧防越界）"""
-    agent_id = request.args.get('agent_id', type=int)
-    path = request.args.get('path', '')
-    if not agent_id:
-        return error_response('缺少 agent_id', 400)
-    agent = BuildAgent.query.get(agent_id)
-    if not agent:
-        return error_response('Agent 不存在', 404)
-    if agent_service.get_hb(agent) is None:
-        return error_response('Agent 离线，无法浏览目录', 400)
-
-    from modules.cicd.services import dispatch_service
-    entries, err = dispatch_service.list_agent_dir(agent, path)
-    if err:
-        return error_response(err, 502)
-    return success_response({'entries': entries, 'path': path})

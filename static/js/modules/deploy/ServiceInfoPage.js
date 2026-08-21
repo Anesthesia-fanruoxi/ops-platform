@@ -428,6 +428,10 @@ const ServiceInfoPage = {
       <el-button size="small" @click="loadCodeDirs(selectDirsPath)">刷新</el-button>
       </div>
       <div style="font-size:12px;color:#909399;margin:4px 0 8px">产物目录：<b style="color:#303133">[[ selectDirsArtifactDir || '未设置（收集整服务目录）' ]]</b>（点目录行「设为产物」/文件行「设为该类产物」快速设置）</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:6px">
+        <el-button link type="primary" size="small" @click="checkAllSelectDirs(true)">全选</el-button>
+        <el-button link type="primary" size="small" @click="checkAllSelectDirs(false)">取消全选</el-button>
+      </div>
     <el-table :data="selectDirsEntries" size="small" border stripe v-loading="selectDirsLoading" style="width:100%" max-height="40vh">
       <el-table-column label="名称" min-width="320">
         <template #default="s">
@@ -1142,6 +1146,17 @@ const ServiceInfoPage = {
         this.selectDirsArtifactDir = val;
         ElementPlus.ElMessage.success('已设定产物：' + val);
       }).catch(() => {});
+    },
+    // 全选/取消全选：全选作用于当前视图 dir 行（打开弹窗默认顶层=全部服务）；取消全选清空所有勾选
+    checkAllSelectDirs(val) {
+      if (!val) {
+        this.selectDirsChecked = {};
+        this.selectDirsList = [];
+        return;
+      }
+      this.selectDirsEntries.filter(e => e.type === 'dir').forEach(e => {
+        this.toggleSelectDir(this.selectDirJoin(e.name), true);
+      });
     },
     toggleSelectDir(name, v) {
       if (v) {

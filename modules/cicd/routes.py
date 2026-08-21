@@ -115,15 +115,13 @@ agent_comm_bp.add_url_rule('/build/<int:build_id>/result', 'build_result', agent
 
 # ─── 调度中心（JWT 鉴权，SSE 用 query token）───────────────────
 from modules.cicd.api.schedule_api import (
-    schedule_overview, schedule_stream, schedule_logs, schedule_log_detail, schedule_scores, schedule_dirs,
+    schedule_overview, schedule_stream, schedule_log_detail, schedule_scores,
 )
 
 schedule_bp.add_url_rule('/overview', 'overview', schedule_overview, methods=['GET'])
 schedule_bp.add_url_rule('/stream', 'stream', schedule_stream, methods=['GET'])
-schedule_bp.add_url_rule('/logs', 'logs', schedule_logs, methods=['GET'])
 schedule_bp.add_url_rule('/logs/<int:log_id>', 'log_detail', schedule_log_detail, methods=['GET'])
 schedule_bp.add_url_rule('/scores', 'scores', schedule_scores, methods=['GET'])
-schedule_bp.add_url_rule('/dirs', 'dirs', schedule_dirs, methods=['GET'])
 
 
 def register(app):

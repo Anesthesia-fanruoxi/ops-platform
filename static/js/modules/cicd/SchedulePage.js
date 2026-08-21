@@ -377,7 +377,6 @@ const SchedulePage = {
     </template>
   </el-dialog>
 
-  <!-- ═══ 节点目录浏览弹窗已移除（目录功能下线，操作入口移至卡片平铺按钮）═══ -->
 </div>
 `,
   data() {
@@ -427,14 +426,12 @@ const SchedulePage = {
   },
   mounted() {
     this.connectStream();
-    this.loadScheduleLogs();
     this.loadOverview(); // 首屏兜底：即使 SSE 异常，刷新页面也能先展示一次数据
   },
   activated() {
-    // keep-alive 从其他标签切回时刷新日志（首次挂载 mounted 已加载，用标志避免重复调用）
+    // keep-alive activation only needs to ensure the schedule SSE is connected
     if (this._deactivated) {
       this._deactivated = false;
-      this.loadScheduleLogs();
     }
     if (!this.es) this.connectStream();
   },
@@ -457,19 +454,26 @@ const SchedulePage = {
         if (res.code === 200) this.applyOverview(res.data);
       });
     },
-    // ─── 节点目录浏览（已移除）─────────────────────
+    // Schedule overview and logs share one SSE connection.
     connectStream() {
       const token = localStorage.getItem('auth_token');
       const url = '/api/cicd/schedule/stream?token=' + encodeURIComponent(token || '');
       const es = new EventSource(url);
       this.es = es;
-      es.onmessage = (evt) => {
+      es.addEventListener('overview', (evt) => {
         try {
-          const data = JSON.parse(evt.data);
-          if (data && data.error) { this.streamOk = false; return; }
-          if (data && data.agents) { this.applyOverview(data); this.streamOk = true; }
-        } catch (e) { /* 忽略异常帧 */ }
-      };
+          this.applyOverview(JSON.parse(evt.data));
+          this.streamOk = true;
+        } catch (e) { /* ignore malformed frames */ }
+      });
+      es.addEventListener('schedule_logs', (evt) => {
+        try {
+          this.scheduleLogs = (JSON.parse(evt.data) || []).map(item => ({
+            ...item, _logs: item.detail_logs || null, _loading: false,
+          }));
+        } catch (e) { /* ignore malformed frames */ }
+      });
+      es.addEventListener('error', () => { this.streamOk = false; });
       es.onopen = () => { this.streamOk = true; };
       es.onerror = () => { this.streamOk = false; };
     },
@@ -482,13 +486,6 @@ const SchedulePage = {
         const updated = this.agents.find(a => a.id === this.detailAgent.id);
         if (updated) this.detailAgent = { ...updated, sys_info: updated.sys_info || {} };
       }
-    },
-    loadScheduleLogs() {
-      ajax('GET', '/api/cicd/schedule/logs', null, res => {
-        if (res.code === 200) {
-          this.scheduleLogs = (res.data || []).map(item => ({ ...item, _logs: null, _loading: false }));
-        }
-      });
     },
     onExpandChange(row, expandedRows) {
       if (!expandedRows.includes(row)) return;

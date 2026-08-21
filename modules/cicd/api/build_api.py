@@ -81,7 +81,7 @@ def rerun_build(build_id):
     return success_response(build.to_dict(), '已开始重跑')
 
 
-@require_permission('op:agent_dir')
+@require_permission('op:cicd_build')
 def build_code_dirs(build_id):
     """GET /builds/<id>/code-dirs?path= → 浏览该构建在 Agent 上的 code 目录（编译后目录；只读防越界）"""
     build = Build.query.get(build_id)

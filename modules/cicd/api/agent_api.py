@@ -20,7 +20,7 @@ def _norm_dir(v):
 
 
 
-@require_any_permission('page:cicd', 'op:cicd_admin')
+@require_permission('page:cicd_schedule')
 def proxy_agent_log(agent_id):
     """
     Agent 日志代理：转发到 Agent 的 /agentlog 接口
@@ -492,7 +492,7 @@ def toggle_agent_disable(agent_id):
     return success_response({'disabled': agent.disabled}, f'{agent.name} {state}')
 
 
-@require_any_permission('page:cicd', 'op:cicd_admin')
+@require_permission('page:cicd_schedule')
 def get_agent_metrics_history(agent_id):
     """
     Agent 历史指标 SSE 代理：转发到 Agent 的 /metrics 接口（SSE 流）
