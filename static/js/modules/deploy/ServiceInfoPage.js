@@ -1916,12 +1916,13 @@ const ServiceInfoPage = {
       return html;
     },
 
-    // 编辑模式高亮层渲染（末尾补换行，保证最后空行高度对齐）
+    // 编辑模式高亮层渲染：内容必须与 textarea 完全一致（含末尾换行），
+    // 否则高亮层与 textarea 内容高度不一致，滚动到底部时两层错位 → 重影
     renderEditView() {
       this.$nextTick(() => {
         const code = this.$refs.configCodeEdit;
         if (!code) return;
-        code.innerHTML = this._highlightHtml(this.configContent || '') + '\n';
+        code.innerHTML = this._highlightHtml(this.configContent || '');
       });
     },
 
@@ -2648,13 +2649,16 @@ const ServiceInfoPage = {
 }
 /* 编辑模式：透明 textarea 叠在高亮层上，输入即实时语法高亮 */
 .svc-editor-wrap { position: relative; flex: 1; min-height: 0; }
-.svc-editor-wrap .svc-editor-pre { position: absolute; inset: 0; overflow: hidden; }
+/* 两层必须预留相同滚动槽：textarea(overflow:auto) 溢出时会占 8px 滚动条，
+   而高亮 pre(overflow:hidden) 从不占；scrollbar-gutter:stable 让两者内容盒永远一致，
+   消除 1080p 下滚动到底部时的重影 */
+.svc-editor-wrap .svc-editor-pre { position: absolute; inset: 0; overflow: hidden; scrollbar-gutter: stable; }
 .svc-editor-textarea {
   position: absolute; inset: 0; width: 100%; height: 100%;
   padding: 12px 14px; margin: 0; border: none; outline: none; resize: none;
   background: transparent; color: transparent; caret-color: #a8bcc0;
   font-family: Consolas, Menlo, monospace; font-size: 12.5px; line-height: 1.7;
-  white-space: pre; overflow: auto;
+  white-space: pre; overflow: auto; scrollbar-gutter: stable; box-sizing: border-box;
 }
 .svc-editor-textarea::selection { background: rgba(47, 90, 107, 0.9); color: transparent; }
 /* diff 折叠占位行 */
