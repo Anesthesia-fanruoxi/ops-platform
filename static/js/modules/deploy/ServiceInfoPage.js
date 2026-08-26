@@ -255,7 +255,7 @@ const ServiceInfoPage = {
 
   <!-- 运行日志弹窗（SSE 终端式；支持全屏，ESC 退出全屏） -->
   <el-dialog v-model="logVisible" width="80%" top="10vh"
-             class="svc-log-dialog" :close-on-click-modal="false" :close-on-press-escape="!logFullscreen"
+             class="svc-log-dialog" :close-on-press-escape="!logFullscreen"
              :fullscreen="logFullscreen" :class="{ 'svc-log-fs': logFullscreen }" @close="onLogDialogClose">
     <template #header>
       <div class="svc-log-header">
