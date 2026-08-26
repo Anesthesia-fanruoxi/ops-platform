@@ -346,7 +346,7 @@ const ServiceInfoPage = {
 
   <!-- 日志文件内容查看弹窗 -->
   <el-dialog v-model="lfContentVisible" :title="'日志内容 - ' + (lfContentFile || '')" width="80%" top="10vh"
-             class="svc-logfile-dialog" :close-on-click-modal="false" append-to-body>
+             class="svc-logfile-dialog" append-to-body>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
       <el-input v-model="lfSearchWord" size="small" style="width:260px;" clearable placeholder="搜索（高亮匹配内容）">
         <template #prefix><span style="font-size:13px">🔍</span></template>
@@ -365,8 +365,9 @@ const ServiceInfoPage = {
   </el-dialog>
 
   <!-- Nacos 配置内容查看/编辑弹窗：深色护眼 + 语法高亮 + Ctrl+F 搜索高亮 -->
+  <!-- 查看模式可点遮罩关闭；编辑模式仅 ESC / 右上角× 可关，防误触丢内容 -->
   <el-dialog v-model="configEditorVisible" width="80%" top="10vh" class="svc-config-dialog"
-             :close-on-click-modal="false" append-to-body @close="onConfigDialogClose">
+             :close-on-click-modal="!configEditMode" append-to-body @close="onConfigDialogClose">
     <template #header>
       <div class="svc-config-header">
         <span class="svc-config-title">Nacos 配置 - [[ configRow ? configRow.dataId : '' ]]</span>
