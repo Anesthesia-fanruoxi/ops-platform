@@ -6,13 +6,13 @@ from core.response import success_response
 
 
 def dashboard_stats():
-    """平台概况统计：项目/环境/用户/认证中心用户/构建/Agent/模板/数据源/近7天审计 + 最近5条构建"""
+    """平台概况统计：项目/环境/用户/认证中心用户/构建/Agent/模板/数据源/近7天审计 + 最近20条构建"""
     from modules.system.models import AuditLog
     from modules.deploy.models import Project, Environment
     from modules.cicd.models import Build, BuildAgent, CicdFlowTemplate
     from modules.database.models import CustomDatasource
 
-    recent = Build.query.order_by(Build.id.desc()).limit(5).all()
+    recent = Build.query.order_by(Build.id.desc()).limit(20).all()
     _pnames = {p.id: p.name for p in Project.query.all()}
     _enames = {e.id: e.name for e in Environment.query.all()}
     recent_builds = []
