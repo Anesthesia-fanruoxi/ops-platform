@@ -6,9 +6,48 @@
 // - 部署配置：deployment YAML 原文
 // ============================================================
 
+// 日志行 HTML 高亮（模块级纯函数，运行日志终端与日志文件渲染共用）
+function svcEscapeHtml(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function svcHighlightLine(line, searchWord) {
+  let html = svcEscapeHtml(line == null ? '' : line);
+  // 行首时间戳着色：2026-08-12 13:57:47.101 或 13:57:47.101
+  html = html.replace(/^(\s*)((\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?)/,
+    '$1<span class="svc-log-time">$2</span>');
+  // Java 方法/行数着色：[类.方法,行号] 或 [lambda$x,行号]
+  html = html.replace(/\[([^\],\[\s]+),(\d+)\]/g,
+    '[<span class="svc-log-method">$1</span>,<span class="svc-log-line">$2</span>]');
+  // 搜索高亮（split/join 方式，避免转义问题）
+  if (searchWord) {
+    const q = svcEscapeHtml(searchWord);
+    if (q) html = html.split(q).join('<mark style="background:#e6a23c;color:#1e1e1e;border-radius:2px">' + q + '</mark>');
+  }
+  return html;
+}
+
+// 日志行列表（独立子组件）：父组件因输入框按键等其他状态重渲染时，
+// 只要 lines/searchWord 引用不变就整体跳过，避免重跑全量行高亮
+const SvcLogLines = {
+  name: 'SvcLogLines',
+  props: {
+    lines: { type: Array, default: () => [] },
+    searchWord: { type: String, default: '' },
+  },
+  template: `<div v-for="(line, i) in lines" :key="i" :id="'logline-' + i" :class="{ 'svc-log-match': isMatch(i) }" v-html="hl(line)"></div>`,
+  methods: {
+    hl(line) { return svcHighlightLine(line, this.searchWord); },
+    isMatch(i) {
+      if (!this.searchWord) return false;
+      return String(this.lines[i]).toLowerCase().includes(this.searchWord.toLowerCase());
+    },
+  },
+};
+
 const ServiceInfoPage = {
   name: 'ServiceInfoPage',
   compilerOptions: { delimiters: ['[[', ']]'] },
+  components: { SvcLogLines },
   template: `
 <div class="serviceinfo-layout">
   <aside class="serviceinfo-favbar" :class="{ collapsed: favCollapsed }">
@@ -271,9 +310,10 @@ const ServiceInfoPage = {
           [[ streamConnected ? '实时跟随中' : (logPaused ? '已暂停追踪' : '未连接') ]]
         </span>
         <span class="svc-log-header-tools">
-          <el-input v-model="logSearchWord" ref="logSearch" size="small" style="width:200px;" clearable
-                    placeholder="搜索（Ctrl+F）" @input="updateLogSearch" @keydown.enter="logSearchJump(1)">
+          <el-input v-model="logSearchInput" ref="logSearch" size="small" style="width:260px;" clearable
+                    placeholder="输入后点搜索（自动暂停追踪）" @focus="onLogSearchFocus" @clear="commitLogSearch" @keydown.enter="onLogSearchEnter">
             <template #prefix><span style="font-size:13px">🔍</span></template>
+            <template #append><el-button size="small" @click="commitLogSearch">搜索</el-button></template>
           </el-input>
           <span v-if="logSearchWord" style="color:#a8bcc0;font-size:12px;white-space:nowrap">[[ logSearchMatches.length ? (logSearchIdx + 1) + '/' + logSearchMatches.length : '无匹配' ]]</span>
           <el-button v-if="logSearchWord" size="small" :disabled="!logSearchMatches.length" @click="logSearchJump(-1)">↑</el-button>
@@ -286,7 +326,7 @@ const ServiceInfoPage = {
         </span>
       </div>
     </template>
-    <div class="svc-log-terminal" ref="logBox"><div v-for="(line, i) in logLines" :key="i" :id="'logline-' + i" :class="{ 'svc-log-match': isLogMatch(i) }" v-html="highlightLogLine(line)"></div></div>
+    <div class="svc-log-terminal" ref="logBox"><svc-log-lines :lines="logLines" :search-word="logSearchWord"></svc-log-lines></div>
   </el-dialog>
 
   <!-- 环境变量弹窗 -->
@@ -566,7 +606,9 @@ const ServiceInfoPage = {
       logPod: '',
       logTail: 500,
       logLines: [],
-      logSearchWord: '', logSearchMatches: [], logSearchIdx: -1,
+      logSearchInput: '',  // 输入框实时值（不参与日志行渲染）
+      logSearchWord: '',   // 已提交的搜索词（变化才触发行高亮渲染）
+      logSearchMatches: [], logSearchIdx: -1,
       logStream: null,
       streamConnected: false,
       logPaused: false,  // 暂停追踪：断开 SSE 但保留已加载日志，供手动翻找
@@ -1494,34 +1536,7 @@ const ServiceInfoPage = {
       this.logVisible = true;
       if (this.logPod) this.connectLogStream();
     },
-    // ─── 日志搜索（Ctrl+F） ────────────────────────────────
-    highlightLogLine(line) {
-      return this._highlightLine(line, this.logSearchWord);
-    },
-    // 通用行高亮：行首时间戳/Java方法着色 + 搜索词高亮
-    _highlightLine(line, searchWord) {
-      let html = this._escapeHtml(String(line == null ? '' : line));
-      // 行首时间戳着色（仅行首，其他地方的时间不特殊显示）：2026-08-12 13:57:47.101 或 13:57:47.101
-      html = html.replace(/^(\s*)((\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?)/,
-        '$1<span class="svc-log-time">$2</span>');
-      // Java 方法/行数着色：[类.方法,行号] 或 [lambda$x,行号]
-      html = html.replace(/\[([^\],\[\s]+),(\d+)\]/g,
-        '[<span class="svc-log-method">$1</span>,<span class="svc-log-line">$2</span>]');
-      // 搜索高亮（split/join 方式，避免转义问题）
-      if (searchWord) {
-        const q = this._escapeHtml(searchWord);
-        if (q) html = html.split(q).join('<mark style="background:#e6a23c;color:#1e1e1e;border-radius:2px">' + q + '</mark>');
-      }
-      return html;
-    },
-    isLogMatch(i) {
-      if (!this.logSearchWord) return false;
-      const q = this.logSearchWord.toLowerCase();
-      return String(this.logLines[i]).toLowerCase().includes(q);
-    },
-    _escapeHtml(text) {
-      return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    },
+    // ─── 日志搜索（Ctrl+F；提交式：输入不渲染，点搜索/回车才渲染） ──
     updateLogSearch() {
       this.logSearchMatches = [];
       if (!this.logSearchWord) { this.logSearchIdx = -1; return; }
@@ -1529,6 +1544,27 @@ const ServiceInfoPage = {
       this.logLines.forEach((line, i) => { if (String(line).toLowerCase().includes(q)) this.logSearchMatches.push(i); });
       this.logSearchIdx = this.logSearchMatches.length ? 0 : -1;
       this._scrollToMatch();
+    },
+    // 聚焦搜索框即进入查询模式：自动暂停实时追踪，保留当前缓冲供检索
+    onLogSearchFocus() {
+      if (this.logStream) {
+        this.closeLogStream();
+        this.logPaused = true;
+      }
+    },
+    // 提交搜索词：这一步才触发日志行高亮/匹配渲染（logSearchWord 变化 → SvcLogLines 重渲染）
+    commitLogSearch() {
+      if (this.logSearchWord !== this.logSearchInput) {
+        this.logSearchWord = this.logSearchInput;
+        this.updateLogSearch();
+      } else {
+        this._scrollToMatch();
+      }
+    },
+    // 回车：输入有改动则提交搜索（跳首个匹配），无改动则跳下一个匹配
+    onLogSearchEnter() {
+      if (this.logSearchWord !== this.logSearchInput) this.commitLogSearch();
+      else this.logSearchJump(1);
     },
     logSearchJump(dir) {
       if (!this.logSearchMatches.length) return;
@@ -1582,6 +1618,11 @@ const ServiceInfoPage = {
       this.logPaused = false;  // 重连即恢复实时追踪
       if (!this.logPod) return;
       this.logLines = [];
+      // 实时（观察）模式不做搜索渲染：连接/重连时清空搜索状态
+      this.logSearchInput = '';
+      this.logSearchWord = '';
+      this.logSearchMatches = [];
+      this.logSearchIdx = -1;
       this.streamConnected = false;
       const token = localStorage.getItem('auth_token') || '';
       const params = new URLSearchParams({
@@ -1643,6 +1684,7 @@ const ServiceInfoPage = {
     // 清屏：仅清空前端缓冲日志，不影响后端/SSE 流（新日志继续追加）
     clearLogScreen() {
       this.logLines = [];
+      this.logSearchInput = '';
       this.logSearchWord = '';
       this.logSearchMatches = [];
       this.logSearchIdx = -1;
@@ -1711,7 +1753,7 @@ const ServiceInfoPage = {
     },
     // 内容弹窗行渲染：复用通用高亮（时间/方法着色 + 搜索高亮）
     lfRenderLine(line) {
-      return this._highlightLine(line, this.lfSearchWord);
+      return svcHighlightLine(line, this.lfSearchWord);
     },
     // 超过 20MB 的文件不支持在线查看，仅下载
     lfTooLarge(row) {
