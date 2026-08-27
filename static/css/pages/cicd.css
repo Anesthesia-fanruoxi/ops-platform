@@ -225,10 +225,7 @@
   white-space: pre-wrap;
   word-break: break-all;
 }
-.agent-log-box::-webkit-scrollbar { width: 8px; }
-.agent-log-box::-webkit-scrollbar-track { background: #0a2e3c; border-radius: 4px; }
-.agent-log-box::-webkit-scrollbar-thumb { background: #2f5a6b; border-radius: 4px; }
-.agent-log-box::-webkit-scrollbar-thumb:hover { background: #3f7a8f; }
+.agent-log-box { --sb-thumb: #2f5a6b; --sb-thumb-hover: #3f7a8f; --sb-track: #0a2e3c; }
 
 /* ═══ Agent 详情弹窗（左右分栏） ═══ */
 .detail-split {

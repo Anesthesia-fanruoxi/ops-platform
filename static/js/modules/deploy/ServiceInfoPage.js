@@ -314,9 +314,8 @@ const ServiceInfoPage = {
         </span>
         <span class="svc-log-header-tools">
           <el-input v-model="logSearchInput" ref="logSearch" size="small" style="width:260px;" clearable
-                    placeholder="输入后点搜索（自动暂停追踪）" @focus="onLogSearchFocus" @clear="commitLogSearch" @keydown.enter="onLogSearchEnter">
-            <template #prefix><span style="font-size:13px">🔍</span></template>
-            <template #append><el-button size="small" @click="commitLogSearch">搜索</el-button></template>
+                    placeholder="搜索（回车触发，自动暂停追踪）" @focus="onLogSearchFocus" @clear="commitLogSearch" @keydown.enter="onLogSearchEnter">
+            <template #prefix><span class="svc-input-icon">🔍</span></template>
           </el-input>
           <span v-if="logSearchWord" style="color:#a8bcc0;font-size:12px;white-space:nowrap">[[ logSearchMatches.length ? (logSearchIdx + 1) + '/' + logSearchMatches.length : '无匹配' ]]</span>
           <el-button v-if="logSearchWord" size="small" :disabled="!logSearchMatches.length" @click="logSearchJump(-1)">↑</el-button>
@@ -410,20 +409,28 @@ const ServiceInfoPage = {
   <!-- Nacos 配置内容查看/编辑弹窗：深色护眼 + 语法高亮 + Ctrl+F 搜索高亮 -->
   <!-- 查看模式可点遮罩关闭；编辑模式仅 ESC / 右上角× 可关，防误触丢内容 -->
   <el-dialog v-model="configEditorVisible" width="80%" top="10vh" class="svc-config-dialog"
-             :close-on-click-modal="!configEditMode" append-to-body @close="onConfigDialogClose">
+             :close-on-click-modal="!configEditMode" append-to-body @close="onConfigDialogClose"
+             :fullscreen="configFullscreen">
     <template #header>
       <div class="svc-config-header">
         <span class="svc-config-title">Nacos 配置 - [[ configRow ? configRow.dataId : '' ]]</span>
         <span class="svc-config-count" v-if="!configNotFound">共 [[ cfgLineCount ]] 行</span>
         <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-          <el-input v-if="!configEditMode && !configNotFound" ref="configSearchInput" v-model="configSearch" size="small" clearable
-                    placeholder="搜索（Ctrl+F）" style="width:220px;"></el-input>
+          <el-input v-if="!configEditMode && !configNotFound" ref="configSearchInput" v-model="configSearchInput" size="small" clearable
+                    placeholder="搜索（Ctrl+F，回车触发）" style="width:240px;"
+                    @clear="commitConfigSearch" @keydown.enter="onConfigSearchEnter">
+            <template #prefix><span class="svc-input-icon">🔍</span></template>
+          </el-input>
           <span v-if="!configEditMode && !configNotFound && configSearch" class="svc-cfg-matches">
-            [[ matchCount > 0 ? matchCount + ' 处匹配' : '无匹配' ]]
+            <template v-if="matchCount > 0">[[ (cfgSearchIdx + 1) + '/' + matchCount ]]</template>
+            <template v-else>无匹配</template>
           </span>
+          <el-button v-if="!configEditMode && !configNotFound && configSearch" size="small" :disabled="!matchCount" @click="cfgSearchJump(-1)">↑</el-button>
+          <el-button v-if="!configEditMode && !configNotFound && configSearch" size="small" :disabled="!matchCount" @click="cfgSearchJump(1)">↓</el-button>
           <el-button v-if="!configEditMode && !configNotFound && canUpdateNacos" size="small" @click="configEditMode = true">编辑</el-button>
           <el-button v-if="configEditMode" size="small" @click="cancelConfigEdit">取消编辑</el-button>
           <el-button v-if="configEditMode && canUpdateNacos" size="small" type="primary" :loading="publishing" @click="publishConfig">发布更新</el-button>
+          <el-button size="small" @click="toggleConfigFullscreen">[[ configFullscreen ? '退出全屏' : '⛶ 全屏' ]]</el-button>
           <el-button size="small" @click="configEditorVisible = false">关闭</el-button>
         </span>
       </div>
@@ -453,7 +460,7 @@ const ServiceInfoPage = {
           <div v-show="configEditMode" class="svc-editor-wrap">
             <pre class="svc-config-pre svc-editor-pre" aria-hidden="true"><span class="svc-cfg-guides" aria-hidden="true"><i v-for="(g, gi) in cfgGuides" :key="'e' + gi" :class="'svc-cfg-guide lvl-' + g.depth" :style="g.style"></i></span><code ref="configCodeEdit" class="language-yaml"></code></pre>
             <textarea ref="configTextarea" :value="configContent" @input="configContent = $event.target.value"
-                      @scroll="syncCfgGutter('edit')" class="svc-editor-textarea" spellcheck="false"></textarea>
+                      @keydown="onConfigAreaKeydown" @scroll="syncCfgGutter('edit')" class="svc-editor-textarea" spellcheck="false"></textarea>
           </div>
         </div>
       </div>
@@ -635,8 +642,11 @@ const ServiceInfoPage = {
       configEditMode: false,
       configNotFound: false,
       configIsNew: false,
-      configSearch: '',
+      configSearchInput: '',   // 搜索输入框实时值（不触发渲染）
+      configSearch: '',        // 已提交的搜索词（回车/点🔍 才触发高亮渲染）
       matchCount: 0,
+      cfgSearchIdx: -1,        // 当前高亮匹配的序号（0 基，用于 ↑/↓ 切换）
+      configFullscreen: false, // Nacos 配置弹窗全屏
       cfgGuides: [],          // YAML 段落缩进参考线（每段一根竖线）
       configOriginal: '',
       publishing: false,
@@ -1856,7 +1866,10 @@ const ServiceInfoPage = {
       this.configContent = '';
       this.configEditMode = false;
       this.configSearch = '';
+      this.configSearchInput = '';
+      this.cfgSearchIdx = -1;
       this.matchCount = 0;
+      this.configFullscreen = false;
       this.configOriginal = '';
       this.configNotFound = false;
       this.configIsNew = false;
@@ -1871,7 +1884,10 @@ const ServiceInfoPage = {
       this.configContent = '';
       this.configEditMode = false;
       this.configSearch = '';
+      this.configSearchInput = '';
+      this.cfgSearchIdx = -1;
       this.matchCount = 0;
+      this.configFullscreen = false;
       this.configOriginal = '';
       this.configNotFound = false;
       this.configIsNew = false;
@@ -1943,11 +1959,91 @@ const ServiceInfoPage = {
             frag.appendChild(document.createTextNode(txt.slice(last)));
             node.parentNode.replaceChild(frag, node);
           });
-          this.$nextTick(() => {
-            const first = code.querySelector('mark.svc-search-mark');
-            if (first) first.scrollIntoView({ block: 'center' });
-          });
         }
+      });
+    },
+
+    // 聚焦当前第 idx 处匹配：清除旧高亮、滚动到目标（idx<0 跳到首个）
+    _focusCfgMatch(idx) {
+      const code = this.$refs.configCode;
+      if (!code) return;
+      const marks = Array.from(code.querySelectorAll('mark.svc-search-mark'));
+      if (!marks.length) { this.matchCount = 0; this.cfgSearchIdx = -1; return; }
+      marks.forEach((m) => m.classList.remove('svc-search-active'));
+      const i = ((idx % marks.length) + marks.length) % marks.length;
+      marks[i].classList.add('svc-search-active');
+      this.cfgSearchIdx = i;
+      this.matchCount = marks.length;
+      marks[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    },
+
+    // 提交搜索：回车 / 点🔍 / 清空 触发。configSearch 变化 → renderConfigView 重建 mark
+    commitConfigSearch() {
+      const kw = (this.configSearchInput || '').trim();
+      this.configSearch = kw;
+      this.cfgSearchIdx = -1;
+      if (kw) this.$nextTick(() => this._focusCfgMatch(0));
+      else { this.matchCount = 0; }
+    },
+    // 回车：输入有改动 → 提交并跳首个；无改动 → 跳下一个
+    onConfigSearchEnter() {
+      if (this.configSearchInput !== this.configSearch) this.commitConfigSearch();
+      else this.cfgSearchJump(1);
+    },
+    cfgSearchJump(dir) {
+      if (!this.configSearch) return;
+      this.$nextTick(() => {
+        const base = this.cfgSearchIdx < 0 ? 0 : this.cfgSearchIdx;
+        this._focusCfgMatch(base + dir);
+      });
+    },
+
+    // 配置弹窗全屏切换
+    toggleConfigFullscreen() {
+      this.configFullscreen = !!this.configFullscreen ? false : true;
+    },
+
+    // 编辑态快捷键：Ctrl+/ 注释 / 反注释选中的行（未选区则针对光标所在行）
+    onConfigAreaKeydown(e) {
+      const ev = e || window.event;
+      if (ev.ctrlKey && (ev.key === '/' || ev.key === '?')) {   // 兼容 Shift+/ 打出 '?'
+        ev.preventDefault();
+        this.toggleCfgComment();
+      }
+    },
+    toggleCfgComment() {
+      const ta = this.$refs.configTextarea;
+      if (!ta) return;
+      const content = this.configContent || '';
+      const s = Math.min(ta.selectionStart, ta.selectionEnd);
+      const ed = Math.max(ta.selectionStart, ta.selectionEnd);
+      const lines = content.split('\n');
+      const ns = [0];
+      for (let i = 0; i < content.length; i++) if (content.charCodeAt(i) === 10) ns.push(i + 1);
+      const lineAt = (pos) => { let lo = 0, hi = ns.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (ns[m] <= pos) lo = m; else hi = m - 1; } return lo; };
+      let a = lineAt(s);
+      let b = lineAt(ed);
+      // 选区终点正好是某行行首（不含该行字符）时，退回到上一行，避免误吞空行
+      if (b > a && ns[b] >= ed) b--;
+      if (b > a && ns[b] >= ed) b--;
+      const slice = lines.slice(a, b + 1);
+      const allCommented = slice.length > 0 && slice.every((l) => /^\s*#/.test(l));
+      const mapped = slice.map((l) => {
+        if (allCommented) { const m = l.match(/^(\s*)#\s?/); return m ? (m[1] + l.slice(m[0].length)) : l; }
+        return '# ' + l;
+      });
+      lines.splice(a, mapped.length, ...mapped);
+      const newVal = lines.join('\n');
+      this.configContent = newVal;    // watcher → renderEditView 实时刷新高亮
+      this.$nextTick(() => {
+        const t = this.$refs.configTextarea;
+        if (!t) return;
+        const n2 = [0];
+        for (let i = 0; i < newVal.length; i++) if (newVal.charCodeAt(i) === 10) n2.push(i + 1);
+        const start = n2[a] != null ? n2[a] : newVal.length;
+        const end = (a + mapped.length <= n2.length - 1) ? (n2[a + mapped.length] - 1) : newVal.length;
+        t.focus();
+        t.setSelectionRange(Math.min(start, newVal.length), Math.min(end, newVal.length));
       });
     },
 
@@ -2085,7 +2181,10 @@ const ServiceInfoPage = {
     onConfigDialogClose() {
       this.configEditMode = false;
       this.configSearch = '';
+      this.configSearchInput = '';
+      this.cfgSearchIdx = -1;
       this.matchCount = 0;
+      this.configFullscreen = false;
       this.configNotFound = false;
       this.diffVisible = false;
     },
@@ -2420,17 +2519,26 @@ const ServiceInfoPage = {
 .svc-config-dialog .el-input__inner { color: #a8bcc0; }
 .svc-config-dialog .el-input__inner::placeholder { color: #5c8490; }
 .svc-config-dialog .el-input__clear { color: #5c8490; }
+/* 搜索输入框内置放大镜图标（prefix 内嵌，青色，替代搜索按钮） */
+.svc-input-icon { font-size: 13px; line-height: 1; color: #3aa3b8; display: inline-flex; align-items: center; }
+.svc-log-dialog .svc-input-icon { color: #3aa3b8; }
 .svc-config-dialog .el-button:not(.el-button--primary):not(.el-button--text) {
   background: #0d3545; border-color: #1c4a5e; color: #a8bcc0;
 }
 .svc-config-dialog .el-button:not(.el-button--primary):not(.el-button--text):hover {
   color: #d4e6ea; border-color: #3f7a8f; background: #123f52;
 }
-/* Nacos 配置弹窗：滚动条深色（代码区/行号栏/编辑区） */
-.svc-config-dialog ::-webkit-scrollbar { width: 8px; height: 8px; }
-.svc-config-dialog ::-webkit-scrollbar-track { background: #0a2e3c; }
-.svc-config-dialog ::-webkit-scrollbar-thumb { background: #2f5a6b; border-radius: 4px; }
-.svc-config-dialog ::-webkit-scrollbar-thumb:hover { background: #3f7a8f; }
+/* Nacos 配置弹窗滚动条：品牌靛蓝。经设计令牌变量覆盖（common.css 基座），
+   含上下限位箭头着色；scrollbar-color 由变量继承兜底，避免被全局浅灰压过 */
+.svc-config-dialog { --sb-size: 10px; --sb-thumb: #2f5a6b; --sb-thumb-hover: #3f7a8f; --sb-track: rgba(47, 90, 107, 0.18); }
+.svc-config-pre { scrollbar-color: #2f5a6b rgba(47, 90, 107, 0.18); scrollbar-width: thin; }
+.svc-config-pre::-webkit-scrollbar { width: 10px; height: 10px; }
+.svc-config-pre::-webkit-scrollbar-track { background: transparent; }
+.svc-config-pre::-webkit-scrollbar-thumb { background: #2f5a6b; border: 2px solid transparent; background-clip: padding-box; border-radius: 5px; }
+.svc-config-pre::-webkit-scrollbar-thumb:hover { background: #3f7a8f; border: 2px solid transparent; background-clip: padding-box; }
+.svc-config-dialog ::-webkit-scrollbar-button { background: #2f5a6b; }
+.svc-config-dialog ::-webkit-scrollbar-button:hover { background: #3f7a8f; }
+.svc-config-dialog ::-webkit-scrollbar-button:vertical:start:decrement, .svc-config-dialog ::-webkit-scrollbar-button:vertical:end:increment { height: 14px; }
 .svc-config-pre {
   position: relative; z-index: 0;   /* 层叠上下文：段落参考线走 z-index:-1，压在文字下、底色上 */
   flex: 1; min-height: 0; margin: 0; padding: 12px 14px; overflow: auto;
@@ -2482,12 +2590,15 @@ const ServiceInfoPage = {
 }
 .svc-log-dialog .el-button:hover:not(:disabled) { background: #14465c; border-color: #2f5a6b; color: #d4e6ea; }
 .svc-log-dialog .el-button:disabled { background: #0c3140; border-color: #164052; color: #4d6d78; }
-/* 滚动条与背景同色系 */
-.svc-log-dialog .svc-log-terminal::-webkit-scrollbar { width: 8px; height: 8px; }
-.svc-log-dialog .svc-log-terminal::-webkit-scrollbar-track { background: #0a2e3c; }
-.svc-log-dialog .svc-log-terminal::-webkit-scrollbar-thumb { background: #2f5a6b; border-radius: 4px; }
-.svc-log-dialog .svc-log-terminal::-webkit-scrollbar-thumb:hover { background: #3f7a8f; }
-.svc-log-dialog .svc-log-terminal { scrollbar-color: #2f5a6b #0a2e3c; scrollbar-width: thin; }
+/* 日志弹窗滚动条：品牌靛蓝。终端具体元素直接写实色，避免变量继承在深色容器失效回落浅灰；其余容器走变量 */
+.svc-log-dialog { --sb-size: 8px; --sb-thumb: #2f5a6b; --sb-thumb-hover: #3f7a8f; --sb-track: rgba(47, 90, 107, 0.18); }
+.svc-log-terminal { scrollbar-color: #2f5a6b rgba(47, 90, 107, 0.18); scrollbar-width: thin; }
+.svc-log-terminal::-webkit-scrollbar { width: 8px; height: 8px; }
+.svc-log-terminal::-webkit-scrollbar-track { background: transparent; }
+.svc-log-terminal::-webkit-scrollbar-thumb { background: #2f5a6b; border-radius: 4px; }
+.svc-log-terminal::-webkit-scrollbar-thumb:hover { background: #3f7a8f; }
+.svc-log-dialog ::-webkit-scrollbar-button { background: #2f5a6b; }
+.svc-log-dialog ::-webkit-scrollbar-button:hover { background: #3f7a8f; }
 /* el-select 新版触发器（.el-select__wrapper）去白底 */
 .svc-log-dialog .el-select__wrapper { background: #0f3a4c; box-shadow: 0 0 0 1px #1c4a5e inset; }
 .svc-log-dialog .el-select__placeholder, .svc-log-dialog .el-select__selected-item { color: #a8bcc0; }
@@ -2498,9 +2609,7 @@ const ServiceInfoPage = {
 .svc-log-popper .el-select-dropdown__item { color: #a8bcc0; }
 .svc-log-popper .el-select-dropdown__item.is-hovering, .svc-log-popper .el-select-dropdown__item:hover { background: #14465c; color: #d4e6ea; }
 .svc-log-popper .el-select-dropdown__item.is-selected { color: #6cb6e8; font-weight: 600; }
-.svc-log-popper .el-scrollbar__thumb { background: #2f5a6b; }
-.svc-log-popper { scrollbar-color: #2f5a6b #0f3a4c; }
-
+.svc-log-popper { --sb-thumb: #2f5a6b; --sb-thumb-hover: #3f7a8f; --sb-track: #0f3a4c; }
 
 .bp-log-box {
   background: #0a2e3c;
@@ -2768,6 +2877,10 @@ const ServiceInfoPage = {
 .svc-config-pre .hljs-bullet, .svc-config-pre .hljs-section { color: #569cd6; }
 .svc-config-pre .hljs-title { color: #dcdcaa; }
 .svc-search-mark { background: #e6a23c; color: #1e1e1e; border-radius: 2px; padding: 0 1px; }
+.svc-search-mark.svc-search-active { background: #f56c6c; color: #fff; outline: 1px solid #ff8a8a; }
+/* Nacos 配置弹窗全屏：覆盖弹窗固定 80vh 高度，铺满窗口 */
+.svc-config-dialog.el-dialog--fullscreen { height: 100vh; max-width: none; margin: 0; }
+.svc-config-dialog.el-dialog--fullscreen .el-dialog__body { padding: 12px 24px; }
 /* 配置不存在空状态 */
 .svc-cfg-empty {
   flex: 1; min-height: 300px;
@@ -2858,10 +2971,7 @@ const ServiceInfoPage = {
   white-space: pre-wrap; word-break: break-all; min-height: 120px;
   scrollbar-color: #2f5a6b #0a2e3c; scrollbar-width: thin;
 }
-.svc-logfile-pre::-webkit-scrollbar { width: 8px; height: 8px; }
-.svc-logfile-pre::-webkit-scrollbar-track { background: #0a2e3c; }
-.svc-logfile-pre::-webkit-scrollbar-thumb { background: #2f5a6b; border-radius: 4px; }
-.svc-logfile-pre::-webkit-scrollbar-thumb:hover { background: #3f7a8f; }
+.svc-logfile-pre { --sb-thumb: #2f5a6b; --sb-thumb-hover: #3f7a8f; --sb-track: #0a2e3c; }
 `;
 
   document.head.appendChild(style);

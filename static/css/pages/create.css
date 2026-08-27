@@ -74,10 +74,7 @@
   line-height: 1.6;
   color: #d4d4d4;
 }
-.deploy-log::-webkit-scrollbar { width: 8px; }
-.deploy-log::-webkit-scrollbar-track { background: #2d2d2d; border-radius: 4px; }
-.deploy-log::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
-.deploy-log::-webkit-scrollbar-thumb:hover { background: #777; }
+.deploy-log { --sb-thumb: #555; --sb-thumb-hover: #777; --sb-track: #2d2d2d; }
 
 .log-line { display: flex; gap: 8px; padding: 2px 0; }
 .log-time { color: #6a9955; flex-shrink: 0; }
