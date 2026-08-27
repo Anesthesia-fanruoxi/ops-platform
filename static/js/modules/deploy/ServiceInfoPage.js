@@ -44,6 +44,9 @@ const SvcLogLines = {
   },
 };
 
+// YAML 段落参考线用：等宽字体单字符宽度（首次渲染时实测，之后复用）
+let svcCfgCharW = 0;
+
 const ServiceInfoPage = {
   name: 'ServiceInfoPage',
   compilerOptions: { delimiters: ['[[', ']]'] },
@@ -445,10 +448,10 @@ const ServiceInfoPage = {
             <div v-for="n in cfgLineCount" :key="n" class="svc-cfg-gutter-line">[[ n ]]</div>
           </div>
           <pre v-show="!configEditMode && !configNotFound" class="svc-config-pre" ref="configPre"
-               @scroll="syncCfgGutter('pre')"><code ref="configCode" class="language-yaml"></code></pre>
+               @scroll="syncCfgGutter('pre')"><span class="svc-cfg-guides" aria-hidden="true"><i v-for="(g, gi) in cfgGuides" :key="gi" :class="'svc-cfg-guide lvl-' + g.depth" :style="g.style"></i></span><code ref="configCode" class="language-yaml"></code></pre>
           <!-- 编辑模式：透明 textarea 叠在高亮层上，输入即实时语法高亮 -->
           <div v-show="configEditMode" class="svc-editor-wrap">
-            <pre class="svc-config-pre svc-editor-pre" aria-hidden="true"><code ref="configCodeEdit" class="language-yaml"></code></pre>
+            <pre class="svc-config-pre svc-editor-pre" aria-hidden="true"><span class="svc-cfg-guides" aria-hidden="true"><i v-for="(g, gi) in cfgGuides" :key="'e' + gi" :class="'svc-cfg-guide lvl-' + g.depth" :style="g.style"></i></span><code ref="configCodeEdit" class="language-yaml"></code></pre>
             <textarea ref="configTextarea" :value="configContent" @input="configContent = $event.target.value"
                       @scroll="syncCfgGutter('edit')" class="svc-editor-textarea" spellcheck="false"></textarea>
           </div>
@@ -634,6 +637,7 @@ const ServiceInfoPage = {
       configIsNew: false,
       configSearch: '',
       matchCount: 0,
+      cfgGuides: [],          // YAML 段落缩进参考线（每段一根竖线）
       configOriginal: '',
       publishing: false,
       // 选择服务目录弹窗（部署等待时勾选回填模板）
@@ -1909,6 +1913,7 @@ const ServiceInfoPage = {
         const code = this.$refs.configCode;
         if (!code) return;
         code.innerHTML = this._highlightHtml(this.configContent || '');
+        this.buildCfgGuides(this.$refs.configPre);
 
         // 搜索高亮：遍历文本节点包裹 mark（不破坏 hljs 标签）
         this.matchCount = 0;
@@ -1959,6 +1964,74 @@ const ServiceInfoPage = {
       return html;
     },
 
+    // ─── YAML 段落缩进参考线 ───────────────────────────────
+    // 按行缩进切出每个「有子行的块」：竖线列取段落自身 key 的起始列，线头从该 key 的
+    // 下方一行引出并引到本段末行——不压段落自身及后续同级子 key 的首字符；层级越深颜色越淡
+    buildCfgGuides(pre) {
+      const text = this.configContent || '';
+      if (!text || !pre) { this.cfgGuides = []; return; }
+      const cs = window.getComputedStyle(pre);
+      const fontPx = parseFloat(cs.fontSize) || 12.5;
+      let lineH = parseFloat(cs.lineHeight) || 0;
+      if (lineH && lineH < fontPx) lineH *= fontPx;   // 部分浏览器返回倍数（1.7）而非像素
+      const charW = this._cfgCharWidth(pre);
+      if (!lineH || !charW) { this.cfgGuides = []; return; }
+      const padTop = parseFloat(cs.paddingTop) || 0;
+      const padLeft = parseFloat(cs.paddingLeft) || 0;
+
+      const lines = text.split('\n');
+      const indentOf = (s) => {
+        let n = 0;
+        for (const ch of s) {
+          if (ch === ' ') n += 1;
+          else if (ch === '\t') n += 4;      // 制表符按 4 列折算
+          else break;
+        }
+        return n;
+      };
+
+      const segs = [];
+      const stack = [];                       // { indent, line, child, depth }
+      let lastContent = 0;                    // 最后一行非空行（块收尾时用）
+      const close = (s, end) => {
+        // 线头从段落自身 key 的「下方一行」引出，列取该 key 的起始列 → 竖线不压任何文字
+        if (s.child == null || end <= s.line) return;
+        segs.push({ start: s.line + 1, end, col: s.indent, depth: s.depth });
+      };
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+        const ind = indentOf(lines[i]);
+        lastContent = i;
+        while (stack.length && ind <= stack[stack.length - 1].indent) close(stack.pop(), i - 1);
+        const parent = stack[stack.length - 1];
+        if (parent && parent.child == null) { parent.child = ind; }   // 首个更深行 → 有子行
+        stack.push({ indent: ind, line: i, child: null, depth: stack.length });
+      }
+      while (stack.length) close(stack.pop(), lastContent);
+
+      this.cfgGuides = segs.map((s) => ({
+        depth: s.depth,
+        style: {
+          left: (padLeft + s.col * charW).toFixed(1) + 'px',
+          top: (padTop + s.start * lineH).toFixed(1) + 'px',
+          height: ((s.end - s.start + 1) * lineH).toFixed(1) + 'px',
+        },
+      }));
+    },
+
+    // 等宽字体单字符宽度：隐藏探针实测（两种字体族/字号下都准），结果缓存
+    _cfgCharWidth(pre) {
+      if (svcCfgCharW) return svcCfgCharW;
+      const probe = document.createElement('span');
+      probe.textContent = '0000000000000000';
+      probe.style.cssText = 'position:absolute;left:-9999px;top:-9999px;white-space:pre;visibility:hidden;';
+      pre.appendChild(probe);
+      const w = probe.getBoundingClientRect().width / 16;
+      pre.removeChild(probe);
+      if (w > 0) svcCfgCharW = w;
+      return w;
+    },
+
     // 编辑模式高亮层渲染：内容必须与 textarea 完全一致（含末尾换行），
     // 否则高亮层与 textarea 内容高度不一致，滚动到底部时两层错位 → 重影
     renderEditView() {
@@ -1966,6 +2039,7 @@ const ServiceInfoPage = {
         const code = this.$refs.configCodeEdit;
         if (!code) return;
         code.innerHTML = this._highlightHtml(this.configContent || '');
+        this.buildCfgGuides(code.parentNode);
       });
     },
 
@@ -2358,10 +2432,20 @@ const ServiceInfoPage = {
 .svc-config-dialog ::-webkit-scrollbar-thumb { background: #2f5a6b; border-radius: 4px; }
 .svc-config-dialog ::-webkit-scrollbar-thumb:hover { background: #3f7a8f; }
 .svc-config-pre {
+  position: relative; z-index: 0;   /* 层叠上下文：段落参考线走 z-index:-1，压在文字下、底色上 */
   flex: 1; min-height: 0; margin: 0; padding: 12px 14px; overflow: auto;
   background: #0a2e3c; color: #a8bcc0; border-radius: 6px;
   font-family: Consolas, Menlo, monospace; font-size: 12.5px; line-height: 1.7;
 }
+/* YAML 段落缩进参考线：图层零尺寸不影响 pre 滚动区，竖线由 JS 按行高/字符宽定位 */
+.svc-cfg-guides { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: -1; }
+.svc-cfg-guide {
+  position: absolute; width: 1px; background: rgba(168, 188, 192, 0.09);
+  pointer-events: none;
+}
+.svc-cfg-guide.lvl-0 { background: rgba(168, 188, 192, 0.22); }
+.svc-cfg-guide.lvl-1 { background: rgba(168, 188, 192, 0.16); }
+.svc-cfg-guide.lvl-2 { background: rgba(168, 188, 192, 0.12); }
 
 /* 日志弹窗：整体 Nacos 配置护眼背景色 */
 .svc-log-dialog { --el-dialog-bg-color: #0a2e3c; }

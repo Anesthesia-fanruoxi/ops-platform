@@ -1,5 +1,6 @@
 /* 首页（DashboardPage） */
-.dashboard-page { padding: 8px 4px; }
+.dashboard-page { padding: 8px 4px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
+.dashboard-page > .dash-hero, .dashboard-page > .dash-section-title, .dash-monitor { flex-shrink: 0; }
 .dash-hero {
   background: linear-gradient(135deg, #1c4a5e 0%, #0a2e3c 100%);
   border-radius: 12px;
@@ -64,17 +65,20 @@
 .dash-stat-num { font-size: 26px; font-weight: 700; color: #1c4a5e; line-height: 1.1; }
 .dash-stat-label { font-size: 12px; color: #909399; }
 
-/* 双栏：最近构建 + 快捷入口 */
+/* 双栏：最近构建 + 快捷入口（占满剩余高度，两栏等高，各自内部滚动） */
 .dash-two-col {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
 }
+.dash-two-col > div { display: flex; flex-direction: column; min-height: 0; }
 @media (max-width: 1100px) { .dash-two-col { grid-template-columns: 1fr; } }
 
 /* 最近构建 */
-.dash-builds { background: #fff; border: 1px solid #e4e7ed; border-radius: 10px; overflow: hidden; }
+.dash-builds { background: #fff; border: 1px solid #e4e7ed; border-radius: 10px; overflow-x: hidden; overflow-y: auto; flex: 1; min-height: 0; }
 .dash-build {
   display: flex;
   align-items: center;
@@ -105,6 +109,10 @@
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
 }
 .dash-entry-group {
   background: #fff; border: 1px solid #e4e7ed; border-radius: 10px;
