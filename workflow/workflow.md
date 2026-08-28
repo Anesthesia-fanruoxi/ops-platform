@@ -56,13 +56,25 @@
 - [x] 前端目录浏览 UI：SchedulePage 选节点逐级浏览（面包屑+单层列表）—— 验收：入口受权限控制、可逐级导航 ✅
 - [x] 编译部署 + 实测回归 —— 验收：正常浏览/越界拒绝/无权限 403/离线友好报错，现有接口不受影响 ✅
 
-### 服务信息环境收藏侧栏（规划中）→ [env-favorites-bar/](./env-favorites-bar/)
+### 服务信息 Pod 重启（已实施 · 待测试环境手测验收）→ [service-restart/](./service-restart/)
+
+> 方案：服务卡片「环境变量」后追加黄色「重启」按钮（rollout restart 该 Deployment，内部多 container 一起滚动重建）+ 工具栏「重启全部服务」按钮（对整个 namespace 下所有 Deployment rollout restart）。后端复用部署权限 `op:cicd_build`（与「快捷部署」按钮同源），接口由全局拦截器自动记录审计日志。详见 steps.md / boundaries.md / ui.md
+>
+> 代码已完成并通过语法校验（Python `py_compile` / 前端 `node --check`）；运行态验收（触发真实 rollout restart、观察 pod 滚动重建、无权限 403、svc 不存在报错）需在测试 namespace 执行。
+
+- [x] 后端 K8s rollout restart：kube_client.py 新增 restart_deployment / restart_all_deployments —— 验收：触发后 pod 滚动重建
+- [x] 后端接口 + 路由：/service-info/restart 与 /service-info/restart-all（复用部署权限、记审计日志）—— 验收：有权限触发成功、无权限 403、svc 不存在报错明确
+- [x] 卡片「重启」按钮：黄色、环境变量后、确认 + loading + 刷新 —— 验收：出现按钮、二次确认、成功后状态恢复
+- [x] 页面级「重启全部服务」按钮：工具栏、危险色、强确认 —— 验收：选齐可用、触发后全 namespace 滚动重建
+- [x] 验收与回归：node --check + 接口手测 + 原有功能回归 —— 验收：重启链路通、原功能无影响
+
+### 服务信息环境收藏侧栏（已完成）→ [env-favorites-bar/](./env-favorites-bar/)
 
 > 方案（落库版）：服务信息页（deploy/ServiceInfoPage.js）左侧可收起「环境收藏栏」+ 右侧工具栏（新增「收藏此环境」按钮）+ 右侧服务卡片区；收藏「项目+环境」二元组，点击卡片回填并触发展示、卡片可取消收藏；**数据落 MySQL 按用户（`g.current_user.id`）绑定，不用 Redis**（项目约定 MySQL 为唯一事实源）。范围扩大为 前端+后端+数据库。详见 steps.md / boundaries.md / ui.md
 
-- [ ] 后端模型+建表：`deploy_env_favorites`（user_id 索引 + 唯一约束 user/project/env）—— 验收：表存在、唯一约束生效
-- [ ] 后端接口：list/add/delete，按 g.current_user.id 隔离、删除校验归属 —— 验收：三接口通、跨用户不可见、删他人 403
-- [ ] 前端三块布局：左可收起收藏栏 + 右工具栏 + 右服务卡片（原逻辑零改动移入）—— 验收：折叠展开正常、主区外观不变、无报错
-- [ ] 工具栏「收藏此环境」按钮 + 写入接口 —— 验收：选齐可用、收藏即时入栏、刷新从库恢复
-- [ ] 侧栏卡片：取消收藏 / 点击回填触发 / 当前高亮 / 空态 —— 验收：取消即消失、点击正确切换加载、环境已删降级
-- [ ] 验收与回归：node --check + 接口手测 + 现有功能回归 —— 验收：收藏链路通、原功能无影响
+- [x] 后端模型+建表：`deploy_env_favorites`（user_id 索引 + 唯一约束 user/project/env）—— 验收：表存在、唯一约束生效 ✅
+- [x] 后端接口：list/add/delete，按 g.current_user.id 隔离、删除校验归属 —— 验收：三接口通、跨用户不可见、删他人 403 ✅
+- [x] 前端三块布局：左可收起收藏栏 + 右工具栏 + 右服务卡片（原逻辑零改动移入）—— 验收：折叠展开正常、主区外观不变、无报错 ✅
+- [x] 工具栏「收藏此环境」按钮 + 写入接口 —— 验收：选齐可用、收藏即时入栏、刷新从库恢复 ✅
+- [x] 侧栏卡片：取消收藏 / 点击回填触发 / 当前高亮 / 空态 —— 验收：取消即消失、点击正确切换加载、环境已删降级 ✅
+- [x] 验收与回归：node --check + 接口手测 + 现有功能回归 —— 验收：收藏链路通、原功能无影响 ✅

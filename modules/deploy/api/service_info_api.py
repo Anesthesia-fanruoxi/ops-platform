@@ -297,3 +297,39 @@ def nacos_config_publish():
     except Exception as e:
         return error_response(str(e), 500)
     return success_response({'dataId': data_id, 'group': group})
+
+
+# ─── Pod 重启（复用部署权限 op:cicd_build，与「快捷部署」同源）────────
+
+@require_permission('op:cicd_build')
+def restart_service():
+    """单服务重启：rollout restart 该服务对应 Deployment（内部多 container 一并滚动重建）"""
+    data = request.json or {}
+    project = data.get('project', '')
+    env = data.get('env', '')
+    service_name = data.get('service_name', '')
+    if not project or not env or not service_name:
+        return error_response('缺少参数 project / env / service_name', 400)
+    ns = f'{project}-{env}-service'
+    from modules.deploy.services.kube_client import restart_deployment
+    try:
+        restart_deployment(ns, service_name)
+    except Exception as e:
+        return error_response(str(e), 400)
+    return success_response({'service': service_name, 'namespace': ns})
+
+
+@require_permission('op:cicd_build')
+def restart_all_services():
+    """重启全部服务：对整个 namespace 下所有 Deployment 逐个 rollout restart，返回成功/失败清单"""
+    data = request.json or {}
+    project = data.get('project', '')
+    env = data.get('env', '')
+    if not project or not env:
+        return error_response('缺少参数 project / env', 400)
+    from modules.deploy.services.kube_client import restart_all_deployments
+    try:
+        result = restart_all_deployments(project, env)
+    except Exception as e:
+        return error_response(str(e), 400)
+    return success_response(result)

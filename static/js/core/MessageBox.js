@@ -58,7 +58,8 @@ function showMessage(options) {
     document.body.appendChild(container);
 
     // 创建Vue实例
-    const app = Vue.createApp({
+    let app;
+    app = Vue.createApp({
       template: `
         <MessageBox
           :visible="visible"

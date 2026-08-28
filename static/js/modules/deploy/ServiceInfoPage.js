@@ -87,6 +87,8 @@ const ServiceInfoPage = {
     <el-button v-if="selectedProject && selectedEnv" type="primary" plain @click="openGlobalNacos">全局 Nacos 配置</el-button>
     <el-button v-if="selectedProject && selectedEnv && canDeploy" type="success" plain
                @click="openDeploy">🚀 快捷部署</el-button>
+    <el-button v-if="selectedProject && selectedEnv && canDeploy" type="danger" plain size="small"
+               :loading="restartingAll" @click="restartAllServices">⟳ 重启全部服务</el-button>
     <!-- 运行状态：监听环境构建 SSE（5s 一帧）；SSE 无任务 → 暂无构建任务，有任务 → 构建中 + 当前步骤 -->
     <span v-if="selectedEnv" class="svc-run-status" :class="{ 'svc-run-active': !!activeBuild }"
           :title="activeBuild ? ('点击查看构建步骤 ' + activeBuild.build_no) : ''"
@@ -284,6 +286,8 @@ const ServiceInfoPage = {
             </el-tag>
           </template>
           <span v-else style="color:#999">-</span>
+          <span v-if="svc.version_created_at" class="svc-card-uptime"
+                :title="'创建于 ' + svc.version_created_at" style="color:#909399;font-size:12px;margin-left:6px">已运行 [[ svcFormatUptime(svc.version_created_at) ]]</span>
         </span>
       </div>
       <div class="svc-card-actions">
@@ -291,6 +295,7 @@ const ServiceInfoPage = {
         <el-button link type="primary" size="small" @click="openLogFiles(svc)">日志目录</el-button>
         <el-button link type="primary" size="small" @click="openNacos(svc)">Nacos配置</el-button>
         <el-button link type="primary" size="small" @click="openEnv(svc)">环境变量</el-button>
+        <el-button link type="warning" size="small" :loading="restarting[svc.name]" @click="restartService(svc)">重启</el-button>
       </div>
     </div>
   </div>
@@ -575,6 +580,9 @@ const ServiceInfoPage = {
       svcStream: null,       // 服务卡片 SSE 流（EventSource）
       svcStreamRetry: null,  // SSE 断连重连定时器
       envLoading: false,     // 环境变量弹窗加载中
+
+      restarting: {},         // 各服务「重启」按钮 loading 态（按 svc.name 记录，避免互相影响）
+      restartingAll: false,   // 「重启全部服务」按钮 loading 态
 
       // 快捷部署弹窗（与环境信息页构建弹窗完全一致：分支/服务/类型 + 进度抽屉）
       buildDialogVisible: false,
@@ -1510,10 +1518,72 @@ const ServiceInfoPage = {
         this.loading = false;
       });
     },
+
+    // 单服务重启：二次确认 → loading → rollout restart → 刷新卡片（观察 pod 滚动重建）
+    restartService(svc) {
+      ElementPlus.ElMessageBox.confirm(
+        '确定重启服务「' + svc.name + '」吗？其内部 Pod 会滚动重建，期间可能短暂不可用。',
+        '重启服务', { type: 'warning', confirmButtonText: '确定重启', cancelButtonText: '取消' }
+      ).then(() => {
+        this.restarting[svc.name] = true;
+        ajax('POST', '/api/deploy/service-info/restart',
+          { project: this.selectedProject, env: this.selectedEnv, service_name: svc.name }, (r) => {
+            if (r.code === 200) {
+              ElementPlus.ElMessage.success('已触发 ' + svc.name + ' 重启');
+            } else {
+              ElementPlus.ElMessage.error(r.msg || '重启失败');
+            }
+            delete this.restarting[svc.name];
+            this.loadServices();  // 重建 SSE 快照，体现 Pod 重建过程
+          });
+      }).catch(() => { /* 取消确认：不触发任何请求 */ });
+    },
+
+    // 重启全部服务：强确认 → loading → 整 namespace 逐个 rollout restart → 刷新
+    restartAllServices() {
+      ElementPlus.ElMessageBox.confirm(
+        '将对该命名空间下所有服务（所有 Pod）执行滚动重启，全部服务会短暂不可用，确定继续？',
+        '重启全部服务', { type: 'warning', confirmButtonText: '确定重启全部', cancelButtonText: '取消' }
+      ).then(() => {
+        this.restartingAll = true;
+        ajax('POST', '/api/deploy/service-info/restart-all',
+          { project: this.selectedProject, env: this.selectedEnv }, (r) => {
+            if (r.code === 200) {
+              const d = r.data || {};
+              if (d.failed && d.failed.length) {
+                ElementPlus.ElMessage.warning(
+                  '重启完成：' + (d.succeeded ? d.succeeded.length : 0) + ' 个成功 / '
+                  + d.failed.length + ' 个失败（' + d.failed.map(x => x.name).join('、') + '）');
+              } else {
+                ElementPlus.ElMessage.success('已触发全部服务重启（共 ' + (d.total || 0) + ' 个）');
+              }
+            } else {
+              ElementPlus.ElMessage.error(r.msg || '重启全部服务失败');
+            }
+            this.restartingAll = false;
+            this.loadServices();  // 刷新，观察全 namespace pod 滚动重建
+          });
+      }).catch(() => { /* 取消确认：不触发任何请求 */ });
+    },
     // 镜像标题：多镜像（滚动更新期间）时展示全部
     svcImageTitle(svc) {
       const imgs = (svc.images && svc.images.length) ? svc.images : (svc.image ? [svc.image] : []);
       return imgs.join('\n');
+    },
+
+    // 运行时间：基于最新版本控制器的创建时间（后端 version_created_at，UTC ISO）计算已运行时长
+    svcFormatUptime(createdAt) {
+      if (!createdAt) return '-';
+      let ts;
+      try { ts = new Date(createdAt).getTime(); } catch (e) { return '-'; }
+      if (!ts || isNaN(ts)) return '-';
+      const diff = Date.now() - ts;
+      if (diff < 0) return '-';
+      const MIN = 60e3, HOUR = 3600e3, DAY = 86400e3;
+      if (diff < MIN) return '刚刚';
+      if (diff < HOUR) return Math.floor(diff / MIN) + ' 分钟';
+      if (diff < DAY) return Math.floor(diff / HOUR) + ' 小时 ' + Math.floor((diff % HOUR) / MIN) + ' 分钟';
+      return Math.floor(diff / DAY) + ' 天 ' + Math.floor((diff % DAY) / HOUR) + ' 小时';
     },
 
     podTagType(pod) {
@@ -2900,7 +2970,11 @@ const ServiceInfoPage = {
   font-family: Consolas, Menlo, monospace; font-size: 12.5px; line-height: 1.7;
   white-space: pre; overflow: auto; scrollbar-gutter: stable; box-sizing: border-box;
 }
-.svc-editor-textarea::selection { background: rgba(47, 90, 107, 0.9); color: transparent; }
+/* 选区：底色用比背景更沉的深蓝，浅色高亮文字在其上才清晰；
+   高亮 pre 层自身选区背景置透明，避免两层叠加把文字压暗 */
+.svc-editor-textarea::selection { background: rgba(38, 79, 120, 0.92); color: transparent; }
+.svc-editor-textarea::-moz-selection { background: rgba(38, 79, 120, 0.92); color: transparent; }
+.svc-editor-pre ::selection, .svc-editor-pre ::-moz-selection { background: transparent; }
 /* diff 折叠占位行 */
 .diff-fold-cell {
   text-align: center; padding: 4px 0; font-size: 12px;

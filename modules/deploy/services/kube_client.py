@@ -6,6 +6,8 @@ kubeconfig 内容存于系统设置 k8s_kubeconfig；可选 k8s_api_server 覆�
 （master 内网 IP 不可达时填 NodeIP）。
 """
 
+import datetime
+
 from modules.system.settings_service import get_setting
 
 
@@ -77,6 +79,7 @@ def _pod_summary(pod):
         if not image and cs.name != 'filebeat' and cs.image:
             image = cs.image
     labels = pod.metadata.labels or {}
+    created = pod.metadata.creation_timestamp
     return {
         'name': pod.metadata.name,
         'phase': phase,
@@ -86,6 +89,8 @@ def _pod_summary(pod):
         'node': pod.spec.node_name or '',
         'image': image,
         'app': labels.get('app', ''),
+        'createdAt': created.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ') if created else '',
+        'ptHash': labels.get('pod-template-hash', ''),
     }
 
 
@@ -286,6 +291,11 @@ def build_service_snapshot(namespace):
             img = p.get('image') or ''
             if img and img not in pod_images:
                 pod_images.append(img)
+        # 最新版本控制器创建时间：同一 Deployment 滚动期间可能并存新旧 ReplicaSet（pod-template-hash，
+        # 即「版本控制器」），只取创建时间最新的一版作为服务运行时间基准
+        version_created_at = ''
+        if pods:
+            version_created_at = max((p.get('createdAt') or '') for p in pods) or ''
         services.append({
             'name': name,
             'image': pod_images[0] if pod_images else d['image'],
@@ -294,6 +304,85 @@ def build_service_snapshot(namespace):
             'ports': ports,
             'namespace': namespace,
             'pods': pods,
+            'version_created_at': version_created_at,
             # 设计决策：envs 不随列表/SSE 携带，弹窗时走 /service-info/envs 实时读 K8s
         })
     return services
+
+
+# ─── Pod 重启（rollout restart）─────────────────────────────
+
+def deployment_namespace(project, env):
+    """推导服务信息页对应的 K8s 命名空间：{project}-{env}-service（与 list_services 同规则）"""
+    return f'{project}-{env}-service'
+
+
+def _api_err_detail(e):
+    """从 kubernetes ApiException 提取可读错误信息（优先 message 字段）"""
+    body = getattr(e, 'body', '') or ''
+    try:
+        import json
+        data = json.loads(body)
+        if isinstance(data, dict) and data.get('message'):
+            return data['message']
+    except Exception:
+        pass
+    return (body or str(e)).strip()
+
+
+def restart_deployment(namespace, name):
+    """对单个 Deployment 执行 rollout restart（等价 kubectl rollout restart）：
+
+    在 spec.template.metadata.annotations 写入 kubectl.kubernetes.io/restartedAt=<now UTC RFC3339>，
+    触发 Pod 滚动重建（内部所有 container 一并重建）；不 delete pod，保持缩放/滚动优雅。
+    Deployment 不存在 / 无权限 / namespace 不存在 均明确抛 KubeNotConfigured。
+    """
+    from kubernetes import client as k8s_client
+    api = _build_apps_api()
+    now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    body = {
+        'spec': {
+            'template': {
+                'metadata': {'annotations': {'kubectl.kubernetes.io/restartedAt': now}}
+            }
+        }
+    }
+    try:
+        api.patch_namespaced_deployment(
+            name=name, namespace=namespace, body=body,
+        )
+    except k8s_client.rest.ApiException as e:
+        detail = _api_err_detail(e)
+        if e.status == 404:
+            raise KubeNotConfigured(f'Deployment「{name}」在命名空间「{namespace}」不存在')
+        if e.status in (401, 403):
+            raise KubeNotConfigured(f'无权限重启 Deployment「{name}」（namespace={namespace}）')
+        raise KubeNotConfigured(f'重启 Deployment「{name}」失败: {detail}')
+    return True
+
+
+def restart_all_deployments(project, env):
+    """对整个 namespace（{project}-{env}-service）下所有 Deployment 逐个 rollout restart，
+    汇总成功/失败清单；部分失败不影响其余执行，由调用方按清单提示。
+    """
+    namespace = deployment_namespace(project, env)
+    api = _build_apps_api()
+    try:
+        deps = api.list_namespaced_deployment(namespace=namespace)
+    except Exception as e:
+        raise KubeNotConfigured(f'读取命名空间「{namespace}」Deployment 列表失败: {e}')
+    names = [d.metadata.name for d in deps.items]
+    succeeded = []
+    failed = []
+    for name in names:
+        try:
+            restart_deployment(namespace, name)
+            succeeded.append(name)
+        except KubeNotConfigured as e:
+            failed.append({'name': name, 'error': str(e)})
+    return {
+        'namespace': namespace,
+        'total': len(names),
+        'succeeded': succeeded,
+        'failed': failed,
+    }

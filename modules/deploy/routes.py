@@ -129,7 +129,8 @@ admin_bp.add_url_rule('/environments/<int:env_id>', 'delete_environment', delete
 # ─── service-info 路由（服务信息：日志/Nacos配置/部署YAML/SSE实时/环境变量）────
 from modules.deploy.api.service_info_api import (
     list_services, pod_log_stream, service_yaml,
-    nacos_config_detail, nacos_config_publish
+    nacos_config_detail, nacos_config_publish,
+    restart_service, restart_all_services
 )
 from modules.deploy.api.service_info_stream_api import service_info_stream, service_envs
 from modules.deploy.api.service_info_logfile_api import logfile_list, logfile_content, logfile_download
@@ -144,6 +145,8 @@ deploy_bp.add_url_rule('/service-info/nacos/config', 'service_info_nacos_publish
 deploy_bp.add_url_rule('/service-info/logfiles', 'service_info_logfiles', logfile_list, methods=['GET'])
 deploy_bp.add_url_rule('/service-info/logfile/content', 'service_info_logfile_content', logfile_content, methods=['GET'])
 deploy_bp.add_url_rule('/service-info/logfile/download', 'service_info_logfile_download', logfile_download, methods=['GET'])
+deploy_bp.add_url_rule('/service-info/restart', 'service_info_restart', restart_service, methods=['POST'])
+deploy_bp.add_url_rule('/service-info/restart-all', 'service_info_restart_all', restart_all_services, methods=['POST'])
 
 
 def register(app):
