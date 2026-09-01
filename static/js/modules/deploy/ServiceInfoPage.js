@@ -34,18 +34,19 @@ const SvcLogLines = {
     lines: { type: Array, default: () => [] },
     searchWord: { type: String, default: '' },
   },
-  template: `<div v-for="(line, i) in lines" :key="i" :id="'logline-' + i" :class="{ 'svc-log-match': isMatch(i) }" v-html="hl(line)"></div>`,
+  template: `<div v-for="line in lines" :key="line.k" :id="'logline-' + line.k" :class="{ 'svc-log-match': isMatch(line) }" v-html="hl(line)"></div>`,
   methods: {
-    hl(line) { return svcHighlightLine(line, this.searchWord); },
-    isMatch(i) {
+    hl(line) { return svcHighlightLine(line.t, this.searchWord); },
+    isMatch(line) {
       if (!this.searchWord) return false;
-      return String(this.lines[i]).toLowerCase().includes(this.searchWord.toLowerCase());
+      return line.t.toLowerCase().includes(this.searchWord.toLowerCase());
     },
   },
 };
 
 // YAML 段落参考线用：等宽字体单字符宽度（首次渲染时实测，之后复用）
 let svcCfgCharW = 0;
+let svcLogKeySeq = 0;  // 日志行稳定 key 计数器（splice 后剩余行 key 不变，Vue 只 diff 增删行）
 
 const ServiceInfoPage = {
   name: 'ServiceInfoPage',
@@ -308,11 +309,6 @@ const ServiceInfoPage = {
       <div class="svc-log-header">
         <span class="svc-log-title">运行日志 - [[ logServiceName ]]</span>
         <span class="svc-log-count">共 [[ logLines.length ]] 行</span>
-        <el-select v-model="logTail" size="small" style="width:120px;" popper-class="svc-log-popper" @change="connectLogStream">
-          <el-option :value="200" label="最近 200 行"></el-option>
-          <el-option :value="500" label="最近 500 行"></el-option>
-          <el-option :value="1000" label="最近 1000 行"></el-option>
-        </el-select>
         <span class="svc-log-status">
           <span :style="{ width:'8px',height:'8px',borderRadius:'50%',background: streamConnected ? '#67c23a' : (logPaused ? '#e6a23c' : '#f56c6c') }"></span>
           [[ streamConnected ? '实时跟随中' : (logPaused ? '已暂停追踪' : '未连接') ]]
@@ -1617,6 +1613,7 @@ const ServiceInfoPage = {
       this.logPods = row.pods || [];
       this.logPod = pod ? pod.name : (this.logPods[0] ? this.logPods[0].name : '');
       this.logLines = [];
+      svcLogKeySeq = 0;
       this.logVisible = true;
       if (this.logPod) this.connectLogStream();
     },
@@ -1625,7 +1622,7 @@ const ServiceInfoPage = {
       this.logSearchMatches = [];
       if (!this.logSearchWord) { this.logSearchIdx = -1; return; }
       const q = this.logSearchWord.toLowerCase();
-      this.logLines.forEach((line, i) => { if (String(line).toLowerCase().includes(q)) this.logSearchMatches.push(i); });
+      this.logLines.forEach((line, i) => { if (line.t.toLowerCase().includes(q)) this.logSearchMatches.push(line.k); });
       this.logSearchIdx = this.logSearchMatches.length ? 0 : -1;
       this._scrollToMatch();
     },
@@ -1702,6 +1699,9 @@ const ServiceInfoPage = {
       this.logPaused = false;  // 重连即恢复实时追踪
       if (!this.logPod) return;
       this.logLines = [];
+      svcLogKeySeq = 0;
+      this._logPending = [];
+      this._logRaf = null;
       // 实时（观察）模式不做搜索渲染：连接/重连时清空搜索状态
       this.logSearchInput = '';
       this.logSearchWord = '';
@@ -1719,27 +1719,38 @@ const ServiceInfoPage = {
       });
       const es = new EventSource('/api/deploy/service-info/log/stream?' + params.toString());
       this.logStream = es;
-      es.onopen = () => { this.streamConnected = true; };
+      // 分批渲染：每帧最多刷 100 行，先出最新行，剩余渐进补全
+      const self = this;
+      function flushBatch() {
+        self._logRaf = null;
+        const pending = self._logPending;
+        if (!pending.length) return;
+        self._logPending = [];
+        for (let i = 0; i < pending.length; i++) self.logLines.push(pending[i]);
+        // 防内存膨胀：仅保留最近 1000 行
+        if (self.logLines.length > 1000) self.logLines.splice(0, self.logLines.length - 1000);
+        requestAnimationFrame(() => {
+          const box = self.$refs.logBox;
+          if (box) box.scrollTop = box.scrollHeight;
+        });
+      }
+      function scheduleFlush() {
+        if (!self._logRaf) self._logRaf = requestAnimationFrame(flushBatch);
+      }
+      es.onopen = () => { this.streamConnected = true; scheduleFlush(); };
       es.onmessage = (e) => {
         try {
           const d = JSON.parse(e.data);
           if (d.error) {
-            this.logLines.push('[错误] ' + d.error);
-            this.closeLogStream();
-            return;
+            this._logPending.push({ k: ++svcLogKeySeq, t: '[错误] ' + d.error });
+            flushBatch(); this.closeLogStream(); return;
           }
           if (d.end) {
-            this.logLines.push('── 日志流结束（Pod 退出或重启）──');
-            this.closeLogStream();
-            return;
+            this._logPending.push({ k: ++svcLogKeySeq, t: '── 日志流结束（Pod 退出或重启）──' });
+            flushBatch(); this.closeLogStream(); return;
           }
-          this.logLines.push(d.line);
-          // 防内存膨胀：仅保留最近 2000 行
-          if (this.logLines.length > 2000) this.logLines.splice(0, this.logLines.length - 2000);
-          Vue.nextTick(() => {
-            const box = this.$refs.logBox;
-            if (box) box.scrollTop = box.scrollHeight;
-          });
+          this._logPending.push({ k: ++svcLogKeySeq, t: d.line });
+          scheduleFlush();
         } catch (err) { /* 忽略非法帧 */ }
       };
       es.onerror = () => {
@@ -1768,6 +1779,8 @@ const ServiceInfoPage = {
     // 清屏：仅清空前端缓冲日志，不影响后端/SSE 流（新日志继续追加）
     clearLogScreen() {
       this.logLines = [];
+      this._logPending = [];
+      if (this._logRaf) { cancelAnimationFrame(this._logRaf); this._logRaf = null; }
       this.logSearchInput = '';
       this.logSearchWord = '';
       this.logSearchMatches = [];
