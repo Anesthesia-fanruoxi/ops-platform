@@ -313,12 +313,15 @@
 }
 .svc-branch-tree .el-tree { background: transparent; }
 .svc-toolbar-lastbuild {
-  display: flex; align-items: center; gap: 6px; margin-left: auto;
+  display: flex; align-items: center; gap: 6px;
   font-size: 12px; color: #606266; cursor: pointer; user-select: none;
   background: #f4f4f5; border-radius: 6px; padding: 4px 10px;
   transition: box-shadow .15s;
 }
 .svc-toolbar-lastbuild:hover { box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.15); }
+/* 构建记录弹窗：行可点击 */
+.build-records-dialog .el-table__row { cursor: pointer; transition: background .15s; }
+.build-records-dialog .el-table__row:hover { background: #ecf5ff !important; }
 .svc-lb-label { color: #909399; flex-shrink: 0; }
 .svc-lb-user { color: #303133; font-weight: 500; }
 .svc-lb-branch { color: #409eff; font-family: monospace; }

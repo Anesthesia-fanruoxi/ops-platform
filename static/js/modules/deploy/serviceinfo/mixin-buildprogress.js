@@ -20,6 +20,10 @@ const SvcMixinBuildProgress = {
       selectedEnvData: {},  // 当前环境详情（含最近构建记录 builds）
       activeBuild: null,   // 当前环境进行中的构建（SSE 推送，点击打开进度抽屉）
       envBuildStream: null,
+      // 构建记录弹窗
+      buildRecordsVisible: false,
+      buildRecords: [],
+      buildRecordsLoading: false,
     };
   },
   computed: {
@@ -49,6 +53,24 @@ const SvcMixinBuildProgress = {
     this.closeEnvBuildStream();
   },
   methods: {
+    // ═══════════ 构建记录弹窗 ═══════════
+    openBuildRecordsDialog() {
+      this.buildRecordsVisible = true;
+      this.loadBuildRecords();
+    },
+    loadBuildRecords() {
+      const env = this.selectedEnvData;
+      if (!env || !env.id) return;
+      this.buildRecordsLoading = true;
+      ajax('GET', '/api/cicd/builds?environment_id=' + env.id, null, (r) => {
+        this.buildRecordsLoading = false;
+        if (r.code === 200) this.buildRecords = r.data || [];
+      }, () => { this.buildRecordsLoading = false; });
+    },
+    onBuildRecordClick(row) {
+      this.buildRecordsVisible = false;
+      this.openProgressDrawer({ id: row.id, build_no: row.build_no, status: row.status, project_type: row.project_type, branch: row.branch });
+    },
     // ═══════════ 构建进度抽屉（与环境信息页一致） ═══════════
     openProgressDrawer(build) {
       this.bpBuild = build;

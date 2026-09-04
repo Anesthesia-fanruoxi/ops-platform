@@ -53,10 +53,13 @@ window.SvcTemplate = `
         <span class="svc-run-idle">暂无构建任务</span>
       </template>
     </span>
-    <!-- 最近构建记录：执行人 / 执行分支 / 执行时间（靠右，点击打开进度） -->
+    <!-- 构建记录按钮：弹出构建记录列表 -->
+    <el-button v-if="selectedProject && selectedEnv" plain size="small" @click="openBuildRecordsDialog">
+      <span style="color:#909399">构建记录</span>
+    </el-button>
+    <!-- 最近构建摘要：昵称 / 分支 / 时间（点击打开构建步骤） -->
     <span v-if="lastBuild" class="svc-toolbar-lastbuild" :title="'最近构建 ' + lastBuild.build_no"
           @click="openProgressDrawer({ id: lastBuild.id, build_no: lastBuild.build_no, status: lastBuild.status, project_type: lastBuild.project_type, branch: lastBuild.branch })">
-      <span class="svc-lb-label">最近构建</span>
       <span class="svc-lb-user">[[ lastBuild.triggered_by || '-' ]]</span>
       <span class="svc-lb-branch">[[ lastBuild.branch || '-' ]]</span>
       <span class="svc-lb-time">[[ lastBuild.created_at || '' ]]</span>
@@ -460,6 +463,31 @@ window.SvcTemplate = `
     <template #footer>
       <el-button @click="diffVisible = false">返回编辑</el-button>
       <el-button type="primary" :loading="publishing" @click="doPublish">确认发布</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 构建记录弹窗：一行一行展示构建记录，点击查看构建步骤 -->
+  <el-dialog v-model="buildRecordsVisible" :title="'构建记录 - ' + (selectedProject || '') + '/' + (selectedEnv || '')" width="900px" top="8vh" class="build-records-dialog">
+    <el-table :data="buildRecords" size="small" border stripe max-height="65vh" style="width:100%"
+              v-loading="buildRecordsLoading" highlight-current-row @row-click="onBuildRecordClick">
+      <el-table-column prop="build_no" label="编号" width="170" />
+      <el-table-column prop="branch" label="分支" min-width="130" show-overflow-tooltip />
+      <el-table-column label="类型" width="70" align="center">
+        <template #default="s">[[ s.row.project_type === 'frontend' ? '前端' : '后端' ]]</template>
+      </el-table-column>
+      <el-table-column label="状态" width="80" align="center">
+        <template #default="s">
+          <el-tag :type="bpStatusType(s.row.status)" size="small">[[ bpStatusText(s.row.status) ]]</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="triggered_by" label="执行人" width="80" align="center" />
+      <el-table-column label="耗时" width="70" align="center">
+        <template #default="s">[[ s.row.duration ? Math.round(s.row.duration) + 's' : '-' ]]</template>
+      </el-table-column>
+      <el-table-column prop="created_at" label="创建时间" width="160" />
+    </el-table>
+    <template #footer>
+      <el-button @click="buildRecordsVisible = false">关闭</el-button>
     </template>
   </el-dialog>
 
