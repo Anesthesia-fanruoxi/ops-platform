@@ -28,7 +28,7 @@ const SchedulePage = {
             <span class="agent-name">[[ a.name ]] ([[ a.host ]]:[[ a.port ]])</span>
             <div style="display:flex;align-items:center;gap:6px">
               <el-tag :type="stateType(a.state)" size="small">[[ stateLabel(a.state) ]]</el-tag>
-              <el-switch :model-value="!a.disabled" size="small" inline-prompt
+              <el-switch v-if="agentOpAllowed" :model-value="!a.disabled" size="small" inline-prompt
                          active-text="启用" inactive-text="禁用"
                          @click.stop @change="toggleDisable(a)" />
             </div>
@@ -179,6 +179,12 @@ const SchedulePage = {
   <!-- ═══ 添加/重新安装 Agent 弹窗 ═══ -->
   <el-dialog v-model="showAgentDialog" :title="reinstallMode ? '重新安装 Agent' : '添加 Agent（远程安装）'" width="520px" :close-on-click-modal="false">
     <el-form label-width="100px" size="small">
+      <el-form-item v-if="!reinstallMode" label="复制配置">
+        <el-select :model-value="''" placeholder="选择已有 Agent，套用其配置" style="width:100%" @change="copyAgentConfig">
+          <el-option v-for="a in agents" :key="a.id" :label="a.name + ' (' + a.host + ')'" :value="a.id" />
+        </el-select>
+        <div style="color:#909399;font-size:12px;margin-top:2px">套用 SSH/工作目录/NFS/Harbor 等配置；名称与主机地址需单独填写</div>
+      </el-form-item>
       <el-form-item label="名称" required><el-input v-model="agentForm.name" placeholder="build-node-01" :disabled="reinstallMode" /></el-form-item>
       <el-form-item label="主机地址" required><el-input v-model="agentForm.host" placeholder="192.168.1.100" :disabled="reinstallMode" /></el-form-item>
       <el-form-item label="SSH 端口"><el-input-number v-model="agentForm.ssh_port" :min="1" :max="65535" :disabled="reinstallMode" /></el-form-item>
@@ -681,6 +687,34 @@ const SchedulePage = {
       this.reinstallAgentId = null;
       this.agentForm = { name: '', host: '', ssh_port: 22, ssh_username: 'root', auth_type: 'credential', ssh_password: '', credential_id: '', master_url: '', work_dir: '/data/cicd', frontend_mount_dir: '', nfs_server: '', nfs_share: '', keep_builds: 5, install_docker: true, harbor_type: 'public', harbor_url: '', harbor_credential_id: '', harbor_ip: '' };
       this.showAgentDialog = true;
+    },
+    // 新增时套用已有 Agent 配置：除名称/主机地址（IP）/SSH 密码留空外全部复制
+    copyAgentConfig(agentId) {
+      if (!agentId) return;
+      ajax('GET', '/api/cicd/agents/' + agentId + '/detail', null, res => {
+        if (res.code !== 200) { ElementPlus.ElMessage.error(res.msg || '获取配置失败'); return; }
+        const d = res.data;
+        const f = this.agentForm;
+        f.ssh_port = d.ssh_port || 22;
+        f.auth_type = d.ssh_auth_type || 'credential';
+        f.ssh_username = d.ssh_username || 'root';
+        f.credential_id = d.ssh_credential_id || '';
+        f.master_url = d.master_url || '';
+        f.work_dir = d.work_dir || '/data/cicd';
+        f.frontend_mount_dir = d.frontend_mount_dir || '';
+        f.nfs_server = d.nfs_server || '';
+        f.nfs_share = d.nfs_share || '';
+        f.keep_builds = d.keep_builds || 5;
+        f.harbor_type = d.harbor_type || 'public';
+        f.harbor_url = d.harbor_url || '';
+        f.harbor_credential_id = d.harbor_credential_id || '';
+        f.harbor_ip = d.harbor_ip || '';
+        // 名称/主机地址/SSH 密码留空，由用户单独填写
+        f.name = '';
+        f.host = '';
+        f.ssh_password = '';
+        ElementPlus.ElMessage.success('已套用「' + (d.name || '') + '」的配置，请填写名称与主机地址');
+      });
     },
     openEditAgent(agent) {
       this.loadCredentials();

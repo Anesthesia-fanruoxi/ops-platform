@@ -41,7 +41,18 @@
 .schema-page .sc-op-list { background: #fff; border: 1px solid var(--cp-border); border-radius: 8px; overflow: hidden; }
 .schema-page .sc-op-item { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 12px; border-bottom: 1px solid #f1f5f9; }
 .schema-page .sc-op-item:last-child { border-bottom: none; }
+.schema-page .sc-op-clickable { cursor: pointer; transition: background .12s; }
+.schema-page .sc-op-clickable:hover { background: #f0f7f9; }
 .schema-page .sc-op-desc { font-size: 12px; color: var(--cp-text-secondary); font-family: 'JetBrains Mono', Consolas, monospace; overflow-wrap: anywhere; }
+.schema-page .sc-op-stat { font-weight: 600; }
+.schema-page .sc-op-sep { color: #cbd5e1; }
+.schema-page .sc-stat-add_field { color: #16a34a; }
+.schema-page .sc-stat-add_index { color: #2563eb; }
+.schema-page .sc-stat-mod_field { color: #d97706; }
+.schema-page .sc-stat-mod_index { color: #9333ea; }
+.schema-page .sc-stat-mod_collation { color: #0891b2; }
+.schema-page .sc-stat-mod_option { color: #db2777; }
+.schema-page .sc-stat-extra { color: #94a3b8; }
 .schema-page .sc-title-create { color: #16a34a; }
 .schema-page .sc-title-modify { color: #d97706; }
 .schema-page .sc-title-drop { color: #94a3b8; }
@@ -56,7 +67,7 @@
 .schema-page .sc-val-target { color: #dc2626; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 12px; text-decoration: line-through; text-decoration-color: rgba(220,38,38,.35); }
 
 /* ── SQL 预览块 ── */
-.schema-page .sc-sql { background: #1e1e1e; color: #d4d4d4; border-radius: 8px; padding: 14px 16px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 12px; line-height: 1.7; overflow-x: auto; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0; }
+.schema-page .sc-sql { background: #002B35; color: #d4d4d4; border-radius: 8px; padding: 14px 16px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 12px; line-height: 1.7; overflow-x: auto; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0; }
 .schema-page .sc-sql code { font-family: inherit; background: none; padding: 0; }
 .schema-page .sc-sql .hljs-comment { color: #6a9955; }
 .schema-page .sc-sql .hljs-keyword { color: #569cd6; font-weight: 600; }

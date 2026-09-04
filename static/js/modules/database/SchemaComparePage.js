@@ -73,7 +73,7 @@ const SchemaComparePage = {
         </div>
         <div style="display:flex;gap:10px;align-items:center">
           <el-input v-model="tableFilter" placeholder="搜索对象名..." clearable size="small" prefix-icon="Search" style="width:200px" />
-          <button class="cp-btn cp-btn-outline cp-btn-sm" @click="viewSyncSql" :disabled="!needSyncCount">查看同步SQL</button>
+          <button class="cp-btn cp-btn-outline cp-btn-sm" @click="viewSyncSql" :disabled="!selectedCount">查看同步SQL</button>
           <template v-if="syncAllowed">
             <button class="cp-btn cp-btn-outline cp-btn-sm" @click="selectAllSync" :disabled="!needSyncCount">全选</button>
             <button class="cp-btn cp-btn-outline cp-btn-sm" @click="clearSelection" :disabled="!selectedCount">清除</button>
@@ -115,11 +115,19 @@ const SchemaComparePage = {
               ➕ 创建（[[ r.summary.missing ]] 个对象）
             </div>
             <div v-if="groupObjects('create', r).length" class="sc-op-list">
-              <div v-for="obj in groupObjects('create', r)" :key="obj.key" class="sc-op-item">
-                <el-checkbox v-if="syncAllowed" :model-value="isObjSelected(r, obj)" @change="v => toggleObjSelect(r, obj, v)" style="flex-shrink:0" />
+              <div v-for="obj in groupObjects('create', r)" :key="obj.key" class="sc-op-item"
+                   :class="{'sc-op-clickable': syncAllowed}" @click="syncAllowed && toggleObjSelect(r, obj, !isObjSelected(r, obj))">
+                <el-checkbox v-if="syncAllowed" :model-value="isObjSelected(r, obj)" @click.stop @change="v => toggleObjSelect(r, obj, v)" style="flex-shrink:0" />
                 <span class="cp-tag" :class="typeTagClass(obj.object_type)" style="font-size:10px;flex-shrink:0">[[ obj.object_type ]]</span>
                 <code class="cp-code" style="flex-shrink:0">[[ obj.table ]]</code>
-                <span class="sc-op-desc">[[ obj.desc ]]</span>
+                <el-button v-if="obj.sql" size="small" text bg type="info" style="flex-shrink:0"
+                           @click.stop="showSqlDetail(r, obj)">查看执行SQL</el-button>
+                <span v-if="obj.op_stats" class="sc-op-desc">
+                  <template v-for="(s, i) in visibleStats(obj)" :key="s.key">
+                    <span class="sc-op-stat" :class="'sc-stat-' + s.key" :title="s.key === 'extra' ? '目标多余，仅提示不处理' : ''">[[ s.label ]] [[ s.count ]]</span><span v-if="i < visibleStats(obj).length - 1" class="sc-op-sep"> · </span>
+                  </template>
+                </span>
+                <span v-else class="sc-op-desc">[[ obj.desc ]]</span>
               </div>
             </div>
             <div v-else class="sc-expand-note">无待创建对象</div>
@@ -132,11 +140,19 @@ const SchemaComparePage = {
               ✏️ 修改（[[ r.summary.diff ]] 个对象）
             </div>
             <div v-if="groupObjects('modify', r).length" class="sc-op-list">
-              <div v-for="obj in groupObjects('modify', r)" :key="obj.key" class="sc-op-item">
-                <el-checkbox v-if="syncAllowed" :model-value="isObjSelected(r, obj)" @change="v => toggleObjSelect(r, obj, v)" style="flex-shrink:0" />
+              <div v-for="obj in groupObjects('modify', r)" :key="obj.key" class="sc-op-item"
+                   :class="{'sc-op-clickable': syncAllowed}" @click="syncAllowed && toggleObjSelect(r, obj, !isObjSelected(r, obj))">
+                <el-checkbox v-if="syncAllowed" :model-value="isObjSelected(r, obj)" @click.stop @change="v => toggleObjSelect(r, obj, v)" style="flex-shrink:0" />
                 <span class="cp-tag" :class="typeTagClass(obj.object_type)" style="font-size:10px;flex-shrink:0">[[ obj.object_type ]]</span>
                 <code class="cp-code" style="flex-shrink:0">[[ obj.table ]]</code>
-                <span class="sc-op-desc">[[ obj.desc ]]</span>
+                <el-button v-if="obj.sql" size="small" text bg type="info" style="flex-shrink:0"
+                           @click.stop="showSqlDetail(r, obj)">查看执行SQL</el-button>
+                <span v-if="obj.op_stats" class="sc-op-desc">
+                  <template v-for="(s, i) in visibleStats(obj)" :key="s.key">
+                    <span class="sc-op-stat" :class="'sc-stat-' + s.key" :title="s.key === 'extra' ? '目标多余，仅提示不处理' : ''">[[ s.label ]] [[ s.count ]]</span><span v-if="i < visibleStats(obj).length - 1" class="sc-op-sep"> · </span>
+                  </template>
+                </span>
+                <span v-else class="sc-op-desc">[[ obj.desc ]]</span>
               </div>
             </div>
             <div v-else class="sc-expand-note">无待修改对象</div>
@@ -159,6 +175,23 @@ const SchemaComparePage = {
     </div>
   </template>
 
+  <!-- ══ 单对象 SQL 详情弹窗（点击问题表「查看 SQL」打开；宽度与工具栏同步SQL弹窗一致） ══ -->
+  <div v-if="sqlDetail.show" class="cp-modal-mask" @click.self="sqlDetail.show=false">
+    <div class="cp-modal-box" style="width:70vw">
+      <div class="cp-modal-header">
+        <span>📄 [[ sqlDetail.title ]]</span>
+        <button class="cp-modal-close" @click="sqlDetail.show=false">✕</button>
+      </div>
+      <div class="cp-modal-body" style="padding:0 12px 8px">
+        <pre class="sc-sql" style="max-height:none;height:58vh"><code v-html="sqlDetail.html"></code></pre>
+      </div>
+      <div class="cp-modal-footer" style="justify-content:space-between">
+        <button class="cp-btn cp-btn-outline cp-btn-sm" @click="copySqlDetail">复制 SQL</button>
+        <button class="cp-btn cp-btn-outline" @click="sqlDetail.show=false">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ══ 同步 SQL 预览弹窗（多目标按标签页分开显示） ══ -->
   <div v-if="sqlModal.show" class="cp-modal-mask" @click.self="sqlModal.show=false">
     <div class="cp-modal-box" style="width:70vw">
@@ -172,7 +205,7 @@ const SchemaComparePage = {
           📥 [[ st.name ]] <span class="cp-tag cp-tag-info" style="font-size:11px">[[ st.tables.length ]]</span>
         </div>
       </div>
-      <div class="cp-modal-body" style="padding-bottom:8px">
+      <div class="cp-modal-body" style="padding:0 12px 8px">
         <!-- 全部目标的 SQL 面板常驻，切页签只切显隐（高亮 HTML 已在打开弹窗时预计算） -->
         <pre v-for="st in sqlModal.targets" :key="st.instanceId" v-show="st.instanceId === sqlModal.activeId"
              class="sc-sql" style="max-height:none;height:58vh"><code v-html="st.html"></code></pre>
@@ -289,6 +322,8 @@ const SchemaComparePage = {
       // 弹窗
       sqlModal: { show: false, targets: [], activeId: '' },
       syncModal: { show: false, loading: false, groups: [], total: 0, activeId: '' },
+      // 单对象 SQL 详情弹窗
+      sqlDetail: { show: false, title: '', sql: '', html: '' },
       // 同步日志（SSE）
       syncLogVisible: false,
       syncLogTitle: '',
@@ -506,6 +541,11 @@ const SchemaComparePage = {
       return ({ '表': 'cp-tag-info', '视图': 'cp-tag-success', '事件': 'cp-tag-purple' })[objectType] || 'cp-tag-info';
     },
 
+    // 修改组四类统计：仅展示非零项（新增/修改 × 字段/索引 + 多余）
+    visibleStats(obj) {
+      return (obj.op_stats || []).filter(s => s.count > 0);
+    },
+
     // SQL 语法高亮（注释/字符串/关键字/数字，输出 hljs-* 类名）
     highlightSql(sql) {
       if (!sql) return '';
@@ -527,11 +567,39 @@ const SchemaComparePage = {
       return html;
     },
 
-    // ── SQL 预览（每个目标单独一份 SQL，弹窗内标签页切换） ──
+    // ── 单对象 SQL 详情弹窗（说明以注释写入内容框，不干扰执行） ──
+    showSqlDetail(r, obj) {
+      const sqls = Array.isArray(obj.sql) ? obj.sql : (obj.sql ? [obj.sql] : []);
+      const lines = [
+        `-- 目标：${r.target.name} · ${r.target.database}`,
+        `-- ${obj.group === 'create' ? '创建' : '修改'}${obj.object_type || '表'} ${obj.table}`,
+        '',
+      ];
+      for (const s of sqls) lines.push(s.trim().replace(/;+$/, '') + ';');
+      const text = lines.join('\n');
+      this.sqlDetail = {
+        show: true,
+        title: `${obj.group === 'create' ? '创建' : '修改'}${obj.object_type || '表'} ${obj.table}`,
+        sql: text,
+        html: this.highlightSql(text),
+      };
+    },
+    copySqlDetail() {
+      const text = this.sqlDetail.sql;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => ElementPlus.ElMessage.success('已复制 SQL'));
+      } else {
+        ElementPlus.ElMessage.warning('当前环境不支持复制');
+      }
+    },
+
+    // ── SQL 预览（仅展示勾选选中的对象，每个目标单独一份 SQL，弹窗内标签页切换） ──
     viewSyncSql() {
       const targets = [];
       for (const r of this.compareResults) {
-        const need = r.tables.filter(t => t.group === 'create' || t.group === 'modify');
+        const need = r.tables.filter(t =>
+          (t.group === 'create' || t.group === 'modify') &&
+          this.selectedKeys[`${r.target.instance_id}|${t.key}`]);
         if (!need.length) continue;
         const lines = [
           `-- 源：${r.source.name} · ${r.source.database} → 目标：${r.target.name} · ${r.target.database}`
@@ -554,7 +622,7 @@ const SchemaComparePage = {
         });
       }
       if (!targets.length) {
-        ElementPlus.ElMessage.success('两侧结构一致，无同步 SQL');
+        ElementPlus.ElMessage.warning('请先勾选要查看的对象');
         return;
       }
       this.sqlModal = { show: true, targets, activeId: targets[0].instanceId };
@@ -756,9 +824,18 @@ const SchemaComparePage = {
 
   created() {
     this.loadInstances();
+    // 弹窗支持 ESC 关闭（cp-modal 为手写遮罩，不响应 el-dialog 默认行为）
+    this._escHandler = (e) => {
+      if (e.key !== 'Escape') return;
+      if (this.sqlDetail.show) { this.sqlDetail.show = false; return; }
+      if (this.syncModal.show) { this.syncModal.show = false; return; }
+      if (this.sqlModal.show) this.sqlModal.show = false;
+    };
+    document.addEventListener('keydown', this._escHandler);
   },
 
   beforeUnmount() {
+    document.removeEventListener('keydown', this._escHandler);
     this.closeSyncSSE();
   }
 };

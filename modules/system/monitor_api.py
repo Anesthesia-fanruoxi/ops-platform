@@ -8,7 +8,7 @@
 import json
 import time
 
-from flask import Response, current_app, request, stream_with_context
+from flask import Response, current_app, request
 
 from core.response import success_response
 from core.security import require_permission
@@ -74,20 +74,21 @@ def monitor_stream():
     interval = max(2, min(interval, 30))
 
     def generate():
-        # 生成器懒执行（响应返回后请求上下文已 pop），手动推入 app context
-        with app_obj.app_context():
-            # 首帧立即推送一次，再按间隔循环
-            while True:
-                try:
+        # 生成器懒执行（响应返回后请求上下文已 pop）。app context 按次收窄：
+        # 每轮检查独立推入、结束即 teardown 归还 DB 连接；若整体持有，
+        # 每条 SSE 连接会常驻占用连接池，池满后全部 API 排队等连接（P99 飙高）
+        while True:
+            try:
+                with app_obj.app_context():
                     result = run_checks_cached()
-                    payload = json.dumps({'type': 'health', 'data': result}, ensure_ascii=False)
-                except Exception as e:
-                    payload = json.dumps({'type': 'error', 'data': {'detail': str(e)[:200]}}, ensure_ascii=False)
-                yield f'data: {payload}\n\n'
-                time.sleep(interval)
+                payload = json.dumps({'type': 'health', 'data': result}, ensure_ascii=False)
+            except Exception as e:
+                payload = json.dumps({'type': 'error', 'data': {'detail': str(e)[:200]}}, ensure_ascii=False)
+            yield f'data: {payload}\n\n'
+            time.sleep(interval)
 
     return Response(
-        stream_with_context(generate()),
+        generate(),
         mimetype='text/event-stream',
         headers={
             'Cache-Control': 'no-cache',

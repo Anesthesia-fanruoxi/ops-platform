@@ -79,52 +79,54 @@ class _NsHub:
         namespace = self.namespace
         last_pushed = None
         streams = [None, None]  # [deployment watch, pod watch]
-        # K8s 客户端构建/快照读取 DB 配置（k8s_kubeconfig），后台线程必须推入 app context
-        with self.app.app_context():
-            try:
-                while not self.stop_flag.is_set():
-                    with self.lock:
-                        empty = not self.subscribers
-                    # 空闲到期：停线程，等下次订阅重新拉起
-                    if empty and time.time() - self.last_active > _IDLE_STOP_SEC:
-                        return
-                    # watch 流按需（重）建：到期/断开置 None，下轮重建
-                    for i in range(2):
-                        if streams[i] is None:
-                            try:
-                                fn = kube_client.watch_deployments if i == 0 else kube_client.watch_pods
+        try:
+            while not self.stop_flag.is_set():
+                with self.lock:
+                    empty = not self.subscribers
+                # 空闲到期：停线程，等下次订阅重新拉起
+                if empty and time.time() - self.last_active > _IDLE_STOP_SEC:
+                    return
+                # watch 流按需（重）建：到期/断开置 None，下轮重建
+                # K8s 客户端构建读 DB 配置（k8s_kubeconfig）：app context 按次收窄，
+                # 用完即归还 DB 连接，避免 watch 线程常驻期间占用连接池
+                for i in range(2):
+                    if streams[i] is None:
+                        try:
+                            fn = kube_client.watch_deployments if i == 0 else kube_client.watch_pods
+                            with self.app.app_context():
                                 streams[i] = fn(namespace, timeout_seconds=_WATCH_TIMEOUT)
-                            except Exception as e:
-                                self._fanout({'type': 'error', 'error': str(e)})
-                                return
-                    changed = False
-                    for i in range(2):
-                        try:
-                            next(streams[i])
-                            changed = True
-                        except StopIteration:
-                            # 流到期/断开：关闭释放底层连接，下轮重建
-                            self._close_stream(streams, i)
-                            changed = True
-                        except Exception:
-                            self._close_stream(streams, i)
-                            changed = True
-                    # 无订阅者时只消费事件保活，不重建快照（省 CPU / K8s API 调用）
-                    if changed and not empty:
-                        try:
+                        except Exception as e:
+                            self._fanout({'type': 'error', 'error': str(e)})
+                            return
+                changed = False
+                for i in range(2):
+                    try:
+                        next(streams[i])
+                        changed = True
+                    except StopIteration:
+                        # 流到期/断开：关闭释放底层连接，下轮重建
+                        self._close_stream(streams, i)
+                        changed = True
+                    except Exception:
+                        self._close_stream(streams, i)
+                        changed = True
+                # 无订阅者时只消费事件保活，不重建快照（省 CPU / K8s API 调用）
+                if changed and not empty:
+                    try:
+                        with self.app.app_context():
                             services = kube_client.build_service_snapshot(namespace)
-                            if services != last_pushed:
-                                last_pushed = services
-                                self._fanout({'type': 'update', 'services': services})
-                        except Exception:
-                            pass
-            finally:
-                for g in streams:
-                    if g is not None:
-                        try:
-                            g.close()
-                        except Exception:
-                            pass
+                        if services != last_pushed:
+                            last_pushed = services
+                            self._fanout({'type': 'update', 'services': services})
+                    except Exception:
+                        pass
+        finally:
+            for g in streams:
+                if g is not None:
+                    try:
+                        g.close()
+                    except Exception:
+                        pass
 
 
 # ── 全局注册表 ─────────────────────────────────────────────

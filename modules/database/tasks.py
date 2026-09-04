@@ -303,7 +303,7 @@ def _run_sync_structure_task(app, task_key, source_instance_id, source_database,
                 _write_collation_log('INFO', op, source, target_database,
                                      f'── 开始同步目标库 {target_name}:{target_database} ──')
                 try:
-                    tgt_conn = get_connection(target_instance_id)
+                    tgt_conn = get_connection(target_instance_id, target_database)
                     tgt_meta = fetch_schema_metadata(tgt_conn, target_database)
                     diff = compare_schemas(src_meta, tgt_meta)
 

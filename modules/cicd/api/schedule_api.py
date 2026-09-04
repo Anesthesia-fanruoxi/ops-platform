@@ -3,7 +3,7 @@
 import json
 import time
 
-from flask import Response, stream_with_context
+from flask import Response, current_app
 
 from core.response import success_response
 from core.security import require_permission
@@ -68,28 +68,33 @@ def _sse_event(event, data):
 @require_permission('page:cicd_schedule')
 def schedule_stream():
     """GET /stream?token= -> SSE overview and schedule-log events."""
+    # 生成器懒执行（响应返回后请求上下文已 pop），先捕获 app 对象；
+    # DB 查询收窄到每轮独立的短命 app context，结束即 teardown 归还连接，
+    # 避免 SSE 常驻期间占用连接池（池满导致全部 API 等连接、P99 飙高）
+    app_obj = current_app._get_current_object()
+
     def generate():
         last_logs_signature = None
         while True:
             try:
-                overview = _overview()
-                logs = _schedule_logs_snapshot()
-                logs_signature = tuple(
-                    (item['id'], item['status'], item['selected_agent'], item['created_at'], item['detail_logs'])
-                    for item in logs
-                )
+                with app_obj.app_context():
+                    overview = _overview()
+                    logs = _schedule_logs_snapshot()
+                    logs_signature = tuple(
+                        (item['id'], item['status'], item['selected_agent'], item['created_at'], item['detail_logs'])
+                        for item in logs
+                    )
                 yield _sse_event('overview', overview)
                 if logs_signature != last_logs_signature:
                     yield _sse_event('schedule_logs', logs)
                     last_logs_signature = logs_signature
             except Exception as e:
-                # Roll back after an exception so the long-lived request does not keep a stale transaction.
-                db.session.rollback()
+                # app context 退出时 teardown 已自动 rollback/释放 session 连接
                 yield _sse_event('error', {'message': str(e)})
             time.sleep(2)
 
     return Response(
-        stream_with_context(generate()),
+        generate(),
         content_type='text/event-stream',
         headers={
             'Cache-Control': 'no-cache',

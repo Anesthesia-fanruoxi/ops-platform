@@ -179,31 +179,33 @@ def pod_log_stream():
 
     def generate():
         stream = None
-        with app_obj.app_context():
-            try:
-                # 历史回放
+        try:
+            # app context 按需收窄：仅历史回放/开流等读 DB 配置的段持有，用完即归还连接；
+            # follow 迭代期间不持有，避免 SSE 常驻占用连接池（池满拖垮全部 API）
+            with app_obj.app_context():
                 history = read_pod_log(namespace, pod, tail_lines=tail, prefer_container=service)
-                for line in history.splitlines():
-                    yield f'data: {json.dumps({"line": line}, ensure_ascii=False)}\n\n'
-                # 实时跟随（逐行迭代；Pod 结束/连接断开时流自然结束）
                 stream = stream_pod_log(namespace, pod, prefer_container=service)
-                for raw in stream:
-                    line = raw.decode('utf-8', errors='replace').rstrip('\n')
-                    yield f'data: {json.dumps({"line": line}, ensure_ascii=False)}\n\n'
-                yield f'data: {json.dumps({"end": True}, ensure_ascii=False)}\n\n'
-            except GeneratorExit:
-                return
-            except Exception as e:
+            # 历史回放
+            for line in history.splitlines():
+                yield f'data: {json.dumps({"line": line}, ensure_ascii=False)}\n\n'
+            # 实时跟随（逐行迭代；Pod 结束/连接断开时流自然结束）
+            for raw in stream:
+                line = raw.decode('utf-8', errors='replace').rstrip('\n')
+                yield f'data: {json.dumps({"line": line}, ensure_ascii=False)}\n\n'
+            yield f'data: {json.dumps({"end": True}, ensure_ascii=False)}\n\n'
+        except GeneratorExit:
+            return
+        except Exception as e:
+            try:
+                yield f'data: {json.dumps({"error": str(e)}, ensure_ascii=False)}\n\n'
+            except Exception:
+                pass
+        finally:
+            if stream is not None:
                 try:
-                    yield f'data: {json.dumps({"error": str(e)}, ensure_ascii=False)}\n\n'
+                    stream.close()
                 except Exception:
                     pass
-            finally:
-                if stream is not None:
-                    try:
-                        stream.close()
-                    except Exception:
-                        pass
 
     return Response(generate(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})

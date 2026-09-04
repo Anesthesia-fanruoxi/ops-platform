@@ -132,6 +132,19 @@
   <script src="{{ static_asset('js/modules/deploy/CreateService.js') }}"></script>
   <script src="{{ static_asset('js/modules/deploy/ProjectsPage.js') }}"></script>
   <script src="{{ static_asset('js/modules/deploy/ManagePage.js') }}"></script>
+    <!-- 服务信息页拆分模块：共享工具/样式 → 功能 mixin → 模板 → 入口（顺序不可调换） -->
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/svc-shared.js') }}"></script>
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/svc-styles.js') }}"></script>
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/mixin-servicelist.js') }}"></script>
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/mixin-quickbuild.js') }}"></script>
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/mixin-buildprogress.js') }}"></script>
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/mixin-log.js') }}"></script>
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/mixin-logfile.js') }}"></script>
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/mixin-nacos.js') }}"></script>
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/mixin-nacosrender.js') }}"></script>
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/mixin-diff.js') }}"></script>
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/mixin-misc.js') }}"></script>
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/svc-template.js') }}"></script>
   <script src="{{ static_asset('js/modules/deploy/ServiceInfoPage.js') }}"></script>
   <!-- nginx 域 -->
   <script src="{{ static_asset('js/modules/nginx/NginxPage.js') }}"></script>

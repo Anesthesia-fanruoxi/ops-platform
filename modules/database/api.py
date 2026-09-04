@@ -392,21 +392,29 @@ _GROUP_BY_STATUS = {'missing': 'create', 'diff': 'modify', 'extra': 'drop'}
 
 
 def _object_brief(row):
-    """生成对象摘要描述（前端直接展示）"""
+    """生成对象摘要描述（前端直接展示）；diff 表额外输出四类变更统计 op_stats（前端彩色渲染）"""
     ops = row.get('ops') or {}
     if row['status'] == 'missing':
         return (ops.get('create') or [{}])[0].get('desc', '')
     if row['status'] == 'extra':
         return '源库不存在该对象'
-    # diff：表按字段/索引变更数汇总，视图/事件直接展示变更内容
+    # diff：表按「新增/修改 × 字段/索引」+ 排序规则/其他表选项分类统计（多余另计，灰色展示）；
+    # 主键差异不在此列，视图/事件直接展示变更内容
     if row.get('object_type') == '表':
-        c = len(ops.get('create') or [])
-        m = len(ops.get('modify') or [])
-        d = len(ops.get('drop') or [])
-        desc = f'新建 {c} · 修改 {m}'
-        if d:
-            desc += f' · 多余 {d}（不处理）'
-        return desc
+        def _cnt(items, obj):
+            return len([o for o in (items or []) if o.get('object') == obj])
+        # 表选项变更：排序规则单列，引擎/注释归入「修改表选项」兜底
+        opt_labels = [o.get('name') for o in (ops.get('modify') or []) if o.get('object') == '表选项']
+        row['op_stats'] = [
+            {'key': 'add_field', 'label': '新增字段', 'count': _cnt(ops.get('create'), '字段')},
+            {'key': 'add_index', 'label': '新增索引', 'count': _cnt(ops.get('create'), '索引')},
+            {'key': 'mod_field', 'label': '修改字段', 'count': _cnt(ops.get('modify'), '字段')},
+            {'key': 'mod_index', 'label': '修改索引', 'count': _cnt(ops.get('modify'), '索引')},
+            {'key': 'mod_collation', 'label': '修改排序规则', 'count': opt_labels.count('排序规则')},
+            {'key': 'mod_option', 'label': '修改表选项', 'count': sum(1 for l in opt_labels if l != '排序规则')},
+            {'key': 'extra', 'label': '多余', 'count': len(ops.get('drop') or [])},
+        ]
+        return ''
     mods = ops.get('modify') or ops.get('create') or []
     return mods[0].get('desc', '') if mods else ''
 

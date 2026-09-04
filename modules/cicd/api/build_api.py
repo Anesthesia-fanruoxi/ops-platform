@@ -614,24 +614,28 @@ def env_builds_stream(environment_id):
     断线自动关闭；连续一段时间（5min）无进行中构建自动关闭，避免线程不必要地占用。
     """
     import time
-    from flask import stream_with_context, Response
+    from flask import Response, current_app
+    # 生成器懒执行（响应返回后请求上下文已 pop），先捕获 app 对象；
+    # DB 查询收窄到每轮独立短命 app context，结束即归还连接，避免 SSE 常驻占用连接池
+    app_obj = current_app._get_current_object()
 
     def generate():
         idle_count = 0  # 空闲轮数（每 5s 一轮）
         max_idle = 60  # 5s * 60 = 300s = 5min 无报告构建，自动关闭
         while True:
-            builds = Build.query.filter(
-                Build.environment_id == environment_id,
-                Build.status.in_(('running', 'pending', 'waiting')),
-            ).order_by(Build.id.desc()).all()
-            items = [{
-                'id': b.id,
-                'build_no': b.build_no,
-                'status': b.status,
-                'project_type': b.project_type or 'backend',
-                'branch': b.branch or '',
-                'current_step': _build_current_step(b.build_no),
-            } for b in builds]
+            with app_obj.app_context():
+                builds = Build.query.filter(
+                    Build.environment_id == environment_id,
+                    Build.status.in_(('running', 'pending', 'waiting')),
+                ).order_by(Build.id.desc()).all()
+                items = [{
+                    'id': b.id,
+                    'build_no': b.build_no,
+                    'status': b.status,
+                    'project_type': b.project_type or 'backend',
+                    'branch': b.branch or '',
+                    'current_step': _build_current_step(b.build_no),
+                } for b in builds]
             payload = json.dumps({'environment_id': environment_id, 'builds': items}, ensure_ascii=False)
             yield f"data: {payload}\n\n"
             # 有构建时重置空闲计数；无构建时递增
@@ -644,7 +648,7 @@ def env_builds_stream(environment_id):
                 break
             time.sleep(5)
 
-    return Response(stream_with_context(generate()), mimetype='text/event-stream',
+    return Response(generate(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 

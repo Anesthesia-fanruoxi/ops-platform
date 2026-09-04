@@ -38,6 +38,8 @@ def service_info_stream():
     app_obj = current_app._get_current_object()
 
     def generate():
+        # app context 按需收窄：仅快照/订阅等需要读 DB 配置的段持有，用完即归还连接；
+        # watch 循环（纯内存队列消费 + 心跳）不再长期持有，避免 SSE 常驻占用连接池
         with app_obj.app_context():
             # 全量快照先行（前端首屏直接可用）
             try:
@@ -49,25 +51,26 @@ def service_info_stream():
 
             # 订阅共享 hub（同 namespace 多连接共用一组 K8s watch）
             sid, q = kube_watch_hub.subscribe(namespace)
-            last_heartbeat = time.time()
-            try:
-                while True:
-                    try:
-                        frame = q.get(timeout=1)
-                    except queue.Empty:
-                        frame = None
-                    if frame is not None:
-                        if frame.get('type') == 'error':
-                            yield _sse(frame)
-                            return
+
+        last_heartbeat = time.time()
+        try:
+            while True:
+                try:
+                    frame = q.get(timeout=1)
+                except queue.Empty:
+                    frame = None
+                if frame is not None:
+                    if frame.get('type') == 'error':
                         yield _sse(frame)
-                    if time.time() - last_heartbeat >= 30:
-                        last_heartbeat = time.time()
-                        yield _sse({'type': 'heartbeat', 'ts': int(time.time())})
-            except GeneratorExit:
-                return
-            finally:
-                kube_watch_hub.unsubscribe(namespace, sid)
+                        return
+                    yield _sse(frame)
+                if time.time() - last_heartbeat >= 30:
+                    last_heartbeat = time.time()
+                    yield _sse({'type': 'heartbeat', 'ts': int(time.time())})
+        except GeneratorExit:
+            return
+        finally:
+            kube_watch_hub.unsubscribe(namespace, sid)
 
     return Response(generate(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})

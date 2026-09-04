@@ -25,6 +25,10 @@ def stream_build_log(build):
     build: Build 模型实例
     """
     log_file = build.log_file
+    # 生成器懒执行（响应返回后请求上下文已 pop），先捕获 app 对象；
+    # 终态查询收窄到每轮独立短命 app context，结束即归还 DB 连接
+    from flask import current_app
+    app_obj = current_app._get_current_object()
 
     def generate():
         # 等待日志文件创建（最多 15s）
@@ -47,9 +51,10 @@ def stream_build_log(build):
                         time.sleep(0.02)
                     continue
 
-                # 暂无新内容：检查构建是否已终态
+                # 暂无新内容：检查构建是否已终态（短命 app context，查完即归还连接）
                 from modules.cicd.models import Build
-                b = Build.query.get(build.id)
+                with app_obj.app_context():
+                    b = Build.query.get(build.id)
                 if b and b.status in ('success', 'failed', 'cancelled'):
                     yield f"data: {json.dumps({'done': True, 'success': b.status == 'success', 'status': b.status}, ensure_ascii=False)}\n\n"
                     return
