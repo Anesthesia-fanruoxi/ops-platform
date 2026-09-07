@@ -22,16 +22,21 @@
 
 ## 镜像仓库清理（Harbor API）
 
-凭据取本机 docker 登录态（`~/.docker/config.json` 中 `hub.hzbxhd.com` 的 auth 字段，base64 解码，不外泄）：
+凭据取本机 docker 登录态（`~/.docker/config.json`；`credsStore=desktop` 时经 `docker-credential-desktop get` 获取，不外泄）：
 
 ```
-# 列出现有 tag
-GET  {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts?with_tag=true&page_size=50
-# 删除指定 tag
+# 列出全部 artifact（含无 tag 的）
+GET    {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts?with_tag=true&page_size=100
+# 删除指定 tag（仅删标签引用）
 DELETE {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts/{digest}/tags/{tag}
+# 删除 artifact 本体（删 tag 后残留的 untagged 项需再删本体，界面才真正消失）
+DELETE {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts/{digest}
 ```
 
-> 只删记录表序外的旧版本 tag；若 tag 被设为不可变（immutable）删除失败则报告用户处理
+实施要点：
+- 保留有 tag 的最新 3 个 artifact，其余逐个先删 tag、再删 artifact 本体（否则界面 Tags 列出现空行残留）
+- 删 tag 后紧跟删本体可能 404（Harbor 内部状态异步传播），等待几十秒后轮询重试即可全部成功
+- 若 tag 被设为不可变（immutable）删除失败则报告用户处理
 
 ## 镜像记录表
 
