@@ -18,6 +18,20 @@
    docker push hub.hzbxhd.com/middleware/ops-platform:{新tag}
    ```
 5. **回填记录**：将新版本追加到下方记录表（版本 / 日期 / 变更摘要 / commit / digest）
+6. **清理旧 tag**：删除镜像仓库中超出最近 3 个版本的旧 tag（以记录表版本序为依据，保留最新 3 个），通过 Harbor API 删除
+
+## 镜像仓库清理（Harbor API）
+
+凭据取本机 docker 登录态（`~/.docker/config.json` 中 `hub.hzbxhd.com` 的 auth 字段，base64 解码，不外泄）：
+
+```
+# 列出现有 tag
+GET  {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts?with_tag=true&page_size=50
+# 删除指定 tag
+DELETE {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts/{digest}/tags/{tag}
+```
+
+> 只删记录表序外的旧版本 tag；若 tag 被设为不可变（immutable）删除失败则报告用户处理
 
 ## 镜像记录表
 
