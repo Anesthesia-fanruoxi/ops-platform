@@ -18,7 +18,8 @@
    docker push hub.hzbxhd.com/middleware/ops-platform:{新tag}
    ```
 5. **回填记录**：将新版本追加到下方记录表（版本 / 日期 / 变更摘要 / commit / digest）
-6. **清理旧 tag**：删除镜像仓库中超出最近 3 个版本的旧 tag（以记录表版本序为依据，保留最新 3 个），通过 Harbor API 删除
+6. **清理旧镜像**：删除镜像仓库中超出最近 3 个版本的旧 tag 及残留本体（以记录表版本序为依据，保留最新 3 个），通过 Harbor API 删除
+7. **清理本机历史镜像**：本机不保留历史版本（已推送 Harbor），`docker rmi` 删除除最新 tag 外的本机 ops-platform 镜像，`docker image prune -f` 清理悬空层
 
 ## 镜像仓库清理（Harbor API）
 
