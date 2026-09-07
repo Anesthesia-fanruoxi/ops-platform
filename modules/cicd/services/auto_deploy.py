@@ -117,7 +117,7 @@ def auto_deploy_build(build):
         if level == 'ERROR':
             has_error[0] = True
 
-    # 进入部署：标记 build.json 中「部署」步骤为 running（供步骤 SSE 推送）
+    # 进入部署：标记「部署」步骤为 running（写入 Redis 并广播，供步骤 SSE 推送）
     from modules.cicd.services.build_service import update_deploy_step
     update_deploy_step(build.build_no, 'running')
 

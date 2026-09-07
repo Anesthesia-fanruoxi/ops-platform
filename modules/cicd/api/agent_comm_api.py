@@ -148,7 +148,7 @@ def agent_build_step(build_id):
     if status not in ('running', 'success', 'failed', 'skipped'):
         return _agent_error('status 必须为 running/success/failed/skipped')
 
-    # 更新步骤状态文件（SSE 端通过监听 build.json mtime 感知变化）
+    # 更新 Redis 步骤状态（写入后自动广播，步骤 SSE 事件驱动感知变化）
     build_service.update_step_status(
         build.build_no,
         step_no=int(step_no),

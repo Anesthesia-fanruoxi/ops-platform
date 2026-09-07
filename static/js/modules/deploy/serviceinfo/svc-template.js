@@ -42,21 +42,21 @@ window.SvcTemplate = `
   </aside>
   <div class="serviceinfo-main">
   <div class="toolbar" style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-    <el-select v-model="selectedProject" placeholder="选择项目" size="small" style="width:180px;"
+    <el-select v-model="selectedProject" placeholder="选择项目" size="default" style="width:180px;"
                @change="onProjectChange" filterable>
       <el-option v-for="p in projects" :key="p" :label="p" :value="p"></el-option>
     </el-select>
-    <el-select v-model="selectedEnv" placeholder="选择环境" size="small" style="width:160px;"
+    <el-select v-model="selectedEnv" placeholder="选择环境" size="default" style="width:160px;"
                @change="loadServices" :disabled="!selectedProject" filterable>
       <el-option v-for="e in envs" :key="e" :label="e" :value="e"></el-option>
     </el-select>
     <!-- SSE 实时推送无需手动刷新；仅当 SSE 回退/K8s 不可用（k8sError）时提供「重新连接」入口 -->
-    <el-button v-if="k8sError" type="warning" plain size="small" @click="loadServices">重新连接</el-button>
+    <el-button v-if="k8sError" type="warning" plain @click="loadServices">重新连接</el-button>
     <!-- 未选择环境时不显示（避免不可用按钮占位） -->
-    <el-button v-if="selectedProject && selectedEnv && envHasNacos !== false" type="primary" plain size="small" @click="openGlobalNacos">全局 Nacos 配置</el-button>
-    <el-button v-if="selectedProject && selectedEnv && canDeploy" type="success" plain size="small"
+    <el-button v-if="selectedProject && selectedEnv && envHasNacos !== false" type="primary" plain @click="openGlobalNacos">全局 Nacos 配置</el-button>
+    <el-button v-if="selectedProject && selectedEnv && canDeploy" type="success" plain
                @click="openDeploy">🚀 快捷部署</el-button>
-    <el-button v-if="selectedProject && selectedEnv && canDeploy" type="danger" plain size="small"
+    <el-button v-if="selectedProject && selectedEnv && canDeploy" type="danger" plain
                :loading="restartingAll" @click="restartAllServices">⟳ 重启全部服务</el-button>
     <!-- 运行状态：监听环境构建 SSE（5s 一帧）；SSE 无任务 → 暂无构建任务，有任务 → 构建中 + 当前步骤 -->
     <span v-if="selectedEnv" class="svc-run-status" :class="{ 'svc-run-active': !!activeBuild }"
@@ -87,6 +87,8 @@ window.SvcTemplate = `
   <!-- 工具栏与内容区之间的虚线分割线 -->
   <div class="svc-toolbar-divider"></div>
 
+  <!-- 工具栏下方整体内容框：卡片多时仅在框内滚动，工具栏/分割线始终可见 -->
+  <div class="svc-main-scroll">
   <!-- 快捷部署弹窗（与环境信息页构建弹窗一致：分支/最近使用/服务范围/类型） -->
   <el-dialog v-model="buildDialogVisible" :title="'构建' + (buildType === 'frontend' ? '前端' : '后端') + ' - ' + (selectedProject || '') + '-' + (selectedEnv || '')"
              width="810px" top="10vh" class="build-dialog" :close-on-click-modal="false">
@@ -572,6 +574,7 @@ window.SvcTemplate = `
       <el-button type="primary" :loading="selectDirsSaving" :disabled="!selectDirsList.length" @click="confirmSelectDirs">保存配置</el-button>
     </template>
   </el-dialog>
+  </div><!-- /svc-main-scroll -->
   </div><!-- /serviceinfo-main -->
 </div>
 `;

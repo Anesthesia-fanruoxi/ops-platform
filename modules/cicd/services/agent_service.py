@@ -376,5 +376,8 @@ def poll_build_by_name(name):
     build.agent_id = agent.id
     build.started_at = datetime.now()
     db.session.commit()
+    # 广播状态变更（步骤 SSE 感知 running）
+    from modules.cicd.services.build_steps_hub import publish
+    publish(build.build_no)
     cache_delete(f'build:claim:{build.id}')
     return build, 'ok'

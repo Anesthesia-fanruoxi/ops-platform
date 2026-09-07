@@ -36,7 +36,6 @@ def _get_env_counts(project_name=None):
 def list_environments():
     """查询数据库，返回环境列表（支持按项目过滤，排除已删除，过滤忽略项目，附加最后构建信息）"""
     from modules.deploy.models import Environment, Project
-    from modules.cicd.models import Build
 
     project_name = request.args.get('project', '')
     show_deleted = request.args.get('show_deleted', 'false').lower() == 'true'
@@ -52,26 +51,13 @@ def list_environments():
 
     envs = query.all()
 
-    # 批量查询每个环境的最后构建记录（按 前后端 分层，避免 N+1）
+    # 批量查询每个环境的最后构建记录（按 前后端 分层；与全局构建状态 SSE 共用实现，避免 N+1）
     last_builds = {}
     if not show_deleted:
         env_ids = [e.id for e in envs]
         if env_ids:
-            from sqlalchemy import func
-            subq = db.session.query(
-                Build.environment_id,
-                Build.project_type,
-                func.max(Build.created_at).label('max_at')
-            ).filter(Build.environment_id.in_(env_ids)).group_by(Build.environment_id, Build.project_type).subquery()
-
-            builds = db.session.query(Build).join(
-                subq,
-                (Build.environment_id == subq.c.environment_id) &
-                (Build.project_type == subq.c.project_type) &
-                (Build.created_at == subq.c.max_at)
-            ).all()
-            for b in builds:
-                last_builds.setdefault(b.environment_id, {})[b.project_type or 'backend'] = b
+            from modules.cicd.services import build_service
+            last_builds = build_service.get_envs_last_builds(env_ids=env_ids)
 
     result = []
     for env in envs:
@@ -93,20 +79,9 @@ def list_environments():
         # 附加最后构建摘要（按 前后端 分层；顶层 last_build 兼容保留为后端摘要）
         if not show_deleted:
             lb_map = last_builds.get(env.id, {})
-            def _summary(lb):
-                if not lb:
-                    return None
-                return {
-                    'id': lb.id,
-                    'build_no': lb.build_no,
-                    'status': lb.status,
-                    'branch': lb.branch,
-                    'triggered_by': lb.triggered_by,
-                    'created_at': lb.created_at.strftime('%Y-%m-%d %H:%M:%S') if lb.created_at else None,
-                }
             item['builds'] = {
-                'backend': _summary(lb_map.get('backend')),
-                'frontend': _summary(lb_map.get('frontend')),
+                'backend': build_service.summarize_build(lb_map.get('backend')),
+                'frontend': build_service.summarize_build(lb_map.get('frontend')),
             }
             item['last_build'] = item['builds']['backend']  # 兼容旧引用
         result.append(item)

@@ -229,6 +229,9 @@ def push_task(agent, build, logs=None):
             build.agent_id = agent.id
             build.started_at = datetime.now()
             db.session.commit()
+            # 广播状态变更（步骤 SSE 感知 running）
+            from modules.cicd.services.build_steps_hub import publish
+            publish(build.build_no)
             if logs is not None:
                 logs.append(f'[成功] Agent 已接受任务，构建进入 running')
             logger.info(f'[Dispatch] 构建#{build.id} 已派发至 {agent.name}')

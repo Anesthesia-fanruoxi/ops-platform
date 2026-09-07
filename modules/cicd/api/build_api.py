@@ -132,7 +132,7 @@ def build_configure_dirs(build_id):
 
 @require_any_permission('page:cicd', 'op:cicd_build')
 def stream_build(build_id):
-    """构建步骤状态快照（读取 build.json），附带 DB 构建总状态"""
+    """构建步骤状态快照（读 Redis），附带 DB 构建总状态"""
     build = Build.query.get(build_id)
     if not build:
         return error_response('构建不存在', 404)
@@ -157,57 +157,47 @@ def _deploy_step_done(steps, build_status):
 @require_any_permission('page:cicd', 'op:cicd_build')
 def stream_build_steps_sse(build_id):
     """
-    SSE 实时推送步骤变化（监听 build.json 文件变更 + DB 状态，跨 worker 安全）
+    SSE 实时推送步骤变化（事件驱动：Redis 步骤状态/DB 构建状态变更处广播唤醒，
+    生成器被唤醒后读 Redis 快照 + DB 总状态推帧，空闲期零查询仅心跳保活）
     GET /api/cicd/builds/<id>/steps/stream?token=
-    首帧推送当前快照，后续仅在步骤/状态变化时推送，构建终态后自动关闭
+    首帧推送当前快照，后续仅在变更时推送，终态（含部署步骤结束）后自动关闭
+    注：hub 为进程内广播，依赖 gunicorn 单 worker 部署；多 worker 需升级 Redis pub/sub
     """
     build = Build.query.get(build_id)
     if not build:
         return error_response('构建不存在', 404)
 
     def generate():
+        import queue
+        from core.db import db
+        from modules.cicd.services import build_steps_hub
         build_no = build.build_no
-        json_path = os.path.join(build_service._build_dir(build_no), 'build.json')
+        sid, events = build_steps_hub.subscribe(build_no)
+        try:
+            # 首帧：推送当前步骤快照
+            steps = build_service.get_build_steps(build_no) or {}
+            snapshot = {
+                'build_id': build_id,
+                'build_status': build.status,
+                'steps': steps.get('steps', []),
+            }
+            if build.status in ('success', 'failed', 'cancelled') and _deploy_step_done(steps, build.status):
+                snapshot['done'] = True
+            yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
+            if snapshot.get('done'):
+                return
 
-        # 首帧：推送当前步骤快照
-        steps = build_service.get_build_steps(build_no) or {}
-        snapshot = {
-            'build_id': build_id,
-            'build_status': build.status,
-            'steps': steps.get('steps', []),
-        }
-        if build.status in ('success', 'failed', 'cancelled') and _deploy_step_done(steps, build.status):
-            snapshot['done'] = True
-        yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
-        if snapshot.get('done'):
-            return
-
-        # 监听文件 mtime + DB 状态，有变化才推帧（服务端 1s 检测，浏览器零轮询）
-        last_mtime = os.path.getmtime(json_path) if os.path.exists(json_path) else 0
-        last_db_status = build.status
-        heartbeat_counter = 0
-
-        while True:
-            time.sleep(1)
-            changed = False
-
-            # build.json 文件变化（Agent 回调写入）
-            cur_mtime = os.path.getmtime(json_path) if os.path.exists(json_path) else 0
-            if cur_mtime != last_mtime:
-                last_mtime = cur_mtime
-                changed = True
-
-            # DB 状态变化（取消 / 终态落库）；expire 后重查，确保读到其他线程提交的最新状态
-            from core.db import db
-            db.session.expire_all()
-            b = Build.query.get(build_id)
-            if not b:
-                break
-            if b.status != last_db_status:
-                last_db_status = b.status
-                changed = True
-
-            if changed:
+            # 事件驱动：变更广播唤醒后读 Redis + DB 推帧（expire 后重查确保读到其他线程提交的最新状态）
+            while True:
+                try:
+                    events.get(timeout=25)
+                except queue.Empty:
+                    yield ': heartbeat\n\n'  # SSE 注释行保活，浏览器自动忽略
+                    continue
+                db.session.expire_all()
+                b = Build.query.get(build_id)
+                if not b:
+                    break
                 steps = build_service.get_build_steps(build_no) or {}
                 evt = {
                     'build_id': build_id,
@@ -219,11 +209,8 @@ def stream_build_steps_sse(build_id):
                 yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
                 if evt.get('done'):
                     break
-            else:
-                heartbeat_counter += 1
-                if heartbeat_counter >= 15:
-                    heartbeat_counter = 0
-                    yield ': heartbeat\n\n'  # SSE 注释行保活，浏览器自动忽略
+        finally:
+            build_steps_hub.unsubscribe(sid)
 
     return Response(
         stream_with_context(generate()),
@@ -550,7 +537,7 @@ def _stream_deploy_log(build, follow):
             deploy_status = next((st.get('status') for st in steps.get('steps', []) if st.get('key') == 'deploy'), None)
             deploy_done = deploy_status in ('success', 'failed', 'skipped', 'waiting')
             deploy_never = deploy_status in (None, 'pending')
-            build_st = steps.get('status')  # build.json 总状态；部署未开始且构建未成功 → 不会触发部署
+            build_st = steps.get('status')  # Redis 步骤总状态；部署未开始且构建未成功 → 不会触发部署
             # 部署终态（含 waiting）且日志无新增 → 结束；构建失败且部署未开始（不会触发部署）→ 直接结束
             if (deploy_done and len(content) <= sent) or (deploy_never and build_st == 'failed'):
                 break
@@ -646,6 +633,37 @@ def env_builds_stream(environment_id):
             # 空闲超阈值自动结束，前端 onerror 已有兜底
             if idle_count >= max_idle:
                 break
+            time.sleep(5)
+
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
+@require_any_permission('page:manage', 'page:cicd', 'op:cicd_build')
+def envs_builds_stream():
+    """
+    全局构建状态 SSE：推送所有存活环境（未删除）每种类型的最新构建摘要，
+    供环境信息页行内「最近构建」实时同步（构建从任意入口触发都能及时反映，无需手动刷新）。
+    GET /api/cicd/builds/envs/stream?token=
+    每 5s 一帧；推送结构按环境 id 分组，与环境列表接口的 builds 字段一致。
+    """
+    from flask import Response, current_app
+    # 生成器懒执行（响应返回后请求上下文已 pop），先捕获 app 对象；
+    # DB 查询收窄到每轮独立短命 app context，结束即归还连接（与环境级 SSE 一致）
+    app_obj = current_app._get_current_object()
+
+    def generate():
+        while True:
+            with app_obj.app_context():
+                last_builds = build_service.get_envs_last_builds(only_alive_envs=True)
+                builds = {}
+                for env_id, lb_map in last_builds.items():
+                    builds[str(env_id)] = {
+                        'backend': build_service.summarize_build(lb_map.get('backend')),
+                        'frontend': build_service.summarize_build(lb_map.get('frontend')),
+                    }
+            payload = json.dumps({'builds': builds}, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
             time.sleep(5)
 
     return Response(generate(), mimetype='text/event-stream',

@@ -83,7 +83,8 @@ from modules.cicd.api.build_api import (
     list_builds, trigger_build, get_build,
     cancel_build, rerun_build, build_code_dirs, build_configure_dirs,
     stream_build, stream_build_steps_sse,
-    proxy_build_log, env_cicd_view, list_branches, list_services, env_builds_stream
+    proxy_build_log, env_cicd_view, list_branches, list_services, env_builds_stream,
+    envs_builds_stream
 )
 
 build_bp.add_url_rule('', 'list_builds', list_builds, methods=['GET'])
@@ -100,6 +101,7 @@ build_bp.add_url_rule('/branches', 'list_branches', list_branches, methods=['GET
 build_bp.add_url_rule('/services', 'list_services', list_services, methods=['GET'])
 build_bp.add_url_rule('/env/<int:environment_id>', 'env_cicd_view', env_cicd_view, methods=['GET'])
 build_bp.add_url_rule('/env/<int:environment_id>/stream', 'env_builds_stream', env_builds_stream, methods=['GET'])
+build_bp.add_url_rule('/envs/stream', 'envs_builds_stream', envs_builds_stream, methods=['GET'])
 
 # ─── Agent 通信（白名单放行，AES-GCM 加密认证）─────────────────
 from modules.cicd.api.agent_comm_api import (

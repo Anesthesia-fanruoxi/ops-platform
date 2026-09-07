@@ -6,7 +6,6 @@ import os
 import re
 import json
 import logging
-import shutil
 import threading
 from datetime import datetime
 
@@ -20,7 +19,7 @@ from modules.cicd.services import agent_service
 # 构建日志目录
 BUILD_LOG_DIR = os.path.join('logs', 'cicd')
 
-# build.json 读改写串行锁（多线程并发读改写会互相覆盖状态，必须原子化）
+# 步骤状态 Redis 读改写串行锁（多线程并发读改写会互相覆盖状态，必须原子化）
 _build_json_lock = threading.RLock()
 
 def get_build_work_subdir(build):
@@ -175,6 +174,9 @@ def cancel_build(build_id):
         build.status = 'cancelled'
         build.finished_at = datetime.now()
         db.session.commit()
+        # 广播取消事件（步骤 SSE 收到后推 done 帧并断开）
+        from modules.cicd.services.build_steps_hub import publish
+        publish(build.build_no)
         from core.redis_client import cache_delete
         cache_delete(f'build:claim:{build.id}')
         # pending 可能处于「已派发持锁、尚未收到首步回调」窗口，比对 owner 释放同环境锁防残留
@@ -192,20 +194,24 @@ def cancel_build(build_id):
         db.session.commit()
         # 主动推送 kill 信号到执行节点，即时终止当前运行的容器/进程（失败则由步骤边界检查兜底）
         if build.agent_id:
-            agent = BuildAgent.query.get(build.agent_id)
-            if agent:
-                from modules.cicd.services.dispatch_service import push_cancel_to_agent
-                # 异步推送：不阻塞取消接口（Agent 响应/超时在后台线程，前端即时返回）。
-                # 线程内加密/解密需读 DB 密钥，必须手动推入 app context，否则报 Working outside of application context
-                from flask import current_app
-                app_obj = current_app._get_current_object()
+            # 异步推送：不阻塞取消接口（Agent 响应/超时在后台线程，前端即时返回）。
+            # 请求线程的 ORM 实例不能跨线程使用：请求结束 session 关闭后实例 detached，
+            # 访问过期属性会抛 DetachedInstanceError（曾致取消推送线程崩溃、成功/失败日志全部丢失）。
+            # 仅传标量 id，线程内推入 app context 重查（加密/解密需读 DB 密钥）。
+            from flask import current_app
+            from modules.cicd.services.dispatch_service import push_cancel_to_agent
+            app_obj = current_app._get_current_object()
+            agent_id, build_id = build.agent_id, build.id
 
-                def _push_cancel():
-                    with app_obj.app_context():
-                        push_cancel_to_agent(agent, build)
+            def _push_cancel():
+                with app_obj.app_context():
+                    ag = BuildAgent.query.get(agent_id)
+                    bd = Build.query.get(build_id)
+                    if ag and bd:
+                        push_cancel_to_agent(ag, bd)
 
-                import threading
-                threading.Thread(target=_push_cancel, daemon=True).start()
+            import threading
+            threading.Thread(target=_push_cancel, daemon=True).start()
         return True, '已发送取消请求（等待 Agent 响应）'
     return False, f'当前状态 {build.status} 不可取消'
 
@@ -270,10 +276,10 @@ def rerun_build(build_id, start_step):
     if not build.agent_id:
         return None, '该构建未在节点上执行过，无法重跑，请重新触发构建'
 
-    # 校验并重置 build.json 步骤状态
+    # 校验并重置 Redis 步骤状态
     data = get_build_steps(build.build_no)
     if not data or not data.get('steps'):
-        return None, '步骤状态文件不存在，无法重跑'
+        return None, '步骤状态不存在（可能已过期清理），无法重跑'
     steps = data['steps']
     total = len(steps)
     try:
@@ -298,7 +304,7 @@ def rerun_build(build_id, start_step):
             s['error'] = ''
             s['action'] = ''
     data['status'] = 'pending'
-    _write_build_json(_build_dir(build.build_no), data)
+    _write_build_steps(build.build_no, data)
 
     # 记录重跑起点，供 assemble_task 下发给 Agent
     snapshot = build.get_steps_snapshot()
@@ -384,7 +390,8 @@ def complete_build(build_id, status, image_digest='', error=''):
 
 def cleanup_old_build_records(environment_id, keep):
     """与 Agent 目录保留策略同步：每个环境仅保留最近 keep 条构建记录。
-    超出且为终态的记录，同步删除其步骤状态目录、日志文件、关联调度日志与 DB 记录。"""
+    超出且为终态的记录，同步删除其日志文件、关联调度日志与 DB 记录
+    （步骤状态在 Redis 由 TTL 自动过期，无需清理）。"""
     if not environment_id:
         return
     try:
@@ -408,7 +415,6 @@ def cleanup_old_build_records(environment_id, keep):
             {'build_id': None}, synchronize_session=False)
         removed = 0
         for old in doomed:
-            shutil.rmtree(_build_dir(old.build_no), ignore_errors=True)
             try:
                 if old.log_file and os.path.exists(old.log_file):
                     os.remove(old.log_file)
@@ -436,16 +442,77 @@ def get_env_builds(environment_id, limit=20):
         environment_id=environment_id
     ).order_by(Build.created_at.desc()).limit(limit).all()
 
-# ─── 步骤状态文件管理 ─────────────────────────────────────
 
-def _build_dir(build_no):
-    """获取构建目录"""
-    return os.path.join(BUILD_LOG_DIR, build_no)
+def get_envs_last_builds(env_ids=None, only_alive_envs=False):
+    """批量获取每个环境、每种类型（backend/frontend）的最新构建记录。
+
+    环境列表接口与全局构建状态 SSE 共用，避免两处重复维护子查询。
+    env_ids 传则过滤环境；only_alive_envs 为 True 时联表剔除已删除环境。
+    返回 {environment_id: {project_type: Build}}
+    """
+    from sqlalchemy import func
+    q = db.session.query(
+        Build.environment_id,
+        Build.project_type,
+        func.max(Build.created_at).label('max_at')
+    )
+    if env_ids:
+        q = q.filter(Build.environment_id.in_(env_ids))
+    subq = q.group_by(Build.environment_id, Build.project_type).subquery()
+
+    rows = db.session.query(Build).join(
+        subq,
+        (Build.environment_id == subq.c.environment_id) &
+        (Build.project_type == subq.c.project_type) &
+        (Build.created_at == subq.c.max_at)
+    )
+    if only_alive_envs:
+        from modules.deploy.models import Environment
+        rows = rows.join(Environment, Build.environment_id == Environment.id).filter(
+            (Environment.is_deleted == False) | (Environment.is_deleted == None))
+    result = {}
+    for b in rows.all():
+        result.setdefault(b.environment_id, {})[b.project_type or 'backend'] = b
+    return result
+
+
+def summarize_build(b):
+    """构建记录摘要（行内展示用字段；环境列表/项目级构建状态 SSE 共用）"""
+    if not b:
+        return None
+    return {
+        'id': b.id,
+        'build_no': b.build_no,
+        'status': b.status,
+        'branch': b.branch,
+        'triggered_by': b.triggered_by,
+        'created_at': b.created_at.strftime('%Y-%m-%d %H:%M:%S') if b.created_at else None,
+    }
+
+# ─── 步骤状态管理（Redis 存储，事件驱动推送） ───────────────
+
+# 步骤状态 TTL 30 天（与构建记录保留期同量级；过期后历史构建仅展示 DB 总状态）
+_STEPS_TTL = 30 * 24 * 3600
+
+
+def _write_build_steps(build_no, data):
+    """步骤状态写入 Redis 并广播变更事件；Redis 不可用时记日志静默降级（构建流程不受影响）"""
+    from core.redis_client import cache_set_json
+    from modules.cicd.services.build_steps_hub import publish
+    ok = cache_set_json(f'build:steps:{build_no}', data, ttl=_STEPS_TTL)
+    if not ok:
+        logger.warning('[build] 步骤状态写入 Redis 失败（build_no=%s），实时步骤展示降级', build_no)
+    publish(build_no)
+
+
+def _read_build_steps(build_no):
+    """读取 Redis 步骤状态；不存在/Redis 不可用返回 None"""
+    from core.redis_client import cache_get_json
+    return cache_get_json(f'build:steps:{build_no}')
+
 
 def init_build_steps(build_no, project_type='backend'):
-    """初始化 build.json，所有步骤状态为 pending"""
-    bdir = _build_dir(build_no)
-    os.makedirs(bdir, exist_ok=True)
+    """初始化步骤状态（Redis），所有步骤为 pending"""
     steps_def = get_build_steps_def(project_type)
     steps = []
     for s in steps_def:
@@ -461,7 +528,7 @@ def init_build_steps(build_no, project_type='backend'):
             'action': '',
         })
     data = {'build_no': build_no, 'status': 'pending', 'project_type': project_type, 'steps': steps}
-    _write_build_json(bdir, data)
+    _write_build_steps(build_no, data)
     return data
 
 def _parse_step_time(s):
@@ -482,8 +549,7 @@ def _parse_step_time(s):
 def update_step_status(build_no, step_no, status, error=''):
     """更新指定步骤状态，并同步 build 总状态"""
     with _build_json_lock:
-        bdir = _build_dir(build_no)
-        data = _read_build_json(bdir)
+        data = _read_build_steps(build_no)
         if not data:
             data = init_build_steps(build_no)
 
@@ -524,22 +590,20 @@ def update_step_status(build_no, step_no, status, error=''):
         else:
             data['status'] = 'pending'
 
-        _write_build_json(bdir, data)
+        _write_build_steps(build_no, data)
         return data
 
 def get_build_steps(build_no):
-    """读取 build.json 步骤状态"""
-    bdir = _build_dir(build_no)
-    return _read_build_json(bdir)
+    """读取步骤状态（Redis）"""
+    return _read_build_steps(build_no)
 
 def update_deploy_step(build_no, status, error='', action=''):
-    """更新 build.json 中「部署」步骤（key='deploy'）的状态。
+    """更新「部署」步骤（key='deploy'）的状态（Redis）。
     由 Master 自动部署调用（Agent 不感知此步）；不重算 build 总状态，
     展示以 DB build.status 为准（部署失败不影响构建终态）。
     status=waiting：后端未配置服务目录，等待平台勾选回填后重新构建。"""
-    bdir = _build_dir(build_no)
     with _build_json_lock:
-        data = _read_build_json(bdir)
+        data = _read_build_steps(build_no)
         if not data or not data.get('steps'):
             return
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
@@ -560,15 +624,14 @@ def update_deploy_step(build_no, status, error='', action=''):
                 if st:
                     step['duration'] = round((datetime.now() - st).total_seconds(), 1)
             break
-        _write_build_json(bdir, data)
+        _write_build_steps(build_no, data)
 
 
 def fill_skipped_steps(build_no):
     """构建终态后补齐未回调步骤（Agent 跳过的步骤无回调），避免步骤永久 pending。
     跳过部署步骤：部署由 Master 自动部署推进（Agent 不回调），不能补成 skipped。"""
-    bdir = _build_dir(build_no)
     with _build_json_lock:
-        data = _read_build_json(bdir)
+        data = _read_build_steps(build_no)
         if not data or not data.get('steps'):
             return
         changed = False
@@ -582,18 +645,4 @@ def fill_skipped_steps(build_no):
                 step['error'] = step.get('error') or ''
                 changed = True
         if changed:
-            _write_build_json(bdir, data)
-
-def _write_build_json(bdir, data):
-    path = os.path.join(bdir, 'build.json')
-    with _build_json_lock:
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-def _read_build_json(bdir):
-    path = os.path.join(bdir, 'build.json')
-    if not os.path.exists(path):
-        return None
-    with _build_json_lock:
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            _write_build_steps(build_no, data)
