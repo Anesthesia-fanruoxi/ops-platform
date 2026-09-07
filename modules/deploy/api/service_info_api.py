@@ -136,9 +136,12 @@ def list_services():
     ns = f'{project}-{env}-service'
     k8s_error = ''
     services = []
+    # 环境级 Nacos 判定：middleware 生成目录无 nacos NodePort Service 则该环境未部署 Nacos
+    from modules.deploy.services.nacos_http_client import env_has_nacos as _env_has_nacos
+    env_nacos = _env_has_nacos(project, env)
     try:
         from modules.deploy.services.kube_client import build_service_snapshot
-        services = build_service_snapshot(ns)
+        services = build_service_snapshot(ns, env_nacos=env_nacos)
     except Exception as e:
         k8s_error = str(e)
         # 回退：deployment YAML 文件（镜像/端口/envs）+ Pod 状态留空
@@ -147,8 +150,77 @@ def list_services():
             services = _parse_deployments(base)
             for svc in services:
                 svc['pods'] = []
+                # 回退路径无 K8s 无法做服务级判断，仅按环境级 middleware 判定
+                svc['show_nacos'] = env_nacos
 
-    return success_response({'list': services, 'k8s_error': k8s_error})
+    return success_response({'list': services, 'k8s_error': k8s_error, 'env_has_nacos': env_nacos})
+
+
+# ─── 服务配置文件（K8s ConfigMap 只读）───────
+
+@require_permission('page:service_info')
+def service_configmap():
+    """读取服务对应 ConfigMap（{服务名}-config）内容（只读）。
+    用于环境未部署 Nacos 的服务：配置文件以 ConfigMap 形式挂在集群中，直接读取展示"""
+    project = request.args.get('project', '')
+    env = request.args.get('env', '')
+    service = request.args.get('service', '')
+    if not project or not env or not service:
+        return error_response('缺少参数 project / env / service', 400)
+    namespace = f'{project}-{env}-service'
+    from modules.deploy.services.kube_client import read_configmap
+    try:
+        data = read_configmap(namespace, f'{service}-config')
+    except Exception as e:
+        return error_response(str(e), 502)
+    if data is None:
+        return error_response(f'未找到服务 {service} 的配置文件（ConfigMap {service}-config 不存在）', 404)
+    return success_response({'name': f'{service}-config', 'data': data})
+
+
+@require_permission('op:nacos_config_update')
+def update_service_configmap():
+    """编辑保存服务 ConfigMap（{服务名}-config）。
+    单 key 直接整份写回；多 key 内容按「# ═══ key ═══」分段标记拆分还原后 merge patch 写回"""
+    body = request.get_json(force=True, silent=True) or {}
+    project = body.get('project', '')
+    env = body.get('env', '')
+    service = body.get('service', '')
+    content = body.get('content')
+    keys = body.get('keys') or []
+    if not project or not env or not service or content is None:
+        return error_response('缺少参数 project / env / service / content', 400)
+    keys = [k for k in keys if k]
+    if not keys:
+        return error_response('无法确定写入的 key，请重新打开配置后编辑', 400)
+    name = f'{service}-config'
+    namespace = f'{project}-{env}-service'
+    if len(keys) > 1:
+        # 多 key：按「# ═══ key ═══」分段标记拆分还原
+        MARK = '# ═══ '
+        result, cur = {}, None
+        for line in content.split('\n'):
+            if line.startswith(MARK) and line.endswith(' ═══'):
+                cur = line[len(MARK):-4].strip()
+                if not cur:
+                    return error_response('分段标记缺少 key 名，请保留「# ═══ key ═══」结构', 400)
+                result.setdefault(cur, '')
+            elif cur is not None:
+                result[cur] += (('\n' if result[cur] else '') + line)
+            elif line.strip():
+                return error_response('多 key 配置必须保留「# ═══ key ═══」分段标记，请勿删除', 400)
+        missing = [k for k in keys if k not in result]
+        if missing:
+            return error_response('缺少分段标记的 key：' + '、'.join(missing), 400)
+        payload = result
+    else:
+        payload = {keys[0]: content}
+    from modules.deploy.services.kube_client import update_configmap
+    try:
+        update_configmap(namespace, name, payload)
+    except Exception as e:
+        return error_response(str(e), 502)
+    return success_response({'name': name})
 
 
 # ─── Pod 日志 SSE 流 ──────────────────────────────────────

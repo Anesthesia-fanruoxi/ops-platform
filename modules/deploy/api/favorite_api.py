@@ -16,9 +16,9 @@ from modules.deploy.models import Project, Environment, DeployEnvFavorite
 
 @require_permission('page:service_info')
 def list_favorites():
-    """当前用户的全部环境收藏"""
+    """当前用户的全部环境收藏（按自定义排序号，其次创建时间）"""
     items = DeployEnvFavorite.query.filter_by(user_id=g.current_user.id) \
-        .order_by(DeployEnvFavorite.created_at.asc()).all()
+        .order_by(DeployEnvFavorite.sort_no.asc(), DeployEnvFavorite.created_at.asc()).all()
     return success_response([f.to_dict() for f in items])
 
 
@@ -42,12 +42,16 @@ def add_favorite():
         return success_response(existing.to_dict(), '已收藏')
 
     try:
+        # 排序号接在当前用户已有收藏之后，新增项排在末尾
+        max_row = DeployEnvFavorite.query.filter_by(user_id=g.current_user.id) \
+            .order_by(DeployEnvFavorite.sort_no.desc()).first()
         fav = DeployEnvFavorite(
             user_id=g.current_user.id,
             project_id=project.id,
             project_name=project.name,
             env_id=env.id,
             env_name=env.name,
+            sort_no=(max_row.sort_no or 0) + 1 if max_row else 1,
         )
         db.session.add(fav)
         db.session.commit()
@@ -55,6 +59,26 @@ def add_favorite():
         db.session.rollback()
         return error_response(f'收藏保存失败: {str(e)}', 500)
     return success_response(fav.to_dict(), '已收藏')
+
+
+@require_permission('page:service_info')
+def sort_favorites():
+    """拖拽自定义排序持久化：body {order: [id,...]}，按数组顺序写 sort_no=0..n（仅限本人收藏）"""
+    data = request.get_json(force=True, silent=True) or {}
+    order = data.get('order') or []
+    if not order:
+        return error_response('缺少 order 列表', 400)
+    items = DeployEnvFavorite.query.filter_by(user_id=g.current_user.id).all()
+    by_id = {f.id: f for f in items}
+    try:
+        for idx, fid in enumerate(order):
+            if fid in by_id:
+                by_id[fid].sort_no = idx
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'排序保存失败: {str(e)}', 500)
+    return success_response({'count': len(order)})
 
 
 @require_permission('page:service_info')

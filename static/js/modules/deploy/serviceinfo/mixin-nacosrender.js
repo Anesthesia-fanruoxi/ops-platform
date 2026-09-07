@@ -261,6 +261,7 @@ const SvcMixinNacosRender = {
       if (src === 'edit' && this.$refs.cfgCanvas) {
         this.$refs.cfgCanvas.style.transform = 'translate(' + (-el.scrollLeft) + 'px,' + (-el.scrollTop) + 'px)';
       }
+      if (this.syncMinimap) this.syncMinimap();   // minimap 跟随主区滚动（mixin-nacosminimap）
     },
 
     // 内容框右上角复制：复制完整配置内容

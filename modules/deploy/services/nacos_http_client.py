@@ -52,6 +52,15 @@ def resolve_nacos_endpoint(project, env):
     return f'http://{master_ip}:{node_port}/nacos', tenant
 
 
+def env_has_nacos(project, env):
+    """环境是否部署了 Nacos：middleware 生成目录存在 nacos NodePort Service 即视为已部署。
+    纯读磁盘零成本，作为服务卡片 Nacos 入口可见性的环境级判定；异常时保守返回 False"""
+    try:
+        return bool(_find_nacos_node_port(project, env))
+    except Exception:
+        return False
+
+
 def _find_nacos_node_port(project, env):
     """从本地生成目录 {output_dir}/{project-env}/middleware 解析 nacos NodePort"""
     from modules.deploy.api.shared import get_output_dir

@@ -80,6 +80,7 @@ class DeployEnvFavorite(db.Model):
     project_name = db.Column(db.String(50), default='')
     env_id = db.Column(db.Integer, nullable=False)
     env_name = db.Column(db.String(50), default='')
+    sort_no = db.Column(db.Integer, nullable=False, default=0, index=True)  # 拖拽自定义排序号（小在前）
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -93,5 +94,6 @@ class DeployEnvFavorite(db.Model):
             'project_name': self.project_name,
             'env_id': self.env_id,
             'env_name': self.env_name,
+            'sort_no': self.sort_no or 0,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
         }

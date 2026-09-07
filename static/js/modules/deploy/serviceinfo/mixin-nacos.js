@@ -15,6 +15,7 @@ const SvcMixinNacos = {
       configNotFound: false,
       configIsNew: false,
       configOriginal: '',
+      configMapKeys: [],   // ConfigMap 模式的原 key 列表（编辑保存时还原多 key 结构）
       publishing: false,
     };
   },
@@ -117,6 +118,56 @@ const SvcMixinNacos = {
         }
       });
     },
+    // 环境无 Nacos 时读 K8s ConfigMap（{服务名}-config）只读展示（多 key 时按 key 分段）
+    openConfigMapFile(svc) {
+      this.configRow = { dataId: (svc.name || '') + '-config', group: '', configmap: true, service: svc.name };
+      this.configContent = '';
+      this.configEditMode = false;
+      this.configSearch = '';
+      this.configSearchInput = '';
+      this.cfgSearchIdx = -1;
+      this.matchCount = 0;
+      this.configFullscreen = false;
+      this.configOriginal = '';
+      this.configNotFound = false;
+      this.configIsNew = false;
+      this.diffVisible = false;
+      this.diffRows = [];
+      this.diffStats = { added: 0, removed: 0, modified: 0 };
+      this.configMapKeys = [];
+      this.configEditorVisible = true;
+      this.loadConfigMapContent();
+    },
+    loadConfigMapContent() {
+      if (!this.configRow) return;
+      this.configLoading = true;
+      const url = '/api/deploy/service-info/configmap?project=' + encodeURIComponent(this.selectedProject)
+        + '&env=' + encodeURIComponent(this.selectedEnv)
+        + '&service=' + encodeURIComponent(this.configRow.service);
+      ajax('GET', url, null, (r) => {
+        this.configLoading = false;
+        if (r.code === 200) {
+          const data = (r.data || {}).data || {};
+          const keys = Object.keys(data);
+          this.configMapKeys = keys;   // 记录原 key 列表，编辑保存时还原多 key 结构
+          let content = '';
+          keys.forEach((k, i) => {
+            if (i > 0) content += '\n\n';
+            if (keys.length > 1) content += '# ═══ ' + k + ' ═══\n';
+            content += data[k] || '';
+          });
+          this.configContent = content;
+          this.configOriginal = content;
+          this.configNotFound = !content;
+        } else if (r.code === 404) {
+          this.configContent = '';
+          this.configOriginal = '';
+          this.configNotFound = true;
+        } else {
+          ElementPlus.ElMessage.error(r.msg || '读取配置文件失败');
+        }
+      });
+    },
     onConfigDialogClose() {
       this.configEditMode = false;
       this.configSearch = '';
@@ -167,6 +218,27 @@ const SvcMixinNacos = {
     },
     doPublish() {
       this.publishing = true;
+      // ConfigMap 模式：保存回写 K8s（复用 diff 确认流程，仅提交目标不同）
+      if (this.configRow && this.configRow.configmap) {
+        ajax('PUT', '/api/deploy/service-info/configmap', {
+          project: this.selectedProject,
+          env: this.selectedEnv,
+          service: this.configRow.service,
+          content: this.configContent,
+          keys: this.configMapKeys || [],
+        }, (r) => {
+          this.publishing = false;
+          if (r.code === 200) {
+            ElementPlus.ElMessage.success('配置文件已保存。挂载卷引用约 1 分钟自动同步；环境变量引用需重启服务生效');
+            this.diffVisible = false;
+            this.configOriginal = this.configContent;
+            this.configEditMode = false;
+          } else {
+            ElementPlus.ElMessage.error(r.msg || '保存失败');
+          }
+        });
+        return;
+      }
       ajax('POST', '/api/deploy/service-info/nacos/config', {
         project: this.selectedProject,
         env: this.selectedEnv,

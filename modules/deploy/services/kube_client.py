@@ -159,6 +159,8 @@ def list_deployments(namespace):
             'name': d.metadata.name,
             'image': (main or {}).get('image', ''),
             'replicas': getattr(spec, 'replicas', None) or 1,
+            # 实际就绪副本数（与 kubectl get deploy 的 READY 列一致；滚动更新期间可能短暂 > 期望值）
+            'ready_replicas': getattr(d.status, 'ready_replicas', None) or 0,
             'containers': containers,
             'envs': (main or {}).get('env', []) if main else [],
         })
@@ -256,15 +258,58 @@ def watch_pods(namespace, timeout_seconds=30):
                   namespace, timeout_seconds, _pod_summary)
 
 
-def build_service_snapshot(namespace):
+def list_configmap_names(namespace):
+    """实时读取 namespace 下所有 ConfigMap 名字集合（服务是否接入 Nacos 的判断依据）"""
+    core = _build_core_api()
+    try:
+        cms = core.list_namespaced_config_map(namespace=namespace)
+    except Exception as e:
+        raise KubeNotConfigured(f'读取 ConfigMap 失败: {e}')
+    return {cm.metadata.name for cm in cms.items}
+
+
+def read_configmap(namespace, name):
+    """读取单个 ConfigMap 的 data（{key: 内容}）；不存在返回 None，K8s 异常抛 KubeNotConfigured"""
+    from kubernetes import client as k8s_client
+    core = _build_core_api()
+    try:
+        cm = core.read_namespaced_config_map(name=name, namespace=namespace)
+    except k8s_client.rest.ApiException as e:
+        if getattr(e, 'status', None) == 404:
+            return None
+        raise KubeNotConfigured(f'读取 ConfigMap「{name}」失败: {_api_err_detail(e)}')
+    except Exception as e:
+        raise KubeNotConfigured(f'读取 ConfigMap「{name}」失败: {e}')
+    return dict(cm.data or {})
+
+
+def update_configmap(namespace, name, data):
+    """merge patch 更新单个 ConfigMap 的 data（不触碰 metadata/labels 等其他字段）
+    data: {key: 内容}；不存在时 404 抛 KubeNotConfigured"""
+    from kubernetes import client as k8s_client
+    core = _build_core_api()
+    try:
+        core.patch_namespaced_config_map(name=name, namespace=namespace, body={'data': data})
+    except k8s_client.rest.ApiException as e:
+        if getattr(e, 'status', None) == 404:
+            raise KubeNotConfigured(f'ConfigMap「{name}」不存在')
+        raise KubeNotConfigured(f'保存 ConfigMap「{name}」失败: {_api_err_detail(e)}')
+    except Exception as e:
+        raise KubeNotConfigured(f'保存 ConfigMap「{name}」失败: {e}')
+
+
+def build_service_snapshot(namespace, env_nacos=None):
     """构建服务卡片快照（Deployment × Service 端口 × Pod 状态/实际镜像）
 
     镜像取 Pod 实际运行镜像（container_statuses[].image，按出现顺序去重；
     无 Pod 时回退 Deployment spec 镜像）；Pod 按 app 标签归属服务。
     K8s 异常统一抛 KubeNotConfigured，由调用方回退。
+    env_nacos：环境级 Nacos 判定（middleware 目录），True/False 时与环境级合并；
+    None 时仅保留服务级结果（兼容未感知环境的调用方）。
     """
     deps = list_deployments(namespace)
     k8s_svcs = {s['name']: s['ports'] for s in list_k8s_services(namespace)}
+    cm_names = list_configmap_names(namespace)
     pods_map = {}
     for pod in list_pods(namespace):
         key = pod.get('app') or ''
@@ -296,15 +341,23 @@ def build_service_snapshot(namespace):
         version_created_at = ''
         if pods:
             version_created_at = max((p.get('createdAt') or '') for p in pods) or ''
+        svc_has_cm = f'{name}-config' in cm_names
+        # Nacos 入口由环境级判定决定（middleware 有 nacos 则全环境可见）；
+        # has_configmap 仅用于无 Nacos 环境的「配置文件」入口，不参与 Nacos 按钮判断
+        show_nacos = (env_nacos is not False)
         services.append({
             'name': name,
             'image': pod_images[0] if pod_images else d['image'],
             'images': pod_images,  # 去重后的实际运行镜像集合（滚动更新期间多镜像并存）
             'replicas': d['replicas'],
+            'ready_replicas': d['ready_replicas'],
             'ports': ports,
             'namespace': namespace,
             'pods': pods,
             'version_created_at': version_created_at,
+            # Nacos 配置入口可见性：环境级（middleware）× 服务级（{服务名}-config ConfigMap）
+            'show_nacos': show_nacos,
+            'has_configmap': svc_has_cm,
             # 设计决策：envs 不随列表/SSE 携带，弹窗时走 /service-info/envs 实时读 K8s
         })
     return services

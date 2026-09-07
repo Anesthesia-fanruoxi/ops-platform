@@ -43,8 +43,12 @@ def service_info_stream():
         with app_obj.app_context():
             # 全量快照先行（前端首屏直接可用）
             try:
-                services = kube_client.build_service_snapshot(namespace)
-                yield _sse({'type': 'snapshot', 'services': services})
+                # 环境级 Nacos 判定：middleware 目录无 nacos 则该环境未部署 Nacos，全部服务隐藏入口
+                from modules.deploy.services.nacos_http_client import env_has_nacos
+                env_nacos = env_has_nacos(project, env)
+                services = kube_client.build_service_snapshot(namespace, env_nacos=env_nacos)
+                yield _sse({'type': 'snapshot', 'services': services,
+                            'env_has_nacos': env_nacos})
             except Exception as e:
                 yield _sse({'type': 'error', 'error': str(e)})
                 return

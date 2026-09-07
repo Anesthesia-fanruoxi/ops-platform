@@ -12,32 +12,49 @@ window.SvcTemplate = `
     </div>
     <div class="serviceinfo-favlist" v-if="!favCollapsed">
       <div v-if="!favorites.length" class="serviceinfo-favempty">暂无收藏，选好环境后点「收藏此环境」</div>
-      <div v-for="f in favorites" :key="f.id" class="serviceinfo-favcard"
-           :class="{ 'is-active': f.project_name === selectedProject && f.env_name === selectedEnv }"
-           @click="selectFavorite(f)">
-        <div class="serviceinfo-favmain">
-          <div class="serviceinfo-favproj">[[ f.project_name ]]</div>
-          <div class="serviceinfo-favenv"><span class="serviceinfo-favdot">●</span> [[ f.env_name ]]</div>
+      <!-- 按项目自动父归纳：组头仅展示+整组拖拽（不响应跳转）；子项完整显示项目-环境，可组内/跨组拖拽 -->
+      <div v-for="g in favGroups" :key="g.project" class="serviceinfo-favgroup"
+           @dragover.prevent @drop.prevent="onFavGroupItemDrop(g)">
+        <div class="serviceinfo-favgroup-head" draggable="true"
+             :class="{ 'svc-fav-dragging': favDrag && favDrag.type === 'group' && favDrag.project === g.project }"
+             @dragstart="onFavGroupDragStart(g, $event)" @dragover.prevent.stop
+             @drop.prevent.stop="onFavGroupDrop(g)" @dragend="favDrag = null">
+          <span class="serviceinfo-favgroup-icon">▾</span>
+          <span class="serviceinfo-favgroup-name">[[ g.project ]]</span>
+          <span class="serviceinfo-favgroup-cnt">[[ g.items.length ]]</span>
         </div>
-        <el-button link size="small" class="serviceinfo-favdel" @click.stop="removeFavorite(f.id)">✕</el-button>
+        <div class="serviceinfo-favgroup-items" @dragover.prevent @drop.prevent="onFavGroupItemDrop(g)">
+          <div v-for="f in g.items" :key="f.id" class="serviceinfo-favcard"
+               :class="{ 'is-active': f.project_name === selectedProject && f.env_name === selectedEnv, 'svc-fav-dragging': favDrag && favDrag.type === 'item' && favDrag.id === f.id }"
+               draggable="true"
+               @dragstart="onFavDragStart(f, $event)" @dragover.prevent.stop
+               @drop.prevent.stop="onFavDrop(f)" @dragend="favDrag = null"
+               @click="selectFavorite(f)">
+            <div class="serviceinfo-favmain">
+              <div class="serviceinfo-favproj">[[ f.project_name ]]</div>
+              <div class="serviceinfo-favenv"><span class="serviceinfo-favdot">●</span> [[ f.env_name ]]</div>
+            </div>
+            <el-button link size="small" class="serviceinfo-favdel" @click.stop="removeFavorite(f.id)">✕</el-button>
+          </div>
+        </div>
       </div>
     </div>
   </aside>
   <div class="serviceinfo-main">
   <div class="toolbar" style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-    <el-select v-model="selectedProject" placeholder="选择项目" size="default" style="width:180px;"
+    <el-select v-model="selectedProject" placeholder="选择项目" size="small" style="width:180px;"
                @change="onProjectChange" filterable>
       <el-option v-for="p in projects" :key="p" :label="p" :value="p"></el-option>
     </el-select>
-    <el-select v-model="selectedEnv" placeholder="选择环境" size="default" style="width:160px;"
+    <el-select v-model="selectedEnv" placeholder="选择环境" size="small" style="width:160px;"
                @change="loadServices" :disabled="!selectedProject" filterable>
       <el-option v-for="e in envs" :key="e" :label="e" :value="e"></el-option>
     </el-select>
     <!-- SSE 实时推送无需手动刷新；仅当 SSE 回退/K8s 不可用（k8sError）时提供「重新连接」入口 -->
-    <el-button v-if="k8sError" type="warning" plain @click="loadServices">重新连接</el-button>
+    <el-button v-if="k8sError" type="warning" plain size="small" @click="loadServices">重新连接</el-button>
     <!-- 未选择环境时不显示（避免不可用按钮占位） -->
-    <el-button v-if="selectedProject && selectedEnv" type="primary" plain @click="openGlobalNacos">全局 Nacos 配置</el-button>
-    <el-button v-if="selectedProject && selectedEnv && canDeploy" type="success" plain
+    <el-button v-if="selectedProject && selectedEnv && envHasNacos !== false" type="primary" plain size="small" @click="openGlobalNacos">全局 Nacos 配置</el-button>
+    <el-button v-if="selectedProject && selectedEnv && canDeploy" type="success" plain size="small"
                @click="openDeploy">🚀 快捷部署</el-button>
     <el-button v-if="selectedProject && selectedEnv && canDeploy" type="danger" plain size="small"
                :loading="restartingAll" @click="restartAllServices">⟳ 重启全部服务</el-button>
@@ -211,7 +228,7 @@ window.SvcTemplate = `
     <div v-for="svc in services" :key="svc.name" class="svc-card">
       <div class="svc-card-head">
         <span class="svc-card-name" :title="svc.name">[[ svc.name ]]</span>
-        <span class="svc-card-replicas" title="副本数">×[[ svc.replicas ]]</span>
+        <span class="svc-card-replicas" :title="'就绪/期望副本数'">[[ svc.ready_replicas != null ? svc.ready_replicas + '/' + svc.replicas : '×' + svc.replicas ]]</span>
         <span class="svc-card-dot" :class="svcCardDotClass(svc)" :title="svcCardDotTitle(svc)"></span>
       </div>
       <div class="svc-card-row">
@@ -248,7 +265,8 @@ window.SvcTemplate = `
       <div class="svc-card-actions">
         <el-button link type="primary" size="small" @click="openLog(svc)">日志</el-button>
         <el-button link type="primary" size="small" @click="openLogFiles(svc)">日志目录</el-button>
-        <el-button link type="primary" size="small" @click="openNacos(svc)">Nacos配置</el-button>
+                <el-button v-if="svc.show_nacos" link type="primary" size="small" @click="openNacos(svc)">Nacos配置</el-button>
+                <el-button v-else-if="svc.has_configmap" link type="primary" size="small" @click="openConfigMapFile(svc)">配置文件</el-button>
         <el-button link type="primary" size="small" @click="openEnv(svc)">环境变量</el-button>
         <el-button link type="warning" size="small" :loading="restarting[svc.name]" @click="restartService(svc)">重启</el-button>
       </div>
@@ -373,7 +391,7 @@ window.SvcTemplate = `
              :fullscreen="configFullscreen">
     <template #header>
       <div class="svc-config-header">
-        <span class="svc-config-title">Nacos 配置 - [[ configRow ? configRow.dataId : '' ]]</span>
+        <span class="svc-config-title">[[ configRow ? (configRow.configmap ? '配置文件 - ' : 'Nacos 配置 - ') + configRow.dataId : '' ]]</span>
         <span class="svc-config-count" v-if="!configNotFound">共 [[ cfgLineCount ]] 行</span>
         <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
           <el-input v-if="!configEditMode && !configNotFound" ref="configSearchInput" v-model="configSearchInput" size="small" clearable
@@ -396,15 +414,15 @@ window.SvcTemplate = `
       </div>
     </template>
     <div v-loading="configLoading">
-      <!-- 配置不存在：引导新增（dataId 自动生成 {服务名}.yaml） -->
+      <!-- 配置不存在：Nacos 模式引导新增；ConfigMap 只读模式仅提示不存在 -->
       <div v-if="configNotFound && !configEditMode" class="svc-cfg-empty">
         <div style="font-size:14px;color:#909399;margin-bottom:8px">
-          配置 <b style="color:#606266">[[ configRow ? configRow.dataId : '' ]]</b> 在当前 namespace 中不存在
+          [[ configRow && configRow.configmap ? '未找到服务对应的配置文件（' + configRow.dataId + '）' : '配置 ' + (configRow ? configRow.dataId : '') + ' 在当前 namespace 中不存在' ]]
         </div>
-        <div style="font-size:12px;color:#c0c4cc;margin-bottom:18px">
+        <div style="font-size:12px;color:#c0c4cc;margin-bottom:18px" v-if="!(configRow && configRow.configmap)">
           是否新增该配置？dataId 已按「服务名.yaml」自动生成，内容为 yaml 格式
         </div>
-        <el-button v-if="canUpdateNacos" type="primary" size="small" @click="createNewConfig">新增配置</el-button>
+        <el-button v-if="canUpdateNacos && !(configRow && configRow.configmap)" type="primary" size="small" @click="createNewConfig">新增配置</el-button>
       </div>
       <!-- 内容区：右上角复制按钮 + 查看/编辑层 -->
       <div class="svc-cfg-content">
@@ -423,6 +441,17 @@ window.SvcTemplate = `
             <textarea ref="configTextarea" :value="configContent" @input="configContent = $event.target.value"
                       @keydown="onConfigAreaKeydown" @scroll="syncCfgGutter('edit')" class="svc-editor-textarea" spellcheck="false"></textarea>
           </div>
+          <!-- 右侧 Minimap 缩略图：整份内容等比缩小 + 当前视口框；点击/按住拖动跳转主区 -->
+          <div v-if="!configNotFound && configContent" class="svc-cfg-minimap" ref="cfgMinimap"
+               @mousedown.prevent="onMinimapDown">
+            <pre class="svc-cfg-minimap-pre" ref="minimapPre"
+                 :style="{ transform: 'scale(' + svcMiniScale + ') translateY(' + miniShiftScaled + 'px)' }">[[ configContent ]]</pre>
+            <div class="svc-cfg-minimap-view" ref="minimapView" :style="{ top: miniViewTop + 'px', height: miniViewH + 'px' }"></div>
+          </div>
+          <!-- 自绘竖向滚动条：贴缩略图外侧（最右缘），thumb 拖动/轨道点击控制主区滚动 -->
+          <div v-if="!configNotFound && configContent" class="svc-cfg-scrollbar" ref="cfgScrollbar" @mousedown.prevent="onSbDown">
+            <div class="svc-cfg-scrollbar-thumb" ref="cfgScrollbarThumb" :style="{ top: miniSbTop + 'px', height: miniSbH + 'px' }"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -430,9 +459,10 @@ window.SvcTemplate = `
 
   <!-- 发布对比弹框（参考 Nginx 配置保存对比） -->
   <el-dialog v-model="diffVisible" width="85%" top="3vh" :close-on-click-modal="false" :close-on-press-escape="false"
-             title="⚠️ 确认发布 Nacos 配置" append-to-body>
+             :title="configRow && configRow.configmap ? '⚠️ 确认保存配置文件（ConfigMap）' : '⚠️ 确认发布 Nacos 配置'" append-to-body>
     <div style="margin-bottom:10px;padding:10px 14px;background:#fff7e6;border:1px solid #ffe58f;border-radius:4px;font-size:13px;color:#ad6800">
       <template v-if="configIsNew">此操作将在 Nacos 当前 namespace 中 <b>新增</b> 配置 <b>[[ configRow ? configRow.dataId : '' ]]</b>，发布后对该 namespace 下服务立即生效。请确认以下内容无误。</template>
+      <template v-else-if="configRow && configRow.configmap">此操作将覆盖集群中 ConfigMap <b>[[ configRow.dataId ]]</b> 的配置内容。保存后挂载卷引用约 1 分钟自动同步，环境变量引用需重启服务生效。请确认以下修改无误。</template>
       <template v-else>此操作将覆盖 Nacos 中 <b>[[ configRow ? configRow.dataId : '' ]]</b> 的配置内容，发布后对该 namespace 下服务立即生效。请确认以下修改无误。</template>
     </div>
     <div style="margin-bottom:8px;display:flex;gap:16px;font-size:12px;color:#909399">
@@ -462,7 +492,7 @@ window.SvcTemplate = `
     </div>
     <template #footer>
       <el-button @click="diffVisible = false">返回编辑</el-button>
-      <el-button type="primary" :loading="publishing" @click="doPublish">确认发布</el-button>
+      <el-button type="primary" :loading="publishing" @click="doPublish">[[ configRow && configRow.configmap ? '确认保存' : '确认发布' ]]</el-button>
     </template>
   </el-dialog>
 

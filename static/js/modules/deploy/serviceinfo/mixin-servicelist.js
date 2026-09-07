@@ -14,9 +14,11 @@ const SvcMixinServiceList = {
       selectedEnv: '',
       favorites: [],          // 当前用户的环境收藏（来自后端，按 user_id 隔离）
       favCollapsed: false,    // 收藏栏是否收起
+      favDrag: null,          // 拖拽中的源：{type:'group', project} 或 {type:'item', id}
       services: [],
       loading: false,
       k8sError: '',
+      envHasNacos: true,     // 环境是否部署 Nacos（middleware 判定，snapshot 帧携带；false 时隐藏全部 Nacos 入口）
       svcStream: null,       // 服务卡片 SSE 流（EventSource）
       svcStreamRetry: null,  // SSE 断连重连定时器
 
@@ -27,6 +29,17 @@ const SvcMixinServiceList = {
   computed: {
     canDeploy() {
       return this.$auth.hasPermission('op:cicd_build');
+    },
+    // 收藏按项目自动父归纳（纯展示层分组，数据仍为扁平 sort_no）：
+    // 组顺序 = 各组内最小 sort_no；组内按 sort_no 升序
+    favGroups() {
+      const sorted = this.favorites.slice().sort((a, b) => (a.sort_no || 0) - (b.sort_no || 0));
+      const map = new Map();
+      sorted.forEach((f) => {
+        if (!map.has(f.project_name)) map.set(f.project_name, []);
+        map.get(f.project_name).push(f);
+      });
+      return Array.from(map.entries()).map(([project, items]) => ({ project, items }));
     },
   },
   mounted() {
@@ -109,6 +122,70 @@ const SvcMixinServiceList = {
           ElementPlus.ElMessage.warning(r.msg || '取消收藏失败');
         }
       });
+    },
+    // ─── 收藏拖拽排序（原生 HTML5 DnD，落库持久化；组整组拖拽 + 组内/跨组子项拖拽） ─────────
+    _sortedFavs() {
+      return this.favorites.slice().sort((a, b) => (a.sort_no || 0) - (b.sort_no || 0));
+    },
+    // 乐观更新本地顺序并持久化（sort_no 重编号为 0..n）
+    persistFavOrder(list) {
+      this.favorites = list.map((f, i) => Object.assign({}, f, { sort_no: i }));
+      ajax('PUT', '/api/deploy/service-info/favorites/sort',
+        { order: list.map(f => f.id) }, (r) => {
+          if (r.code !== 200) ElementPlus.ElMessage.warning(r.msg || '排序保存失败');
+        });
+    },
+    // 子项（环境卡）拖拽
+    onFavDragStart(fav, e) {
+      this.favDrag = { type: 'item', id: fav.id };
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(fav.id));   // Firefox 必需
+    },
+    // drop 到某张环境卡：移动到该卡位置（可跨组，分组是纯展示计算）
+    onFavDrop(fav) {
+      const drag = this.favDrag;
+      this.favDrag = null;
+      if (!drag || drag.type !== 'item' || drag.id === fav.id) return;
+      const list = this._sortedFavs();
+      const fromIdx = list.findIndex(f => f.id === drag.id);
+      const toIdx = list.findIndex(f => f.id === fav.id);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const [moved] = list.splice(fromIdx, 1);
+      list.splice(toIdx, 0, moved);
+      this.persistFavOrder(list);
+    },
+    // 组头拖拽（整组移动）
+    onFavGroupDragStart(group, e) {
+      this.favDrag = { type: 'group', project: group.project };
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', 'g:' + group.project);
+    },
+    // drop 到某组头：整组移动到该组位置（组内相对顺序不变）
+    onFavGroupDrop(targetGroup) {
+      const drag = this.favDrag;
+      this.favDrag = null;
+      if (!drag || drag.type !== 'group' || drag.project === targetGroup.project) return;
+      const groups = this.favGroups.slice();
+      const fromIdx = groups.findIndex(g => g.project === drag.project);
+      const toIdx = groups.findIndex(g => g.project === targetGroup.project);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const [moved] = groups.splice(fromIdx, 1);
+      groups.splice(toIdx, 0, moved);
+      this.persistFavOrder(groups.flatMap(g => g.items));
+    },
+    // drop 到组空白区：把拖拽中的环境卡追加到该组末尾
+    onFavGroupItemDrop(group) {
+      const drag = this.favDrag;
+      this.favDrag = null;
+      if (!drag || drag.type !== 'item') return;
+      const list = this._sortedFavs();
+      const fromIdx = list.findIndex(f => f.id === drag.id);
+      if (fromIdx < 0) return;
+      const [moved] = list.splice(fromIdx, 1);
+      const tail = group.items.length ? group.items[group.items.length - 1] : null;
+      const insertAt = tail ? list.findIndex(f => f.id === tail.id) + 1 : list.length;
+      list.splice(insertAt, 0, moved);
+      this.persistFavOrder(list);
     },
     selectFavorite(item) {
       // 跨项目：重置并加载目标项目环境列表后回填；同项目：仅换环境
@@ -199,6 +276,7 @@ const SvcMixinServiceList = {
           const d = JSON.parse(e.data);
           if (d.type === 'snapshot' || d.type === 'update') {
             this.services = d.services || [];
+            if (d.type === 'snapshot') this.envHasNacos = d.env_has_nacos !== false;   // 仅快照帧携带
             this.k8sError = '';
             this.loading = false;
           } else if (d.type === 'error') {
@@ -233,6 +311,7 @@ const SvcMixinServiceList = {
       ajax('GET', url, null, (r) => {
         const d = r.data || {};
         this.services = d.list || [];
+        this.envHasNacos = d.env_has_nacos !== false;
         if (d.k8s_error) this.k8sError = d.k8s_error;
         this.loading = false;
       });
