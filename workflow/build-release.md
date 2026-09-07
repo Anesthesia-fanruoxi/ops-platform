@@ -50,6 +50,7 @@ DELETE {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts
 | 1.17 | — | —（历史版本，未在本表记录） | — | — |
 | 1.18 | 2026-09-03 | 服务信息页拆分 12 个 serviceinfo/ 模块（mixin 架构）；Nacos 编辑器单滚动体 transform 同步；发布对比 LCS 死循环修复；日志目录搜索定位与深色样式统一 | 2ab724b | sha256:f6a4312e42317d278590f4c0feae06a562776ce6aa1dc8b733e9a0d51f612ce2 |
 | 1.19 | 2026-09-07 | 1080p 缩放体系；Nacos/ConfigMap 入口环境级判定与 ConfigMap 编辑保存；收藏父归纳分组与拖拽排序；配置弹窗 Minimap 缩略图与自绘滚动条；新增本流程文档并新增第6步旧 tag 清理 | a4e38ba | sha256:b2524a8e93c93f7db4bfb704f6ca3b1fb6642af95b23df6a9fcc088d64297cc8 |
+| 1.20 | 2026-09-07 | 撤回 1080p 缩放；服务信息页工具栏下内容框滚动与卡片布局优化；环境信息页构建状态接入全局 SSE；构建步骤状态迁移 Redis 并改造步骤 SSE 为事件驱动；修复取消推送线程 DetachedInstanceError | f5cfa05 | sha256:ab76b1b912e830c2a0912f8c4bda73ee403dc8a0077a0ce2b45130a7f8f702c5 |
 
-> 下一版本：**1.20**（build 时自动递增并回填本表）
+> 下一版本：**1.21**（build 时自动递增并回填本表）
 > 历史行中 tag 已从仓库清理（仅保留最近 3 个），行本身保留作构建历史记录
