@@ -19,6 +19,11 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua
 # 拷贝项目代码
 COPY . .
 
+# Agent 二进制打进镜像：部署平台即自带 Agent，供「远程安装/更新 Agent」直接使用；
+# 复现方式：编译后拷到 agent/dist/ 再构建镜像（cd agent && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/cicd-agent .）
+COPY agent/dist /app/agent/dist
+RUN chmod +x /app/agent/dist/cicd-agent
+
 # 占位启动配置：config/config.yaml 被 .gitignore 排除不入库，但 config.py 启动强制要求存在；
 # 实际连接信息由 docker-compose 环境变量覆盖（环境变量优先），占位内容不影响运行
 COPY config/config.example.yaml config/config.yaml

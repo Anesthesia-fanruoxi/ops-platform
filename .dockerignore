@@ -3,8 +3,11 @@
 .gitignore
 logs
 node_modules
-agent
-agent/*.exe
+# Agent：仅保留 dist 里的 Linux 二进制打进镜像（供远程安装/更新 Agent），排除 Go 源码及其他构建产物
+agent/*
+!agent/dist/
+agent/dist/*
+!agent/dist/cicd-agent
 __pycache__
 *.pyc
 .dockerignore

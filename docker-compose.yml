@@ -28,8 +28,8 @@ services:
       - product:/app/product
       - nginx_configs:/app/nginx_configs
       - recycle:/app/recycle
-      # Agent 二进制（安装/更新 Agent 时上传用）：宿主机替换文件即生效，无需重建镜像
-      - ./agent/dist:/app/agent/dist
+      # Agent 二进制已打包进镜像（/app/agent/dist/cicd-agent），不再挂载宿主机目录；
+      # 如需替换 Agent 版本，重新编译并重建镜像即可
 
 volumes:
   app_logs:
