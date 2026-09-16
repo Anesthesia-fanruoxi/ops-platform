@@ -12,7 +12,7 @@
    ```
    docker build -t hub.hzbxhd.com/middleware/ops-platform:{新tag} .
    ```
-   - 基础镜像 python:3.9-slim；未改 Dockerfile 时基础层/apt/pip 层全部命中缓存，仅 COPY 层重建，约几秒完成
+   - 基础镜像 python:3.12-slim；未改 Dockerfile 时基础层/apt/pip 层全部命中缓存，仅 COPY 层重建，约几秒完成
 4. **推送镜像**
    ```
    docker push hub.hzbxhd.com/middleware/ops-platform:{新tag}
