@@ -326,6 +326,15 @@
 .svc-lb-user { color: #303133; font-weight: 500; }
 .svc-lb-branch { color: #409eff; font-family: monospace; }
 .svc-lb-time { color: #c0c4cc; }
+/* 摘要底色随构建结果：成功绿/失败红（EP 标准色）；构建中/取消保持默认灰 */
+.svc-toolbar-lastbuild.svc-lb-success { background: #f0f9eb; }
+.svc-toolbar-lastbuild.svc-lb-success .svc-lb-user,
+.svc-toolbar-lastbuild.svc-lb-success .svc-lb-branch,
+.svc-toolbar-lastbuild.svc-lb-success .svc-lb-time { color: #529b2e; }
+.svc-toolbar-lastbuild.svc-lb-failed { background: #fef0f0; }
+.svc-toolbar-lastbuild.svc-lb-failed .svc-lb-user,
+.svc-toolbar-lastbuild.svc-lb-failed .svc-lb-branch,
+.svc-toolbar-lastbuild.svc-lb-failed .svc-lb-time { color: #c45656; }
 /* 工具栏与内容区之间的虚线分割线 */
 .svc-toolbar-divider {
   border-top: 1px dashed #dcdfe6;

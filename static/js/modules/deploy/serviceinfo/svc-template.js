@@ -75,7 +75,7 @@ window.SvcTemplate = `
       <span style="color:#909399">构建记录</span>
     </el-button>
     <!-- 最近构建摘要：昵称 / 分支 / 时间（点击打开构建步骤） -->
-    <span v-if="lastBuild" class="svc-toolbar-lastbuild" :title="'最近构建 ' + lastBuild.build_no"
+    <span v-if="lastBuild" class="svc-toolbar-lastbuild" :class="lastBuildBgClass" :title="'最近构建 ' + lastBuild.build_no"
           @click="openProgressDrawer({ id: lastBuild.id, build_no: lastBuild.build_no, status: lastBuild.status, project_type: lastBuild.project_type, branch: lastBuild.branch })">
       <span class="svc-lb-user">[[ lastBuild.triggered_by || '-' ]]</span>
       <span class="svc-lb-branch">[[ lastBuild.branch || '-' ]]</span>

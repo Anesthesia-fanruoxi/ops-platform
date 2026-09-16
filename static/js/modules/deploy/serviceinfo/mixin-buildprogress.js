@@ -48,6 +48,13 @@ const SvcMixinBuildProgress = {
     lastBuild() {
       return this.envBuilds[0] || null;
     },
+    // 摘要底色随构建结果：成功绿/失败红，其他状态保持默认灰
+    lastBuildBgClass() {
+      const s = (this.lastBuild || {}).status;
+      if (s === 'success') return 'svc-lb-success';
+      if (s === 'failed') return 'svc-lb-failed';
+      return '';
+    },
   },
   beforeUnmount() {
     this.closeEnvBuildStream();
