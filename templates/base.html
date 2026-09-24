@@ -67,6 +67,11 @@
               </div>
             </div>
             <div class="topbar-user">
+              <!-- 局域网聊天室外链：地址来自系统设置-平台设置（chat_room_url），未配置则隐藏 -->
+              <a v-if="auth.chatRoomUrl" class="chatroom-link" :href="auth.chatRoomUrl"
+                 target="_blank" rel="noopener noreferrer" title="打开局域网聊天室">
+                <span class="chatroom-icon">💬</span><span class="chatroom-text">聊天室</span>
+              </a>
               <el-dropdown trigger="click" @command="handleUserCommand">
                 <span class="user-info">
                   <span class="user-avatar">[[ (auth.nickname || auth.username) ? (auth.nickname || auth.username)[0].toUpperCase() : '?' ]]</span>

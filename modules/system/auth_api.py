@@ -39,12 +39,13 @@ def _finish_login(user, username, action='login'):
     from modules.system.session_cache import clear_login_fail
     clear_login_fail(username)
     record_auth_event(action, 'success', f'用户 {username} 登录成功', username=username)
-    from modules.system.settings_service import get_password_policy
+    from modules.system.settings_service import get_password_policy, get_chat_room_url
     return success_response({
         'token': token_str,
         'expires_at': expires_at.strftime('%Y-%m-%d %H:%M:%S'),
         'user': user.to_dict(include_permissions=True),
         'password_policy': get_password_policy(),
+        'chat_room_url': get_chat_room_url(),
     }, '登录成功')
 
 
@@ -269,8 +270,10 @@ def me():
     if not user:
         return error_response('未登录', 401)
     data = user.to_dict(include_permissions=True)
-    from modules.system.settings_service import get_password_policy
+    from modules.system.settings_service import get_password_policy, get_chat_room_url
     data['password_policy'] = get_password_policy()
+    # 聊天室外链地址：所有登录用户可见（不占权限码），随 /api/auth/me 下发
+    data['chat_room_url'] = get_chat_room_url()
     return success_response(data)
 
 

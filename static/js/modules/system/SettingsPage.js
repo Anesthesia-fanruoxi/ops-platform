@@ -32,7 +32,8 @@ const SETTING_FORM_MAP = {
     agent_comm_secret: '',
     authplatform_base_url: '',
     authplatform_platform_id: '',
-    authplatform_secret: ''
+    authplatform_secret: '',
+    chat_room_url: ''
   }
 };
 
@@ -360,6 +361,16 @@ const SettingsPage = {
 
       <!-- ── 平台设置 ── -->
       <div v-show="activeTab === 'platform'">
+        <div class="subsection-title">局域网聊天室</div>
+        <div class="form-row">
+          <div class="form-group w-url">
+            <label class="form-label">聊天室地址</label>
+            <input class="form-input" v-model="form.chat_room_url" @input="detectChange"
+                   placeholder="如 http://192.168.6.2:3000（留空则顶部不显示入口）">
+            <small style="color:#888">配置后顶部用户区显示「聊天室」外链入口，所有登录用户可见（未填协议自动补 http://）</small>
+          </div>
+        </div>
+
         <div class="subsection-title">认证</div>
         <div class="form-row">
           <div class="form-group w-port">
@@ -495,6 +506,12 @@ const SettingsPage = {
       ajax('POST', '/api/settings/update', data, (r) => {
         if (r.code === 200) {
           showSuccess('设置已保存');
+          // 聊天室地址等全局配置：保存后立即重拉 /api/auth/me 同步顶部入口（无需刷新页面）
+          ajax('GET', '/api/auth/me', null, (me) => {
+            if (me.code === 200 && me.data) {
+              authState.chatRoomUrl = me.data.chat_room_url || '';
+            }
+          });
           this.loadSettings();
         } else {
           showError(r.msg || '保存失败');

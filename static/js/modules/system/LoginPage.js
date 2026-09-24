@@ -375,6 +375,8 @@ const LoginPage = {
       authState.isSuperAdmin = !!res.data.user.is_super_admin;
       // 同步密码策略（登录响应携带，供修改密码弹窗的随机密码生成与前端校验使用）
       if (res.data.password_policy) authState.passwordPolicy = res.data.password_policy;
+      // 聊天室外链地址（登录响应携带，顶部入口立即生效）
+      authState.chatRoomUrl = res.data.chat_room_url || '';
 
       // 登录跳转：带路径请求（如直链 /settings）登录后跳回原菜单；否则一律首页
       const redirect = router.currentRoute.value.query.redirect;

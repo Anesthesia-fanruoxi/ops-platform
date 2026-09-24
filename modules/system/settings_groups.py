@@ -41,6 +41,7 @@ SETTING_GROUPS = {
         'authplatform_base_url',
         'authplatform_platform_id',
         'authplatform_secret',
+        'chat_room_url',
     ],
 }
 

@@ -47,3 +47,15 @@ def check_password_policy(password):
     if errors:
         return False, '；'.join(errors)
     return True, ''
+
+
+def get_chat_room_url():
+    """局域网聊天室地址（平台设置项，顶部外链入口用）
+
+    - 去首尾空格；未带协议时补 http://（局域网地址通常不带协议）
+    - 未配置返回空串，前端据此隐藏入口
+    """
+    url = (get_setting('chat_room_url', '') or '').strip()
+    if url and not url.startswith(('http://', 'https://')):
+        url = 'http://' + url
+    return url

@@ -10,6 +10,8 @@ const authState = Vue.reactive({
   isSuperAdmin: false,
   // 平台密码策略（来自 /api/auth/me，随登录/切回页面刷新）
   passwordPolicy: { min_length: 6, require_upper: false, require_digit: false },
+  // 局域网聊天室外链地址（系统设置-平台设置配置，留空则顶部不显示入口）
+  chatRoomUrl: '',
   hasPermission(code) {
     // 超级管理员（super_admins 独立账号，无角色权限集）：前端全权限放行（后端 require_permission 已放行）
     if (this.isSuperAdmin) return true;
@@ -130,6 +132,7 @@ function tryRestoreAuth(callback) {
         authState.permissions = res.data.permissions || [];
         authState.isSuperAdmin = !!res.data.is_super_admin;
         if (res.data.password_policy) authState.passwordPolicy = res.data.password_policy;
+        authState.chatRoomUrl = res.data.chat_room_url || '';
       }
     } else {
       localStorage.removeItem('auth_token');
@@ -160,6 +163,8 @@ function refreshPermissions() {
         authState.roleName = res.data.role_name || '';
         authState.isSuperAdmin = !!res.data.is_super_admin;
         if (res.data.password_policy) authState.passwordPolicy = res.data.password_policy;
+        // 聊天室地址随之刷新（设置页改完地址后切回页面即生效，无需重登）
+        authState.chatRoomUrl = res.data.chat_room_url || '';
         // 检查当前页面是否还有权限，无则跳转
         var currentPath = router.currentRoute.value.path;
         var currentMenu = flatMenuItems().find(m => m.path === currentPath);
@@ -268,6 +273,7 @@ const app = Vue.createApp({
       authState.roleName = '';
       authState.permissions = [];
       authState.isSuperAdmin = false;
+      authState.chatRoomUrl = '';
       this.openedTabs = [];
       router.push('/login');
     },

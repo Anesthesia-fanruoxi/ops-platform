@@ -70,7 +70,11 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Sego
 .tab-item.active { color: #722ed1; background: #f9f0ff; border-color: #e5d3f7; font-weight: 500; }
 .tab-close { font-size: 11px; color: #909399; width: 15px; height: 15px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; transition: all .2s; }
 .tab-close:hover { background: #c0c4cc; color: #fff; }
-.topbar-user { display: flex; align-items: center; }
+.topbar-user { display: flex; align-items: center; gap: 4px; }
+/* 局域网聊天室外链按钮（顶部用户区左侧） */
+.chatroom-link { display: flex; align-items: center; gap: 5px; padding: 5px 12px; margin-right: 4px; border-radius: 6px; background: #f0f7ff; border: 1px solid #d3e6ff; color: #1890ff; font-size: 13px; font-weight: 500; text-decoration: none; white-space: nowrap; transition: all 0.2s; }
+.chatroom-link:hover { background: #e0f0ff; border-color: #9dcaff; color: #096dd9; }
+.chatroom-icon { font-size: 14px; line-height: 1; }
 .user-info { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 12px; border-radius: 6px; transition: background 0.2s; }
 .user-info:hover { background: #f5f7fa; }
 .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #9254de, #722ed1); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; }

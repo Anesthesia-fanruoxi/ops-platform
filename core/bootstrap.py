@@ -537,6 +537,7 @@ def init_db(app):
             {'key': 'authplatform_base_url', 'value': '', 'description': '统一鉴权中心地址（如 http://127.0.0.1:8080），留空=使用本地账号登录'},
             {'key': 'authplatform_platform_id', 'value': '', 'description': '统一鉴权中心平台标识（如 ops-platform），在鉴权中心后台注册'},
             {'key': 'authplatform_secret', 'value': '', 'description': '统一鉴权中心平台加密盐（仅创建时展示一次，用于请求签名）'},
+            {'key': 'chat_room_url', 'value': '', 'description': '局域网聊天室地址（如 http://192.168.6.2:3000），留空则顶部不显示聊天室入口'},
         ]
         for item in defaults:
             if not Setting.query.filter_by(key=item['key']).first():
