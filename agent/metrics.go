@@ -6,7 +6,7 @@ package main
 // - 磁盘IO：/proc/diskstats 累计扇区(512B)差值 → 读/写 KB/s
 // - 系统负载：/proc/loadavg
 // - 网络流量：/proc/net/dev 差值 → 收/发 KB/s
-// - 磁盘使用率：sysInfo 中计算
+// - 磁盘容量/使用率：statfs 工作目录所在文件系统（每轮采样重新读取）
 // - Docker 构建缓存大小：独立协程每 30s 执行 docker system df（心跳上报）
 // 后台每 3s 采样一次，心跳读取最新快照。
 
@@ -36,6 +36,8 @@ type Metrics struct {
 	NetRxKB     float64 // 网络接收 KB/s
 	NetTxKB     float64 // 网络发送 KB/s
 	DiskPercent float64 // 磁盘使用率 %
+	DiskTotalGB float64 // 磁盘总量 GB（工作目录所在文件系统）
+	DiskUsedGB  float64 // 磁盘已用 GB
 	MemUsedGB   float64 // 内存已用 GB
 	MemAvailGB  float64 // 内存可用 GB
 	DockerCache string  // Docker 构建缓存大小（如 12.3GB / 0B）
@@ -59,6 +61,9 @@ func startMetricsCollector() {
 	lastReadSec, lastWriteSec = readDiskSectors()
 	lastNetRx, lastNetTx = readNetBytes()
 	lastSampleTime = time.Now()
+
+	// 立即采样一次，保证注册包/首个心跳携带实时数据（否则启动后前 3s 指标全为 0）
+	collectOnce()
 
 	go func() {
 		ticker := time.NewTicker(3 * time.Second)
@@ -172,28 +177,39 @@ func collectOnce() {
 	readKB, writeKB := sampleDiskRate(elapsed)
 	netRxKB, netTxKB := sampleNetRate(elapsed)
 	load1, load5, load15 := sampleLoadAvg()
-	diskPercent := calcDiskPercent()
+	diskTotalGB, diskUsedGB := sampleDiskGB()
 	lastSampleTime = now
 
 	metricsMu.Lock()
-	latestMetrics = Metrics{
+	prev := latestMetrics
+	next := Metrics{
 		// 现有字段
 		CPULoad:     round1(cpu),
 		MemPercent:  round1(memPercent),
 		DiskReadKB:  round1(readKB),
 		DiskWriteKB: round1(writeKB),
 		// 新增动态指标
-		Load1:       load1,
-		Load5:       load5,
-		Load15:      load15,
-		NetRxKB:     round1(netRxKB),
-		NetTxKB:     round1(netTxKB),
-		DiskPercent: diskPercent,
-		MemUsedGB:   round1(memUsedGB),
-		MemAvailGB:  round1(memAvailGB),
+		Load1:      load1,
+		Load5:      load5,
+		Load15:     load15,
+		NetRxKB:    round1(netRxKB),
+		NetTxKB:    round1(netTxKB),
+		MemUsedGB:  round1(memUsedGB),
+		MemAvailGB: round1(memAvailGB),
 		// Docker 构建缓存由独立 30s 协程维护，主采样不能覆盖为空
-		DockerCache: latestMetrics.DockerCache,
+		DockerCache: prev.DockerCache,
 	}
+	// 磁盘容量每轮重新 statfs；采样失败（工作目录异常）时保留上次值，避免误报为 0
+	if diskTotalGB > 0 {
+		next.DiskTotalGB = diskTotalGB
+		next.DiskUsedGB = diskUsedGB
+		next.DiskPercent = round1(diskUsedGB / diskTotalGB * 100)
+	} else {
+		next.DiskTotalGB = prev.DiskTotalGB
+		next.DiskUsedGB = prev.DiskUsedGB
+		next.DiskPercent = prev.DiskPercent
+	}
+	latestMetrics = next
 	metricsMu.Unlock()
 
 	// 推入历史指标 Ring Buffer
@@ -353,12 +369,4 @@ func sampleNetRate(elapsed float64) (rxKB, txKB float64) {
 	}
 	lastNetRx, lastNetTx = rx, tx
 	return rxKB, txKB
-}
-
-// calcDiskPercent 计算磁盘使用率
-func calcDiskPercent() float64 {
-	if sysInfo.DiskTotalGB <= 0 {
-		return 0
-	}
-	return round1(sysInfo.DiskUsedGB / sysInfo.DiskTotalGB * 100)
 }

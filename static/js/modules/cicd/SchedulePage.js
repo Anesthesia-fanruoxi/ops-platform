@@ -415,7 +415,7 @@ const SchedulePage = {
       },
       agentForm: { name: '', host: '', ssh_port: 22, ssh_username: 'root', auth_type: 'credential', ssh_password: '', credential_id: '', master_url: '', work_dir: '/data/cicd', frontend_mount_dir: '', nfs_server: '', nfs_share: '', keep_builds: 5, install_docker: true, harbor_type: 'public', harbor_url: '', harbor_credential_id: '', harbor_ip: '' },
       installVisible: false, installStep: 0, installLogs: [], installDone: false, installSource: null, installAutoClose: null,
-      installTitle: 'Agent 安装进度', installStepTitles: ['SSH 连接', '安装 Docker', '上传文件', '启动服务'],
+      installTitle: 'Agent 安装进度', installStepTitles: ['SSH 连接', '磁盘扩容', '安装 Docker', '上传文件', '启动服务'],
       cleanupVisible: false, cleanupMode: 'uninstall', cleanupAgent: null,
       cleanupForm: { remove_docker: false, remove_nfs: false },
     };
@@ -814,7 +814,7 @@ const SchedulePage = {
     startInstallStream(taskId, opts) {
       opts = opts || {};
       this.installTitle = opts.title || 'Agent 安装进度';
-      this.installStepTitles = opts.steps || ['SSH 连接', '安装 Docker', '上传文件', '启动服务'];
+      this.installStepTitles = opts.steps || ['SSH 连接', '磁盘扩容', '安装 Docker', '上传文件', '启动服务'];
       this.installVisible = true;
       this.installStep = 0;
       this.installLogs = [];

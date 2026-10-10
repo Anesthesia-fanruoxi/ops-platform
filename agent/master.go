@@ -27,8 +27,8 @@ func register() {
 		"disk_write_kb": m.DiskWriteKB,
 		"cpu_cores":     sysInfo.CPUCores,
 		"mem_total_gb":  sysInfo.MemTotalGB,
-		"disk_total_gb": sysInfo.DiskTotalGB,
-		"disk_used_gb":  sysInfo.DiskUsedGB,
+		"disk_total_gb": m.DiskTotalGB,
+		"disk_used_gb":  m.DiskUsedGB,
 		// 新增动态指标
 		"load1":        m.Load1,
 		"load5":        m.Load5,
@@ -72,8 +72,8 @@ func heartbeatLoop(quit <-chan os.Signal) {
 				"disk_write_kb": m.DiskWriteKB,
 				"cpu_cores":     sysInfo.CPUCores,
 				"mem_total_gb":  sysInfo.MemTotalGB,
-				"disk_total_gb": sysInfo.DiskTotalGB,
-				"disk_used_gb":  sysInfo.DiskUsedGB,
+				"disk_total_gb": m.DiskTotalGB,
+				"disk_used_gb":  m.DiskUsedGB,
 				// 新增动态指标
 				"load1":        m.Load1,
 				"load5":        m.Load5,

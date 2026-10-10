@@ -35,6 +35,126 @@ WorkingDirectory={workdir}
 WantedBy=multi-user.target
 """
 
+# 磁盘扩容脚本（安装前置步骤）：根分区/LVM/文件系统扩展至磁盘全部剩余空间
+# 镜像磁盘固定 200G、实例磁盘更大的场景，安装时自动扩到磁盘实际大小；失败以非零退出码中断安装
+EXPAND_DISK_SCRIPT = r'''
+#!/bin/bash
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+fail() { echo "$1"; exit 1; }
+
+install_pkgs() {
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -qq >/dev/null 2>&1
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" >/dev/null 2>&1
+    else
+        dnf install -y "$@" >/dev/null 2>&1 || yum install -y "$@" >/dev/null 2>&1
+    fi
+}
+
+GROWPART_PKG=cloud-utils-growpart
+if command -v apt-get >/dev/null 2>&1; then GROWPART_PKG=cloud-guest-utils; fi
+
+root_src=$(findmnt -n -o SOURCE / | head -n1)
+root_fs=$(findmnt -n -o FSTYPE / | head -n1)
+[ -n "$root_src" ] || fail "无法识别根挂载设备（findmnt 无输出）"
+echo "根设备：$root_src（文件系统：$root_fs）"
+df -h / | awk 'NR==2{print "当前容量： "$2"（已用 "$3"，可用 "$4"）"}'
+
+is_lvm=0
+if command -v lvs >/dev/null 2>&1 && lvs "$root_src" >/dev/null 2>&1; then
+    is_lvm=1
+fi
+
+if [ "$is_lvm" = "1" ]; then
+    # 注意：pvs 的位置参数只接受 PV 路径（传 LV 路径会查不到），先取 VG 再列该 VG 下的 PV
+    vg=$(lvs --noheadings -o vg_name "$root_src" 2>/dev/null | head -n1 | tr -d ' ')
+    [ -n "$vg" ] || fail "无法定位根逻辑卷 $root_src 所属的卷组"
+    pv_list=$(pvs --noheadings -o vg_name,pv_name 2>/dev/null | awk -v vg="$vg" '$1 == vg {print $2}')
+    [ -n "$pv_list" ] || fail "无法定位卷组 $vg 下的物理卷"
+    targets="$pv_list"
+    echo "布局：LVM（LV=$root_src，VG=$vg，PV=$(echo $pv_list)）"
+else
+    case "$root_src" in
+        /dev/mapper/*) fail "根设备为 $root_src（加密/多路径映射），暂不支持自动扩容" ;;
+        /dev/*) targets="$root_src"; echo "布局：直接分区（$targets）" ;;
+        *) fail "无法识别的根设备：$root_src" ;;
+    esac
+fi
+
+for target in $targets; do
+    pkname=$(lsblk -no PKNAME "$target" 2>/dev/null | head -n1 | tr -d ' ')
+    partn=$(lsblk -no PARTN "$target" 2>/dev/null | head -n1 | tr -d ' ')
+
+    if [ -n "$pkname" ] && [ -n "$partn" ]; then
+        disk="/dev/$pkname"
+        disk_size=$(blockdev --getsize64 "$disk")
+        part_size=$(blockdev --getsize64 "$target")
+        if [ "$part_size" -ge "$disk_size" ]; then
+            echo "分区 $target 已占满磁盘，无需扩容分区"
+        else
+            if ! command -v growpart >/dev/null 2>&1; then
+                echo "缺少 growpart，正在安装软件包 ..."
+                install_pkgs "$GROWPART_PKG" gdisk
+            fi
+            command -v growpart >/dev/null 2>&1 || fail "growpart 安装失败，请检查软件源后重试"
+            grow_out=$(growpart "$disk" "$partn" 2>&1)
+            grow_rc=$?
+            echo "$grow_out"
+            [ "$grow_rc" -eq 0 ] || fail "分区扩容失败：$grow_out"
+            partx -u "$disk" >/dev/null 2>&1 || partprobe "$disk" >/dev/null 2>&1 || true
+            new_part_size=$(blockdev --getsize64 "$target")
+            [ "$new_part_size" -gt "$part_size" ] || fail "分区扩容未生效（内核未识别新分区大小），请重启后重试"
+        fi
+    elif [ -n "$pkname" ] || [ -n "$partn" ]; then
+        fail "无法解析设备 $target 的磁盘/分区信息"
+    else
+        echo "$target 为整盘设备，跳过分区扩容"
+    fi
+done
+
+if [ "$is_lvm" = "1" ]; then
+    if ! command -v pvresize >/dev/null 2>&1; then
+        echo "缺少 LVM 工具，正在安装 lvm2 ..."
+        install_pkgs lvm2
+    fi
+    for target in $targets; do
+        pvresize "$target" || fail "PV 扩容失败（pvresize $target）"
+    done
+    free_bytes=$(vgs --noheadings --units b --nosuffix -o vg_free "$vg" 2>/dev/null | tr -dc '0-9')
+    echo "卷组 $vg 可扩展空间：$(( ${free_bytes:-0} / 1024 / 1024 )) MB"
+    if [ "${free_bytes:-0}" -gt 0 ]; then
+        lvextend -l +100%FREE "$root_src" || fail "逻辑卷扩容失败（lvextend $root_src）"
+    else
+        echo "卷组无可扩展空间，跳过逻辑卷扩容"
+    fi
+fi
+
+case "$root_fs" in
+    xfs)
+        if ! command -v xfs_growfs >/dev/null 2>&1; then
+            echo "缺少 xfs_growfs，正在安装 xfsprogs ..."
+            install_pkgs xfsprogs
+        fi
+        xfs_growfs / || fail "文件系统扩容失败（xfs_growfs /）"
+        ;;
+    ext2|ext3|ext4)
+        if ! command -v resize2fs >/dev/null 2>&1; then
+            echo "缺少 resize2fs，正在安装 e2fsprogs ..."
+            install_pkgs e2fsprogs
+        fi
+        resize2fs "$root_src" || fail "文件系统扩容失败（resize2fs $root_src）"
+        ;;
+    *)
+        fail "文件系统 $root_fs 不支持在线扩容"
+        ;;
+esac
+
+df -h / | awk 'NR==2{print "扩容后容量： "$2"（已用 "$3"，可用 "$4"）"}'
+echo "磁盘扩容完成"
+exit 0
+'''
+
 
 def create_install_task(params):
     """创建安装任务，后台线程执行，返回 task_id"""
@@ -83,39 +203,44 @@ def _run_install(task_id, app):
         _emit(task_id, 1, 'SSH 连接', 'success',
               f"连接成功 | {os_info['pretty_name']} | {arch}")
 
-        # Step 2: 安装 Docker（根据系统版本执行对应命令）
+        # Step 2: 磁盘扩容（镜像磁盘固定 200G、实例磁盘更大的场景，自动扩展到磁盘实际大小）
+        _emit(task_id, 2, '磁盘扩容', 'running', '正在检测磁盘剩余空间 ...')
+        summary = _expand_disk(ssh, task_id)
+        _emit(task_id, 2, '磁盘扩容', 'success', summary)
+
+        # Step 3: 安装 Docker（根据系统版本执行对应命令）
         if p.get('install_docker'):
-            _emit(task_id, 2, '安装 Docker', 'running',
+            _emit(task_id, 3, '安装 Docker', 'running',
                   f"正在检测 / 安装 Docker ({os_info['id']} {os_info['major']}) ...")
             msg = _install_docker(ssh, os_info)
-            _emit(task_id, 2, '安装 Docker', 'success', msg)
+            _emit(task_id, 3, '安装 Docker', 'success', msg)
         else:
-            _emit(task_id, 2, '安装 Docker', 'skipped', '已跳过')
+            _emit(task_id, 3, '安装 Docker', 'skipped', '已跳过')
 
-        # Step 2.5: 私有 Harbor 写入 /etc/hosts 映射
+        # Step 3.5: 私有 Harbor 写入 /etc/hosts 映射
         harbor_ip = p.get('harbor_ip', '')
         harbor_url = p.get('harbor_url', '')
         if harbor_ip and harbor_url:
-            _emit(task_id, 2, '安装 Docker', 'running', f'写入 hosts 映射：{harbor_ip} {harbor_url}')
+            _emit(task_id, 3, '安装 Docker', 'running', f'写入 hosts 映射：{harbor_ip} {harbor_url}')
             _exec(ssh, f'grep -q "{harbor_url}" /etc/hosts || echo "{harbor_ip} {harbor_url}" >> /etc/hosts')
-            _emit(task_id, 2, '安装 Docker', 'success', f'hosts 映射已写入：{harbor_ip} → {harbor_url}')
+            _emit(task_id, 3, '安装 Docker', 'success', f'hosts 映射已写入：{harbor_ip} → {harbor_url}')
 
-        # Step 2.6: 登录 Harbor 镜像仓库
+        # Step 3.6: 登录 Harbor 镜像仓库
         harbor_user = p.get('harbor_user', '')
         harbor_pass = p.get('harbor_pass', '')
         if harbor_url and harbor_user and harbor_pass:
-            _emit(task_id, 2, '安装 Docker', 'running', f'正在登录 Harbor：{harbor_url} ...')
+            _emit(task_id, 3, '安装 Docker', 'running', f'正在登录 Harbor：{harbor_url} ...')
             code, out, err = _exec(ssh, f'docker login {harbor_url} -u {harbor_user} -p "{harbor_pass}"')
             if code != 0:
                 raise Exception(f'Harbor 登录失败: {err or out}')
-            _emit(task_id, 2, '安装 Docker', 'success', f'Harbor 登录成功：{harbor_url}')
+            _emit(task_id, 3, '安装 Docker', 'success', f'Harbor 登录成功：{harbor_url}')
 
-        # Step 2.7: 挂载 NFS 目录（前端发布目录，安装时自动完成，无需再登录服务器）
+        # Step 3.7: 挂载 NFS 目录（前端发布目录，安装时自动完成，无需再登录服务器）
         nfs_server = (p.get('nfs_server') or '').strip()
         nfs_share = (p.get('nfs_share') or '').strip().rstrip('/')
         mount_dir = (p.get('frontend_mount_dir') or '').strip().rstrip('/')
         if nfs_server and nfs_share and mount_dir:
-            _emit(task_id, 2, '安装 Docker', 'running',
+            _emit(task_id, 3, '安装 Docker', 'running',
                   f'挂载 NFS：{nfs_server}:{nfs_share} → {mount_dir} ...')
             # 1) 按系统版本安装 NFS 客户端
             os_id = (os_info.get('id') or '').lower()
@@ -124,7 +249,7 @@ def _run_install(task_id, app):
             else:
                 _exec(ssh, 'dnf install -y nfs-utils || yum install -y nfs-utils', timeout=300)
             # 2) showmount 预检：确认 NFS 服务器可达且共享目录已导出
-            _emit(task_id, 2, '安装 Docker', 'running',
+            _emit(task_id, 3, '安装 Docker', 'running',
                   f'showmount 检查：{nfs_server} ...')
             code, out, err = _exec(ssh, f'showmount -e {nfs_server} 2>&1', timeout=30)
             if code != 0:
@@ -146,18 +271,18 @@ def _run_install(task_id, app):
             code, out, err = _exec(ssh, f'mountpoint -q {mount_dir} && echo OK || echo FAIL')
             if 'OK' not in out:
                 raise Exception(f'NFS 挂载失败: {nfs_server}:{nfs_share} → {mount_dir} ({err or out})')
-            _emit(task_id, 2, '安装 Docker', 'success',
+            _emit(task_id, 3, '安装 Docker', 'success',
                   f'NFS 已挂载：{nfs_server}:{nfs_share} → {mount_dir}（已写入 fstab）')
 
-        # Step 3: 上传文件
-        _emit(task_id, 3, '上传文件', 'running', '正在上传 Agent 二进制 ...')
+        # Step 4: 上传文件
+        _emit(task_id, 4, '上传文件', 'running', '正在上传 Agent 二进制 ...')
         _upload_files(ssh, p)
-        _emit(task_id, 3, '上传文件', 'success', '二进制 / service / 配置 上传完成')
+        _emit(task_id, 4, '上传文件', 'success', '二进制 / service / 配置 上传完成')
 
-        # Step 4: 配置 systemd 并启动
-        _emit(task_id, 4, '启动服务', 'running', '正在注册 systemd 并启动 ...')
+        # Step 5: 配置 systemd 并启动
+        _emit(task_id, 5, '启动服务', 'running', '正在注册 systemd 并启动 ...')
         _setup_and_start(ssh, p)
-        _emit(task_id, 4, '启动服务', 'success', 'cicd-agent 服务已启动')
+        _emit(task_id, 5, '启动服务', 'success', 'cicd-agent 服务已启动')
 
         # 标记已安装（先提交，再发完成事件；同时清掉概览缓存）
         with app.app_context():
@@ -220,6 +345,40 @@ def _detect_arch(ssh):
     if 'aarch64' in out or 'arm64' in out:
         return 'arm64'
     return 'amd64'
+
+
+# ─── 磁盘扩容 ─────────────────────────────────────────────────
+
+def _expand_disk(ssh, task_id):
+    """上传并执行扩容脚本：根分区 → PV → LV → 文件系统 逐层扩展到磁盘剩余空间。
+    脚本输出实时逐行推送到安装进度；失败抛异常中断安装。
+    磁盘本就无剩余空间时脚本输出"无需扩容"并以 0 退出（不算失败）。
+    """
+    remote = '/tmp/ops-expand-disk.sh'
+    sftp = ssh.open_sftp()
+    try:
+        _sftp_write(sftp, remote, EXPAND_DISK_SCRIPT)
+    finally:
+        sftp.close()
+
+    lines = []
+    try:
+        stdin, stdout, stderr = ssh.exec_command(f'bash {remote} 2>&1', timeout=900)
+        for line in iter(stdout.readline, ''):
+            line = line.strip()
+            if line:
+                lines.append(line)
+                _emit(task_id, 2, '磁盘扩容', 'running', line)
+        code = stdout.channel.recv_exit_status()
+    finally:
+        try:
+            _exec(ssh, f'rm -f {remote}', timeout=10)
+        except Exception:
+            pass
+
+    if code != 0:
+        raise Exception('磁盘扩容失败：' + (lines[-1] if lines else f'脚本退出码 {code}'))
+    return lines[-1] if lines else '磁盘扩容完成'
 
 
 # ─── SSH 连接 ─────────────────────────────────────────────────

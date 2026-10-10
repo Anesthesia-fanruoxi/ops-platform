@@ -1,10 +1,9 @@
 package main
 
-// ─── 服务器静态配置采集（零第三方依赖，读 Linux /proc + statfs）───
+// ─── 服务器静态配置采集（零第三方依赖，读 Linux /proc）───
 // 与 metrics.go（实时使用率）不同，此处为低频静态配置：
 // - CPU 核数/型号：/proc/cpuinfo
 // - 内存总量：/proc/meminfo MemTotal（KB → GB）
-// - 磁盘总量/已用：statfs 工作目录所在文件系统
 // - OS 信息：/etc/os-release
 // - 内核/架构/主机名/运行时长：/proc/version, runtime.GOARCH, os.Hostname(), /proc/uptime
 // - Docker 版本：docker version 命令
@@ -21,10 +20,8 @@ import (
 // SysInfo 服务器配置信息（心跳上报用，静态不变）
 type SysInfo struct {
 	// 现有字段
-	CPUCores    int     // CPU 逻辑核数
-	MemTotalGB  float64 // 内存总量 GB
-	DiskTotalGB float64 // 磁盘总量 GB（工作目录所在文件系统）
-	DiskUsedGB  float64 // 磁盘已用 GB
+	CPUCores   int     // CPU 逻辑核数
+	MemTotalGB float64 // 内存总量 GB
 
 	// 新增静态信息
 	CPUModel         string  // CPU 型号
@@ -46,10 +43,8 @@ var sysInfo SysInfo
 func collectSysInfo() {
 	sysInfo = SysInfo{
 		// 现有字段
-		CPUCores:    sampleCPUCores(),
-		MemTotalGB:  sampleMemTotalGB(),
-		DiskTotalGB: sampleDiskGB(false),
-		DiskUsedGB:  sampleDiskGB(true),
+		CPUCores:   sampleCPUCores(),
+		MemTotalGB: sampleMemTotalGB(),
 
 		// 新增静态信息
 		CPUModel:         sampleCPUModel(),

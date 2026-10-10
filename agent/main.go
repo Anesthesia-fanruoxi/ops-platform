@@ -183,7 +183,7 @@ func main() {
 	// 每天凌晨 1 点清理 3 天前的 Docker 构建缓存
 	startDockerCacheCleanup()
 
-	// 采集服务器静态配置（CPU核数/内存总量/磁盘容量），随注册/心跳上报
+	// 采集服务器静态配置（CPU核数/内存总量/OS 信息等），随注册/心跳上报
 	collectSysInfo()
 
 	register()

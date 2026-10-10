@@ -7,16 +7,14 @@ package main
 
 import "syscall"
 
-// sampleDiskGB 用 statfs 统计工作目录所在文件系统容量（used=true 返回已用 GB）
-func sampleDiskGB(used bool) float64 {
+// sampleDiskGB 用 statfs 统计工作目录所在文件系统容量，返回（总量 GB，已用 GB）
+// 已用 = 总量 - Bavail（非特权用户可用空间），与构建进程实际可用空间一致
+func sampleDiskGB() (totalGB, usedGB float64) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(cfg.WorkDir, &st); err != nil {
-		return 0
+		return 0, 0
 	}
-	total := float64(st.Blocks) * float64(st.Bsize) / 1024 / 1024 / 1024
-	if used {
-		avail := float64(st.Bavail) * float64(st.Bsize) / 1024 / 1024 / 1024
-		return round1(total - avail)
-	}
-	return round1(total)
+	totalGB = round1(float64(st.Blocks) * float64(st.Bsize) / 1024 / 1024 / 1024)
+	availGB := float64(st.Bavail) * float64(st.Bsize) / 1024 / 1024 / 1024
+	return totalGB, round1(totalGB - availGB)
 }
