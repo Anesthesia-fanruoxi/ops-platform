@@ -360,7 +360,7 @@ def reset_agent_remote(agent_id):
 
 
 def _do_remote_cleanup(agent_id, delete_record):
-    """卸载/重置公用逻辑：SSH 信息从 DB 记录读取，前端只传 remove_docker"""
+    """卸载/重置公用逻辑：SSH 信息从 DB 记录读取，前端可传 remove_docker / remove_nfs / remove_workdir"""
     agent = BuildAgent.query.get(agent_id)
     if not agent:
         return error_response('Agent 不存在', 404)
@@ -384,6 +384,7 @@ def _do_remote_cleanup(agent_id, delete_record):
         'work_dir': agent.work_dir or '/data/cicd',
         'frontend_mount_dir': agent.frontend_mount_dir or '',
         'remove_nfs': data.get('remove_nfs', delete_record),  # 卸载默认 True，重置由前端勾选
+        'remove_workdir': data.get('remove_workdir', delete_record),  # 卸载默认 True；重置默认保留，前端可勾选删除
         'remove_docker': data.get('remove_docker', False),
         'delete_record': delete_record,
     }

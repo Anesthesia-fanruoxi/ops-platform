@@ -206,7 +206,10 @@ const SchedulePage = {
         </el-form-item>
       </template>
       <el-form-item label="Master 地址"><el-input v-model="agentForm.master_url" :placeholder="masterUrlPlaceholder" /></el-form-item>
-      <el-form-item label="工作目录"><el-input v-model="agentForm.work_dir" placeholder="/data/cicd" :disabled="reinstallMode" /></el-form-item>
+      <el-form-item label="工作目录">
+        <el-input v-model="agentForm.work_dir" placeholder="/data/cicd" :disabled="reinstallMode" />
+        <div style="color:#909399;font-size:12px;margin-top:2px">安装时自动检测：目录已存在则跳过初始化直接复用，不清理其中数据；不存在则自动创建</div>
+      </el-form-item>
       <el-divider content-position="left">NFS 挂载（安装时自动挂载，无需登录服务器）</el-divider>
       <el-form-item label="挂载目录">
         <el-input v-model="agentForm.frontend_mount_dir" placeholder="/web（Agent 机 NFS 挂载根；发布目标 = 挂载根/项目/环境/web，如 /web/ysh/test/web）" />
@@ -340,11 +343,19 @@ const SchedulePage = {
     <el-alert v-else type="warning" :closable="false" show-icon style="margin-bottom:14px">
       <template #title>重置将执行以下操作（保留本地记录，可重新安装）</template>
       <template #default>
-        <div style="line-height:1.8">1. 停止并移除 cicd-agent 服务<br>2. 删除远程二进制 /usr/local/bin/cicd-agent<br>3. 删除工作目录 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]]<br>4. [[ cleanupAgent && cleanupAgent.frontend_mount_dir ? '（可选）卸载 NFS 挂载 ' + cleanupAgent.frontend_mount_dir : '' ]]</div>
+        <div style="line-height:1.8">1. 停止并移除 cicd-agent 服务<br>2. 删除远程二进制 /usr/local/bin/cicd-agent<br>3. [[ cleanupForm.remove_workdir ? '删除' : '保留' ]]工作目录 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]]<br>4. [[ cleanupAgent && cleanupAgent.frontend_mount_dir ? '（可选）卸载 NFS 挂载 ' + cleanupAgent.frontend_mount_dir : '' ]]</div>
       </template>
     </el-alert>
     <el-form label-width="100px" size="small">
       <el-form-item label="主机"><span style="font-weight:bold">[[ cleanupAgent?cleanupAgent.host:'' ]]</span></el-form-item>
+      <!-- 开启=保留：active-value 反向绑定 remove_workdir -->
+      <el-form-item v-if="cleanupMode==='reset'" label="保留工作目录">
+        <el-switch v-model="cleanupForm.remove_workdir" :active-value="false" :inactive-value="true" />
+        <span style="margin-left:8px;color:#909399;font-size:12px">开启则保留 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]]，重新安装后可复用构建数据</span>
+      </el-form-item>
+      <el-alert v-if="cleanupMode==='reset' && cleanupForm.remove_workdir" type="warning" :closable="false" show-icon style="margin:-4px 0 12px 100px">
+        <template #default>将删除 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]]（构建产物/缓存，不可恢复）</template>
+      </el-alert>
       <el-form-item label="卸载 Docker">
         <el-switch v-model="cleanupForm.remove_docker" />
         <span style="margin-left:8px;color:#909399;font-size:12px">同时卸载 Docker</span>
@@ -417,7 +428,7 @@ const SchedulePage = {
       installVisible: false, installStep: 0, installLogs: [], installDone: false, installSource: null, installAutoClose: null,
       installTitle: 'Agent 安装进度', installStepTitles: ['SSH 连接', '磁盘扩容', '安装 Docker', '上传文件', '启动服务'],
       cleanupVisible: false, cleanupMode: 'uninstall', cleanupAgent: null,
-      cleanupForm: { remove_docker: false, remove_nfs: false },
+      cleanupForm: { remove_docker: false, remove_nfs: false, remove_workdir: true },
     };
   },
   computed: {
@@ -889,7 +900,7 @@ const SchedulePage = {
     openCleanupDialog(row, mode) {
       this.cleanupAgent = row;
       this.cleanupMode = mode;
-      this.cleanupForm = { remove_docker: false, remove_nfs: (mode === 'uninstall') };
+      this.cleanupForm = { remove_docker: false, remove_nfs: (mode === 'uninstall'), remove_workdir: true };
       this.cleanupVisible = true;
     },
     confirmCleanup() {
@@ -902,7 +913,7 @@ const SchedulePage = {
           const isUninstall = this.cleanupMode === 'uninstall';
           this.startInstallStream(res.data.task_id, {
             title: isUninstall ? 'Agent 卸载进度' : 'Agent 重置进度',
-            steps: ['SSH 连接', '移除 Agent 服务', '删除工作目录', '卸载 NFS', '卸载 Docker'],
+            steps: ['SSH 连接', '移除 Agent 服务', isUninstall ? '删除工作目录' : '工作目录', '卸载 NFS', '卸载 Docker'],
           });
         } else ElementPlus.ElMessage.error(res.msg || '启动失败');
       });

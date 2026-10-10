@@ -44,12 +44,24 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 fail() { echo "$1"; exit 1; }
 
 install_pkgs() {
+    # 安装软件包；失败时回显实际报错（dnf 只要有一个包不存在整条就失败，可选包必须单独装）
+    local out rc
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -qq >/dev/null 2>&1
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" >/dev/null 2>&1
+        out=$(DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" 2>&1)
+        rc=$?
     else
-        dnf install -y "$@" >/dev/null 2>&1 || yum install -y "$@" >/dev/null 2>&1
+        out=$(dnf install -y "$@" 2>&1)
+        rc=$?
+        if [ "$rc" -ne 0 ] && command -v yum >/dev/null 2>&1; then
+            out=$(yum install -y "$@" 2>&1)
+            rc=$?
+        fi
     fi
+    if [ "$rc" -ne 0 ]; then
+        echo "$out" | tail -n 5
+    fi
+    return "$rc"
 }
 
 GROWPART_PKG=cloud-utils-growpart
@@ -94,10 +106,11 @@ for target in $targets; do
             echo "分区 $target 已占满磁盘，无需扩容分区"
         else
             if ! command -v growpart >/dev/null 2>&1; then
-                echo "缺少 growpart，正在安装软件包 ..."
-                install_pkgs "$GROWPART_PKG" gdisk
+                echo "缺少 growpart，正在安装 $GROWPART_PKG ..."
+                install_pkgs "$GROWPART_PKG" || fail "growpart 安装失败，请检查软件源后重试"
+                # gdisk（sgdisk）仅老版 util-linux 的 GPT 扩容需要；EL10 起 growpart 走 sfdisk，装不上不阻塞
+                command -v sgdisk >/dev/null 2>&1 || install_pkgs gdisk || echo "提示：gdisk 不可用，GPT 分区将由 sfdisk 处理"
             fi
-            command -v growpart >/dev/null 2>&1 || fail "growpart 安装失败，请检查软件源后重试"
             grow_out=$(growpart "$disk" "$partn" 2>&1)
             grow_rc=$?
             echo "$grow_out"
@@ -274,8 +287,16 @@ def _run_install(task_id, app):
             _emit(task_id, 3, '安装 Docker', 'success',
                   f'NFS 已挂载：{nfs_server}:{nfs_share} → {mount_dir}（已写入 fstab）')
 
-        # Step 4: 上传文件
+        # Step 4: 上传文件（工作目录已存在则跳过初始化、直接复用，不清理其中数据）
         _emit(task_id, 4, '上传文件', 'running', '正在上传 Agent 二进制 ...')
+        workdir = p.get('work_dir', '/data/cicd')
+        _, out, _ = _exec(ssh, f'[ -d {workdir} ] && echo EXISTS || echo MISSING')
+        if 'EXISTS' in out:
+            _emit(task_id, 4, '上传文件', 'running',
+                  f'检测到工作目录已存在，跳过初始化、直接复用：{workdir}')
+        else:
+            _emit(task_id, 4, '上传文件', 'running',
+                  f'工作目录不存在，将自动创建：{workdir}')
         _upload_files(ssh, p)
         _emit(task_id, 4, '上传文件', 'success', '二进制 / service / 配置 上传完成')
 
@@ -654,12 +675,15 @@ def _run_uninstall(task_id, app):
         _exec(ssh, 'systemctl daemon-reload')
         _emit(task_id, 2, '移除 Agent 服务', 'success', '服务已停止，二进制和 service 文件已删除')
 
-        # Step 3: 删除工作目录
+        # Step 3: 工作目录（卸载始终删除；重置默认保留，前端可勾选删除）
         workdir = p.get('work_dir', '/data/cicd')
-        _emit(task_id, 3, '删除工作目录', 'running', f'正在删除 {workdir} ...')
-        # 构建产物小文件海量（.git/node_modules/target），rm 耗时可能分钟级，超时放宽到 10 分钟
-        _exec(ssh, f'rm -rf {workdir}', timeout=600)
-        _emit(task_id, 3, '删除工作目录', 'success', f'{workdir} 已删除')
+        if p.get('remove_workdir', True):
+            _emit(task_id, 3, '删除工作目录', 'running', f'正在删除 {workdir} ...')
+            # 构建产物小文件海量（.git/node_modules/target），rm 耗时可能分钟级，超时放宽到 10 分钟
+            _exec(ssh, f'rm -rf {workdir}', timeout=600)
+            _emit(task_id, 3, '删除工作目录', 'success', f'{workdir} 已删除')
+        else:
+            _emit(task_id, 3, '保留工作目录', 'skipped', f'已保留 {workdir}')
 
         # Step 4: 卸载 NFS 挂载（可选：重置勾选/卸载默认）
         if p.get('remove_nfs') and p.get('frontend_mount_dir'):

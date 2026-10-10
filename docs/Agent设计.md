@@ -33,8 +33,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/cicd-age
 1. 解析配置，创建 `workdir` 与 `logs` 目录。
 2. 日志双写：stdout（journal）+ `{workdir}/logs/agent.log`（O_TRUNC 启动即截断）。
 3. 打印运行环境检查：Docker 版本与数据目录、Harbor/Registry 登录状态、NFS 挂载、工作目录。
-4. 启动实时指标采集（CPU/内存/磁盘 IO/网络）、Docker 构建缓存采集（30s 一次）、每天凌晨 1 点清理 3 天前缓存。
-5. 采集静态配置（CPU 核数/内存总量/磁盘容量/OS/Docker 版本）。
+4. 启动实时指标采集（CPU/内存/磁盘容量与 IO/网络，每 3s statfs 重采磁盘容量）、Docker 构建缓存采集（30s 一次）、每天凌晨 1 点清理 3 天前缓存。
+5. 采集静态配置（CPU 核数/内存总量/OS/Docker 版本）。
 6. `register()` 注册上线。
 7. 启动日志/任务 HTTP 服务与心跳协程。
 8. 收到 SIGINT/SIGTERM 后等待在跑任务完成再退出（`wg.Wait()`）。
@@ -91,8 +91,10 @@ Git clone → 编译构建 → 产物收集 → Docker 构建 → 镜像推送 H
 
 - 安装入口：调度中心 → 节点 → 安装，Master 通过 SSH 连接节点（凭据或密码认证），自动下发并启动 `cicd-agent`。
 - 支持远程重装、卸载、重置、更新、禁用启用，安装进度通过 SSE 推送。
+- 卸载删除节点工作目录与 DB 记录；重置默认删除工作目录（弹窗可勾选保留以复用构建数据），保留记录支持重新安装。
 - 安装时自动配置 NFS 挂载（`nfs_server`/`nfs_share` → `frontend_mount_dir`）与 Harbor 凭据。
 - 安装前自动扩容磁盘：将根分区 / PV / LV / 文件系统逐层扩展至磁盘全部剩余空间（镜像磁盘固定 200G、实例磁盘更大的场景），无需扩容时自动跳过，扩容失败则中断安装。
+- 安装时自动检测工作目录：已存在则跳过初始化直接复用（不清理其中数据），不存在则自动创建。
 
 ## 相关文档
 
