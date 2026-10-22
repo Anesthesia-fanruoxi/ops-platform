@@ -108,7 +108,8 @@ const SvcMixinLog = {
         pod: this.logPod || '',
         tail: String(this.logTail),
       });
-      window.open('/#/log-view?' + params.toString(), '_blank');
+      // 独立轻量页 /log-view（不走 SPA，首屏只加载日志所需资源）
+      window.open('/log-view?' + params.toString(), '_blank');
     },
     // ─── 日志搜索（Ctrl+F 聚焦；回车提交并跳首个，之后回车/↑/↓ 循环跳转） ──
     commitLogSearch() {

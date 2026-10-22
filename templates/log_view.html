@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日志查看 - 运维平台</title>
+  <link rel="icon" type="image/svg+xml" href="{{ static_asset('favicon.svg') }}">
+  <link rel="stylesheet" href="{{ static_asset('css/pages/common.css') }}">
+  <link rel="stylesheet" href="{{ static_asset('vendor/element-plus.css') }}">
+  <script src="{{ static_asset('vendor/vue.global.prod.js') }}"></script>
+  <script src="{{ static_asset('vendor/element-plus.full.min.js') }}"></script>
+  <script src="{{ static_asset('vendor/element-plus-zh-cn.min.js') }}"></script>
+  <script src="{{ static_asset('js/utils.js') }}"></script>
+  <script src="{{ static_asset('js/modules/deploy/serviceinfo/svc-shared.js') }}"></script>
+  <script src="{{ static_asset('js/modules/deploy/serviceinfo/svc-styles.js') }}"></script>
+  <script src="{{ static_asset('js/modules/deploy/serviceinfo/LogViewPage.js') }}"></script>
+</head>
+<body>
+  {# 独立日志页：只加载日志查看所需脚本，不加载整个后台 SPA（57 个资源 → 9 个），
+     新标签页首屏更快，也不受主应用 SSE 连接数占用的影响 #}
+  <div id="app">
+    <svc-log-view></svc-log-view>
+  </div>
+  <script>
+    (function () {
+      if (!localStorage.getItem('auth_token')) {
+        location.replace('/#/login');
+        return;
+      }
+      var query = {};
+      new URLSearchParams(location.search).forEach(function (v, k) { query[k] = v; });
+      var app = Vue.createApp({
+        compilerOptions: { delimiters: ['[[', ']]'] },
+        template: '<svc-log-view></svc-log-view>',
+      });
+      app.component('svc-log-view', SvcLogViewPage);
+      // LogViewPage 通过 $route.query 取参数，这里用地址栏参数造等价对象
+      app.config.globalProperties.$route = { query: query };
+      app.use(ElementPlus, { locale: window.ElementPlusLocaleZhCn });
+      app.mount('#app');
+
+      // 诊断用：把耗时打印到控制台，排查「打开慢」时可直接贴出来
+      var nav = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || null;
+      console.info('[log-view] 首字节 ' + Math.round(nav ? nav.responseStart : 0) + 'ms / ' +
+        'HTML 完成 ' + Math.round(nav ? nav.responseEnd : 0) + 'ms / ' +
+        'DOMContentLoaded ' + Math.round(nav ? nav.domContentLoadedEventEnd : 0) + 'ms / ' +
+        '脚本执行完 ' + Math.round(performance.now()) + 'ms');
+    })();
+  </script>
+</body>
+</html>

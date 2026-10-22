@@ -172,7 +172,8 @@ const SvcMixinLogfile = {
         service: this.lfServiceName || '',
         file: this.lfContentFile,
       });
-      window.open('/#/log-view?' + params.toString(), '_blank');
+      // 独立轻量页 /log-view（不走 SPA，首屏只加载日志所需资源）
+      window.open('/log-view?' + params.toString(), '_blank');
     },
   },
 };

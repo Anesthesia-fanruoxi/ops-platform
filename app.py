@@ -84,6 +84,12 @@ def create_app(config_name='default'):
     from modules.database.ddl_sync import ddl_sync_manager
     ddl_sync_manager.start(app)
 
+    # 日志独立查看页：轻量独立模板（只加载日志所需 9 个资源，不启动整个 SPA），
+    # 供服务信息页/日志弹窗的「在新标签页打开」使用
+    @app.route('/log-view')
+    def log_view_page():
+        return render_template('log_view.html')
+
     # 页面路由 - 所有页面使用同一个模板，通过Vue Router切换
     @app.route('/')
     @app.route('/<path:path>')

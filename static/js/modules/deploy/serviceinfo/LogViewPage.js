@@ -98,6 +98,13 @@ const SvcLogViewPage = {
       if (v) this.stopDrain();
       else if (this._backlog && this._backlog.length) this.startDrain();
     },
+    // 诊断用：首行日志到达耗时（区分「页面慢」还是「日志流慢」）
+    'lines.length'(n) {
+      if (n && !this._firstLineAt) {
+        this._firstLineAt = performance.now();
+        console.info('[log-view] 首行日志 ' + Math.round(this._firstLineAt) + 'ms');
+      }
+    },
   },
   created() {
     // 参数全部来自路由 query（新标签页 URL：#/log-view?type=live&project=..&env=..&service=..）
