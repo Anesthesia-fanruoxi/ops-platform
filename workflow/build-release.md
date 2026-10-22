@@ -56,6 +56,7 @@ DELETE {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts
 | 1.23 | 2026-10-10 | 修复调度中心磁盘使用率冻结在 Agent 启动时刻的问题（磁盘容量改为每 3s statfs 实时采样，注册/心跳上报实时已用量与使用率）；Agent 安装新增自动磁盘扩容步骤（根分区/PV/LV/文件系统逐层扩展至磁盘剩余空间） | 8fdef3a | sha256:001226c60f031eb20873915697b43b7577fccc24ddb2939ecf31be5f53cb4f0b |
 | 1.24 | 2026-10-10 | Agent 工作目录复用与重置保留：安装时检测到工作目录已存在则跳过初始化直接复用，重置弹窗可勾选保留工作目录（默认保留、卸载仍删除）；磁盘扩容兼容 Rocky 10：growpart 单独安装、gdisk 降为软依赖（EL10 仅 EPEL）并回显软件包安装真实报错 | 766d23b | sha256:ef648e577a0afb494ca760049c8afa4bbec7783f3f43cd5fd023cc87f2dd65ad |
 | 1.25 | 2026-10-22 | 服务日志查看重构：新增 /log-view 独立标签页（实时追踪 + 日志文件两种模式、搜索回车定位与分级配色、暂停/阅读/搜索均只积压不渲染、积压满 500 断开重连、恢复按 20 行/0.5s 平滑吐字）；运行日志弹窗 ESC 全屏先缩再关；Agent 重置工作目录默认保留（开关语义改为清除数据） | 272e866 | sha256:b29a1f644e34f9e8bc4ac7c3e06287eefe3ae1e079b144715bd2dbeb158f30f8 |
+| 1.26 | 2026-10-22 | 修复新增服务端口冲突：不再按 len(services)+1 推算偏移，改为扫描 deploy_config 与本地 service YAML 已占用的 nodePort 后取首个不冲突偏移（三组端口一并避让，29 个/段用尽报明确错误），新服务端口落库；修复 /api/manage/validate/service 因 Environment 与 Project 无外键导致的 JOIN 500（改为显式 ON 条件） | 63e7ae1 | sha256:def9ec18081070e58020c57277b36acfcea1a7a47e2581b05984ecc078b9348f |
 
-> 下一版本：**1.26**（build 时自动递增并回填本表）
+> 下一版本：**1.27**（build 时自动递增并回填本表）
 > 历史行中 tag 已从仓库清理（仅保留最近 3 个），行本身保留作构建历史记录
