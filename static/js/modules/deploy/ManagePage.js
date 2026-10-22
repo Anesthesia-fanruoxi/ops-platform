@@ -569,7 +569,7 @@ const ManagePage = {
       progressEnv: '',
       progressEventSource: null,
       syncEventSource: null,
-      buildsEventSource: null,   // 全局构建状态 SSE（行内「最近构建」实时同步）
+      buildsUnsub: null,        // 全局构建状态 SSE 退订函数（SseHub 多路复用）
       sortField: 'project',
       sortOrder: 'asc',
       // 构建弹窗
@@ -1078,23 +1078,24 @@ const ManagePage = {
     // 全局构建状态 SSE：后端 5s 一帧推所有存活环境最新构建摘要（与环境列表 builds 字段一致），
     // 行内「最近构建」实时同步；构建从服务信息页等其他入口触发时也能及时反映。
     connectBuildsSSE() {
-      const token = localStorage.getItem('auth_token') || '';
-      const es = new EventSource('/api/cicd/builds/envs/stream?token=' + encodeURIComponent(token));
-      this.buildsEventSource = es;
-      es.onmessage = (evt) => {
-        let data;
-        try { data = JSON.parse(evt.data); } catch (e) { return; }
-        const push = data.builds || {};
-        this.envs.forEach((row) => {
-          const nb = push[row.id];
-          if (!nb) return;  // 无构建/环境已删除：保持现状
-          // 有变化才写回，避免每帧触发无意义重渲染
-          if (JSON.stringify(row.builds || {}) === JSON.stringify(nb)) return;
-          row.builds = { backend: nb.backend, frontend: nb.frontend };
-          row.last_build = nb.backend || row.last_build;  // 兼容旧引用（构建弹窗记忆分支）
-        });
-      };
-      // 断线由 EventSource 自动重连，无需处理
+      this.closeBuildsSSE();
+      this.buildsUnsub = SseHub.subscribe('builds_envs', {
+        onmessage: (data) => {
+          const push = data.builds || {};
+          this.envs.forEach((row) => {
+            const nb = push[row.id];
+            if (!nb) return;  // 无构建/环境已删除：保持现状
+            // 有变化才写回，避免每帧触发无意义重渲染
+            if (JSON.stringify(row.builds || {}) === JSON.stringify(nb)) return;
+            row.builds = { backend: nb.backend, frontend: nb.frontend };
+            row.last_build = nb.backend || row.last_build;  // 兼容旧引用（构建弹窗记忆分支）
+          });
+        },
+      });
+    },
+    // 退订全局构建状态 SSE
+    closeBuildsSSE() {
+      if (this.buildsUnsub) { this.buildsUnsub(); this.buildsUnsub = null; }
     },
     copyText(text) {
       const str = String(text);
@@ -1650,7 +1651,7 @@ const ManagePage = {
     onPageVisibility() {
       if (document.hidden) {
         this._sseHidden = true;
-        if (this.buildsEventSource) { this.buildsEventSource.close(); this.buildsEventSource = null; }
+        this.closeBuildsSSE();
         return;
       }
       if (!this._sseHidden) return;
@@ -1663,7 +1664,7 @@ const ManagePage = {
     document.removeEventListener('visibilitychange', this.onPageVisibility);
     if (this.progressEventSource) { this.progressEventSource.close(); this.progressEventSource = null; }
     if (this.syncEventSource) { this.syncEventSource.close(); this.syncEventSource = null; }
-    if (this.buildsEventSource) { this.buildsEventSource.close(); this.buildsEventSource = null; }
+    this.closeBuildsSSE();
     this.stopBpPolling();
   },
   // keep-alive 缓存页：切到别的页签时断开全局构建状态 SSE，切回再连
@@ -1675,7 +1676,7 @@ const ManagePage = {
   },
   deactivated() {
     this._pageDeactivated = true;
-    if (this.buildsEventSource) { this.buildsEventSource.close(); this.buildsEventSource = null; }
+    this.closeBuildsSSE();
   },
   created() {
     // 无回收站操作权限时强制停留在“运行中”标签页

@@ -76,3 +76,69 @@ function loadScriptOnce(url) {
   });
   return __scriptCache[url];
 }
+
+// ─── SSE 多路复用 ─────────────────────────────────────────
+// 浏览器对同一域名（HTTP/1.1）只允许 6 条并发连接，而平台页面挂着多条常驻 SSE
+// （首页监控 / 服务列表 / 构建状态…），多开标签页后配额即被占满。
+// SseHub 让整个标签页只占 1 条连接（/api/stream?topics=...），按 topic 分发给订阅者。
+// topic 集合变化时自动重连（服务端会重发快照帧，页面状态自愈）。
+var SseHub = (function () {
+  var es = null;
+  var subs = {};            // topic -> [{ onmessage, onopen, onerror }]
+  var reconnectTimer = null;
+
+  function fire(topic, key, arg) {
+    var list = subs[topic];
+    if (!list) return;
+    list.slice().forEach(function (h) {
+      try { if (h[key]) h[key](arg); } catch (e) { console.error('[SseHub]', e); }
+    });
+  }
+  function fireAll(key) {
+    Object.keys(subs).forEach(function (t) { fire(t, key); });
+  }
+  function reconnect() {
+    if (es) { es.close(); es = null; }
+    var topics = Object.keys(subs);
+    if (!topics.length) return;
+    var token = localStorage.getItem('auth_token') || '';
+    var url = '/api/stream?topics=' + encodeURIComponent(topics.join(','))
+      + '&token=' + encodeURIComponent(token);
+    es = new EventSource(url);
+    es.onopen = function () { fireAll('onopen'); };
+    es.onmessage = function (e) {
+      var d;
+      try { d = JSON.parse(e.data); } catch (_) { return; }
+      if (!d || !d.topic || d.topic === '__end__') {
+        // 所有主题都自然结束：通知订阅方连接已断
+        if (d && d.topic === '__end__') fireAll('onerror');
+        return;
+      }
+      fire(d.topic, 'onmessage', d);
+    };
+    es.onerror = function () {
+      // EventSource 自身会按同 URL 自动重连；这里只通知订阅方连接状态变化
+      fireAll('onerror');
+    };
+  }
+  function scheduleReconnect() {
+    // 合并同一时刻的多次订阅/退订，避免反复建连
+    if (reconnectTimer) return;
+    reconnectTimer = setTimeout(function () { reconnectTimer = null; reconnect(); }, 60);
+  }
+  function subscribe(topic, handlers) {
+    var list = subs[topic] || (subs[topic] = []);
+    list.push(handlers);
+    scheduleReconnect();
+    return function () { unsubscribe(topic, handlers); };
+  }
+  function unsubscribe(topic, handlers) {
+    var list = subs[topic];
+    if (!list) return;
+    var i = list.indexOf(handlers);
+    if (i >= 0) list.splice(i, 1);
+    if (!list.length) delete subs[topic];
+    scheduleReconnect();
+  }
+  return { subscribe: subscribe };
+})();

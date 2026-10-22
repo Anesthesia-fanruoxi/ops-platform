@@ -19,7 +19,8 @@ const SvcMixinServiceList = {
       loading: false,
       k8sError: '',
       envHasNacos: true,     // 环境是否部署 Nacos（middleware 判定，snapshot 帧携带；false 时隐藏全部 Nacos 入口）
-      svcStream: null,       // 服务卡片 SSE 流（EventSource）
+      svcStreamUnsub: null,  // 服务卡片 SSE 退订函数（SseHub 多路复用）
+
       svcStreamRetry: null,  // SSE 断连重连定时器
 
       restarting: {},         // 各服务「重启」按钮 loading 态（按 svc.name 记录，避免互相影响）
@@ -260,48 +261,45 @@ const SvcMixinServiceList = {
       this.loading = true;
       this.connectSvcStream();
     },
-    // 服务卡片 SSE 订阅：snapshot/update 全量替换 services；error/多次断连回退 HTTP
+    // 服务卡片 SSE 订阅（走 SseHub 多路复用：快照 → 共享 watch → 心跳）。
+    // K8s 不可用推 error 后回退 HTTP
     connectSvcStream() {
-      const token = localStorage.getItem('auth_token') || '';
-      const params = new URLSearchParams({
-        project: this.selectedProject,
-        env: this.selectedEnv,
-        token: token,
-      });
-      const es = new EventSource('/api/deploy/service-info/stream?' + params.toString());
-      this.svcStream = es;
+      const topic = 'svc:' + this.selectedProject + ':' + this.selectedEnv;
+      if (this.svcStreamUnsub) this.svcStreamUnsub();
       let failCount = 0;
-      es.onmessage = (e) => {
-        try {
-          const d = JSON.parse(e.data);
-          if (d.type === 'snapshot' || d.type === 'update') {
-            this.services = d.services || [];
-            if (d.type === 'snapshot') this.envHasNacos = d.env_has_nacos !== false;   // 仅快照帧携带
-            this.k8sError = '';
-            this.loading = false;
-          } else if (d.type === 'error') {
-            this.k8sError = d.error || 'SSE 不可用';
+      this.svcStreamUnsub = SseHub.subscribe(topic, {
+        onopen: () => { failCount = 0; },
+        onmessage: (d) => {
+          try {
+            if (d.type === 'snapshot' || d.type === 'update') {
+              this.services = d.services || [];
+              if (d.type === 'snapshot') this.envHasNacos = d.env_has_nacos !== false;   // 仅快照帧携带
+              this.k8sError = '';
+              this.loading = false;
+            } else if (d.type === 'error') {
+              this.k8sError = d.error || 'SSE 不可用';
+              this.closeSvcStream();
+              this.loadServicesHttp();
+            }
+            // heartbeat 忽略（保活）
+          } catch (err) { /* 忽略非法帧 */ }
+        },
+        onerror: () => {
+          // 网络断连：SseHub 的 EventSource 自动重连；连续失败则回退 HTTP
+          failCount++;
+          if (failCount >= 3) {
             this.closeSvcStream();
+            this.loading = false;
+            this.k8sError = 'SSE 连接失败，已回退 HTTP';
             this.loadServicesHttp();
           }
-          // heartbeat 忽略（保活）
-        } catch (err) { /* 忽略非法帧 */ }
-      };
-      es.onerror = () => {
-        // 网络断连：EventSource 默认自动重连；连续失败则回退 HTTP
-        failCount++;
-        if (failCount >= 3) {
-          this.closeSvcStream();
-          this.loading = false;
-          this.k8sError = 'SSE 连接失败，已回退 HTTP';
-          this.loadServicesHttp();
-        }
-      };
+        },
+      });
     },
     closeSvcStream() {
-      if (this.svcStream) {
-        this.svcStream.close();
-        this.svcStream = null;
+      if (this.svcStreamUnsub) {
+        this.svcStreamUnsub();
+        this.svcStreamUnsub = null;
       }
     },
     // HTTP 列表回退（SSE 不可用 / 后端 K8s 不可用）

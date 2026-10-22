@@ -592,51 +592,81 @@ def _build_current_step(build_no):
     return ''
 
 
+def builds_env_frames(app_obj, environment_id):
+    """环境级构建状态 payload 生成器（SSE 端点与 /api/stream 多路复用共用）。
+
+    5s 一帧；连续 5min 无进行中构建自动结束（topic 结束后多路复用侧会移除该通道）。
+    """
+    import time
+    idle_count = 0  # 空闲轮数（每 5s 一轮）
+    max_idle = 60  # 5s * 60 = 300s = 5min 无报告构建，自动结束
+    while True:
+        # DB 查询收窄到每轮独立短命 app context，结束即归还连接，避免 SSE 常驻占用连接池
+        with app_obj.app_context():
+            builds = Build.query.filter(
+                Build.environment_id == environment_id,
+                Build.status.in_(('running', 'pending', 'waiting')),
+            ).order_by(Build.id.desc()).all()
+            items = [{
+                'id': b.id,
+                'build_no': b.build_no,
+                'status': b.status,
+                'project_type': b.project_type or 'backend',
+                'branch': b.branch or '',
+                'current_step': _build_current_step(b.build_no),
+            } for b in builds]
+        yield {'environment_id': environment_id, 'builds': items}
+        # 有构建时重置空闲计数；无构建时递增
+        if builds:
+            idle_count = 0
+        else:
+            idle_count += 1
+        # 空闲超阈值自动结束
+        if idle_count >= max_idle:
+            return
+        time.sleep(5)
+
+
 @require_any_permission('page:cicd', 'op:cicd_build')
 def env_builds_stream(environment_id):
     """
     环境级构建状态 SSE：实时推送该环境进行中的构建（running/pending），
     供服务信息页顶部显示「构建中」状态（即使构建是从环境信息页触发的）。
     GET /api/cicd/builds/env/<environment_id>/stream?token=
-    断线自动关闭；连续一段时间（5min）无进行中构建自动关闭，避免线程不必要地占用。
     """
-    import time
-    from flask import Response, current_app
-    # 生成器懒执行（响应返回后请求上下文已 pop），先捕获 app 对象；
-    # DB 查询收窄到每轮独立短命 app context，结束即归还连接，避免 SSE 常驻占用连接池
+    from flask import current_app
     app_obj = current_app._get_current_object()
 
     def generate():
-        idle_count = 0  # 空闲轮数（每 5s 一轮）
-        max_idle = 60  # 5s * 60 = 300s = 5min 无报告构建，自动关闭
-        while True:
-            with app_obj.app_context():
-                builds = Build.query.filter(
-                    Build.environment_id == environment_id,
-                    Build.status.in_(('running', 'pending', 'waiting')),
-                ).order_by(Build.id.desc()).all()
-                items = [{
-                    'id': b.id,
-                    'build_no': b.build_no,
-                    'status': b.status,
-                    'project_type': b.project_type or 'backend',
-                    'branch': b.branch or '',
-                    'current_step': _build_current_step(b.build_no),
-                } for b in builds]
-            payload = json.dumps({'environment_id': environment_id, 'builds': items}, ensure_ascii=False)
-            yield f"data: {payload}\n\n"
-            # 有构建时重置空闲计数；无构建时递增
-            if builds:
-                idle_count = 0
-            else:
-                idle_count += 1
-            # 空闲超阈值自动结束，前端 onerror 已有兜底
-            if idle_count >= max_idle:
-                break
-            time.sleep(5)
+        frames = builds_env_frames(app_obj, environment_id)
+        try:
+            for frame in frames:
+                yield f"data: {json.dumps(frame, ensure_ascii=False)}\n\n"
+        finally:
+            # 生成器可能已被提前关闭/上下文已回收，close 异常一律忽略
+            try:
+                frames.close()
+            except Exception:
+                pass
 
     return Response(generate(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
+def builds_envs_frames(app_obj):
+    """全局构建状态 payload 生成器（SSE 端点与 /api/stream 多路复用共用）。5s 一帧。"""
+    import time
+    while True:
+        with app_obj.app_context():
+            last_builds = build_service.get_envs_last_builds(only_alive_envs=True)
+            builds = {}
+            for env_id, lb_map in last_builds.items():
+                builds[str(env_id)] = {
+                    'backend': build_service.summarize_build(lb_map.get('backend')),
+                    'frontend': build_service.summarize_build(lb_map.get('frontend')),
+                }
+        yield {'builds': builds}
+        time.sleep(5)
 
 
 @require_any_permission('page:manage', 'page:cicd', 'op:cicd_build')
@@ -645,26 +675,21 @@ def envs_builds_stream():
     全局构建状态 SSE：推送所有存活环境（未删除）每种类型的最新构建摘要，
     供环境信息页行内「最近构建」实时同步（构建从任意入口触发都能及时反映，无需手动刷新）。
     GET /api/cicd/builds/envs/stream?token=
-    每 5s 一帧；推送结构按环境 id 分组，与环境列表接口的 builds 字段一致。
     """
-    from flask import Response, current_app
-    # 生成器懒执行（响应返回后请求上下文已 pop），先捕获 app 对象；
-    # DB 查询收窄到每轮独立短命 app context，结束即归还连接（与环境级 SSE 一致）
+    from flask import current_app
     app_obj = current_app._get_current_object()
 
     def generate():
-        while True:
-            with app_obj.app_context():
-                last_builds = build_service.get_envs_last_builds(only_alive_envs=True)
-                builds = {}
-                for env_id, lb_map in last_builds.items():
-                    builds[str(env_id)] = {
-                        'backend': build_service.summarize_build(lb_map.get('backend')),
-                        'frontend': build_service.summarize_build(lb_map.get('frontend')),
-                    }
-            payload = json.dumps({'builds': builds}, ensure_ascii=False)
-            yield f"data: {payload}\n\n"
-            time.sleep(5)
+        frames = builds_envs_frames(app_obj)
+        try:
+            for frame in frames:
+                yield f"data: {json.dumps(frame, ensure_ascii=False)}\n\n"
+        finally:
+            # 生成器可能已被提前关闭/上下文已回收，close 异常一律忽略
+            try:
+                frames.close()
+            except Exception:
+                pass
 
     return Response(generate(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})

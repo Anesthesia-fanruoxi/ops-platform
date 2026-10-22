@@ -19,7 +19,7 @@ const SvcMixinBuildProgress = {
       bpTimer: null,
       selectedEnvData: {},  // 当前环境详情（含最近构建记录 builds）
       activeBuild: null,   // 当前环境进行中的构建（SSE 推送，点击打开进度抽屉）
-      envBuildStream: null,
+      envBuildUnsub: null,   // 环境构建状态 SSE 退订函数（SseHub 多路复用）
       // 构建记录弹窗
       buildRecordsVisible: false,
       buildRecords: [],
@@ -268,7 +268,8 @@ const SvcMixinBuildProgress = {
       }).catch(() => { /* 取消确认 */ });
     },
     // 订阅环境进行中构建状态（SSE，5s 一帧；构建可能来自环境信息页）。
-    // 每次订阅前先断开上一个 SSE；切换环境/项目后，旧连接残留帧按 environment_id 丢弃，
+    // 走 SseHub 多路复用：与首页监控/服务列表共用同一条连接。
+    // 每次订阅前先退订上一个；切换环境/项目后，旧连接残留帧按 environment_id 丢弃，
     // 避免误把上个环境的构建状态显示在当前环境上。
     subscribeEnvBuilds() {
       this.closeEnvBuildStream();
@@ -276,40 +277,30 @@ const SvcMixinBuildProgress = {
       const env = this.selectedEnvData;
       if (!env || !env.id) return;
       const envId = env.id;
-      const token = localStorage.getItem('auth_token') || '';
-      const es = new EventSource('/api/cicd/builds/env/' + envId + '/stream?token=' + encodeURIComponent(token));
-      this.envBuildStream = es;
-      es.onmessage = (evt) => {
-        try {
-          const d = JSON.parse(evt.data);
-          // 流已断开或环境已切换：丢弃不属于当前环境的推送
-          if (d.environment_id !== envId || !this.envBuildStream || this.selectedEnvData.id !== envId) return;
-          const builds = d.builds || [];
-          const run = builds.find(b => b.status === 'running') || builds.find(b => b.status === 'pending') || null;
-          const wasRunning = !!this.activeBuild;
-          this.activeBuild = run ? { id: run.id, build_no: run.build_no, status: run.status, project_type: run.project_type, branch: run.branch, current_step: run.current_step || '' } : null;
-          // 进行中构建结束：刷新普通 list 接口，让「最近构建」状态及时更新
-          if (wasRunning && !run) this.loadEnvs();
-        } catch (e) { /* 忽略解析错误 */ }
-      };
-      es.onerror = () => {
-        es.close();
-        this.envBuildStream = null;
-        // 流断开时清掉残留的「构建中」指示，避免 SSE 断开后 UI 卡死在构建态
-        if (this.activeBuild) {
-          this.activeBuild = null;
-          this.loadEnvs();
-        }
-        // 自动重连：10s 后重建 SSE（仅当环境未切换、未主动关闭）
-        setTimeout(() => {
-          if (this.selectedEnvData && this.selectedEnvData.id === envId && !this.envBuildStream) {
-            this.subscribeEnvBuilds();
+      this.envBuildUnsub = SseHub.subscribe('builds_env:' + envId, {
+        onmessage: (d) => {
+          try {
+            // 流已断开或环境已切换：丢弃不属于当前环境的推送
+            if (d.environment_id !== envId || !this.envBuildUnsub || this.selectedEnvData.id !== envId) return;
+            const builds = d.builds || [];
+            const run = builds.find(b => b.status === 'running') || builds.find(b => b.status === 'pending') || null;
+            const wasRunning = !!this.activeBuild;
+            this.activeBuild = run ? { id: run.id, build_no: run.build_no, status: run.status, project_type: run.project_type, branch: run.branch, current_step: run.current_step || '' } : null;
+            // 进行中构建结束：刷新普通 list 接口，让「最近构建」状态及时更新
+            if (wasRunning && !run) this.loadEnvs();
+          } catch (e) { /* 忽略解析错误 */ }
+        },
+        onerror: () => {
+          // 流断开时清掉残留的「构建中」指示，避免 SSE 断开后 UI 卡死在构建态
+          if (this.activeBuild) {
+            this.activeBuild = null;
+            this.loadEnvs();
           }
-        }, 10000);
-      };
+        },
+      });
     },
     closeEnvBuildStream() {
-      if (this.envBuildStream) { this.envBuildStream.close(); this.envBuildStream = null; }
+      if (this.envBuildUnsub) { this.envBuildUnsub(); this.envBuildUnsub = null; }
     },
   },
 };

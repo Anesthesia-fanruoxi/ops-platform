@@ -28,7 +28,7 @@ const SvcLogViewPage = {
       searchWord: '',
       searchIdx: -1,
       // live 模式状态
-      es: null,
+      streamUnsub: null,   // 日志 SSE 退订函数（SseHub 多路复用）
       connecting: false,    // 正在建立连接（避免按钮/状态闪烁）
       connected: false,
       paused: false,        // 暂停追踪：SSE 保持连接，新行只进积压区
@@ -220,38 +220,32 @@ const SvcLogViewPage = {
       this.connected = false;
       this.connecting = true;
       this.loadingTip = '正在连接日志流...';
-      const token = localStorage.getItem('auth_token') || '';
-      const params = new URLSearchParams({
-        project: this.lvProject,
-        env: this.lvEnv,
-        pod: this.lvPod,
-        service: this.lvService || '',
-        tail: String(this.lvTail),
-        token: token,
-      });
-      const es = new EventSource('/api/deploy/service-info/log/stream?' + params.toString());
-      this.es = es;
+      // 走 SseHub 多路复用（独立页只有这一个主题，仍占 1 条连接）
       const self = this;
-      es.onopen = () => {
-        self.connecting = false;
-        self.connected = true;
-        self.loadingTip = '';
-        self.scheduleFlush();
-      };
-      es.onmessage = (e) => {
-        let d;
-        try { d = JSON.parse(e.data); } catch (err) { return; }  // 忽略非法帧
-        if (d.error) { self.onStreamEnd('[错误] ' + d.error); return; }
-        if (d.end) { self.onStreamEnd('── 日志流结束（Pod 退出或重启）──'); return; }
-        self.receiveLine(d.line);
-      };
-      es.onerror = () => {
-        // 断连不自动重连（避免历史行重复），由用户点「重连」
-        self.connected = false;
-        self.connecting = false;
-        es.close();
-        if (self.es === es) self.es = null;
-      };
+      const topic = 'log:' + this.lvProject + ':' + this.lvEnv + ':'
+        + this.lvPod + ':' + (this.lvService || '') + ':' + String(this.lvTail);
+      this.streamUnsub = SseHub.subscribe(topic, {
+        onopen: () => {
+          // 连接（重）建 = 重建：清空已渲染行，服务器会重放最近 tail 行
+          self.connecting = false;
+          self.connected = true;
+          self.loadingTip = '';
+          self.lines = [];
+          self.seq = 0;
+          self._pending = [];
+          self._raf = null;
+          self.scheduleFlush();
+        },
+        onmessage: (d) => {
+          if (d.error) { self.onStreamEnd('[错误] ' + d.error); return; }
+          if (d.end) { self.onStreamEnd('── 日志流结束（Pod 退出或重启）──'); return; }
+          if (d.line !== undefined) self.receiveLine(d.line);
+        },
+        onerror: () => {
+          self.connected = false;
+          self.connecting = false;
+        },
+      });
     },
     // 流结束/出错：提示行排在积压尾部（有积压时继续按节奏吐），随后断开
     onStreamEnd(text) {
@@ -362,7 +356,7 @@ const SvcLogViewPage = {
       this.detached = false;
     },
     closeStream() {
-      if (this.es) { this.es.close(); this.es = null; }
+      if (this.streamUnsub) { this.streamUnsub(); this.streamUnsub = null; }
       if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
       this._pending = [];
       this.connected = false;

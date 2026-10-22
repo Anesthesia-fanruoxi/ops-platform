@@ -229,21 +229,92 @@ def update_service_configmap():
 
 # ─── Pod 日志 SSE 流 ──────────────────────────────────────
 
-@require_permission('page:service_info')
-def pod_log_stream():
-    """Pod 日志 SSE 流：先回放最近 N 行历史，再 follow 实时跟随。
+def pod_log_frames(app_obj, namespace, pod, service, tail):
+    """Pod 日志 payload 生成器（SSE 端点与 /api/stream 多路复用共用）。
 
-    EventSource 无法带 Header，token 走 query 参数（core/security 已支持）。
-
-    跟随阶段用「后台线程读 k8s 流 + 队列 + 心跳」：
-    浏览器关标签/断网时，K8s 日志流不会自己报错，若生成器一直阻塞在 for 循环里，
-    这条 SSE 线程（以及底层连接）会一直挂着不退出。这里每 20s 写一帧 SSE 注释心跳，
-    写失败即说明客户端已断开 → 生成器退出 → 关流、停线程，避免线程/连接泄漏。
+    yield dict：{'line': str} / {'error': str} / {'end': True} / {'ping': True}。
+    {'ping'} 是空转帧：K8s follow 流静默时按心跳周期吐出，
+    让外层（SSE 写出 / 多路复用泵线程）有机会感知客户端断开并触发本生成器清理。
     """
     import queue
     import threading
     import time
 
+    from modules.deploy.services.kube_client import read_pod_log, stream_pod_log
+
+    stream = None
+    stop = threading.Event()
+    q = queue.Queue(maxsize=2000)
+    try:
+        # app context 按需收窄：仅历史回放/开流等读 DB 配置的段持有，用完即归还连接；
+        # follow 迭代期间不持有，避免 SSE 常驻占用连接池（池满拖垮全部 API）
+        with app_obj.app_context():
+            history = read_pod_log(namespace, pod, tail_lines=tail, prefer_container=service)
+            stream = stream_pod_log(namespace, pod, prefer_container=service)
+        # 历史回放
+        for line in history.splitlines():
+            yield {'line': line}
+
+        # 后台线程消费 follow 流：外层才能按时感知断开
+        def _pump():
+            try:
+                for raw in stream:
+                    if stop.is_set():
+                        break
+                    q.put(raw)
+            except Exception as e:  # 流被关闭/网络异常
+                try:
+                    q.put_nowait(e)
+                except Exception:
+                    pass
+            finally:
+                try:
+                    q.put_nowait(None)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_pump, daemon=True, name=f'podlog-{pod[:20]}').start()
+
+        last_ping = time.time()
+        while True:
+            try:
+                item = q.get(timeout=1)
+            except queue.Empty:
+                # 无日志可推：到点吐空转帧（外层转成 SSE 注释心跳或直接丢弃）
+                if time.time() - last_ping >= _POD_LOG_HEARTBEAT_SECONDS:
+                    last_ping = time.time()
+                    yield {'ping': True}
+                continue
+
+            if item is None:
+                break
+            if isinstance(item, Exception):
+                yield {'error': str(item)}
+                return
+            yield {'line': item.decode('utf-8', errors='replace').rstrip('\n')}
+            last_ping = time.time()
+
+        yield {'end': True}
+    except GeneratorExit:
+        return
+    except Exception as e:
+        yield {'error': str(e)}
+    finally:
+        # 客户端断开/正常结束时：通知读取线程退出并关闭底层 K8s 日志流
+        stop.set()
+        if stream is not None:
+            try:
+                stream.close()
+            except Exception:
+                pass
+
+
+@require_permission('page:service_info')
+def pod_log_stream():
+    """Pod 日志 SSE 流：先回放最近 N 行历史，再 follow 实时跟随。
+
+    EventSource 无法带 Header，token 走 query 参数（core/security 已支持）。
+    """
     project = request.args.get('project', '')
     env = request.args.get('env', '')
     pod = request.args.get('pod', '')
@@ -254,85 +325,28 @@ def pod_log_stream():
     tail = max(50, min(tail, 5000))
     namespace = f'{project}-{env}-service'
 
-    from modules.deploy.services.kube_client import read_pod_log, stream_pod_log
-
-    # 生成器懒执行（响应返回后请求上下文已 pop），先捕获 app 对象，
-    # 在生成器内手动推入应用上下文，否则 get_setting 访问 DB 报
-    # Working outside of application context
     from flask import current_app
     app_obj = current_app._get_current_object()
 
     def generate():
-        stream = None
-        stop = threading.Event()
-        q = queue.Queue(maxsize=2000)
+        frames = pod_log_frames(app_obj, namespace, pod, service, tail)
         try:
-            # app context 按需收窄：仅历史回放/开流等读 DB 配置的段持有，用完即归还连接；
-            # follow 迭代期间不持有，避免 SSE 常驻占用连接池（池满拖垮全部 API）
-            with app_obj.app_context():
-                history = read_pod_log(namespace, pod, tail_lines=tail, prefer_container=service)
-                stream = stream_pod_log(namespace, pod, prefer_container=service)
-            # 历史回放
-            for line in history.splitlines():
-                yield f'data: {json.dumps({"line": line}, ensure_ascii=False)}\n\n'
-
-            # 后台线程消费 follow 流：主线程才能按时写心跳、感知断开
-            def _pump():
-                try:
-                    for raw in stream:
-                        if stop.is_set():
-                            break
-                        q.put(raw)
-                except Exception as e:  # 流被关闭/网络异常
-                    try:
-                        q.put_nowait(e)
-                    except Exception:
-                        pass
-                finally:
-                    try:
-                        q.put_nowait(None)
-                    except Exception:
-                        pass
-
-            pump = threading.Thread(target=_pump, daemon=True, name=f'podlog-{pod[:20]}')
-            pump.start()
-
-            last_ping = time.time()
-            while True:
-                try:
-                    item = q.get(timeout=1)
-                except queue.Empty:
-                    # 无日志可推：到点写心跳（SSE 注释行，EventSource 不会触发 onmessage）
-                    if time.time() - last_ping >= _POD_LOG_HEARTBEAT_SECONDS:
-                        last_ping = time.time()
-                        yield ': ping\n\n'
-                    continue
-
-                if item is None:
-                    break
-                if isinstance(item, Exception):
-                    yield f'data: {json.dumps({"error": str(item)}, ensure_ascii=False)}\n\n'
-                    return
-                line = item.decode('utf-8', errors='replace').rstrip('\n')
-                yield f'data: {json.dumps({"line": line}, ensure_ascii=False)}\n\n'
-                last_ping = time.time()
-
-            yield 'data: {"end": true}\n\n'
-        except GeneratorExit:
-            return
-        except Exception as e:
+            for frame in frames:
+                if frame.get('ping'):
+                    # 空转帧 → SSE 注释行（EventSource 不触发 onmessage，但保持连接活性）
+                    yield ': ping\n\n'
+                elif 'line' in frame:
+                    yield f'data: {json.dumps({"line": frame["line"]}, ensure_ascii=False)}\n\n'
+                elif 'error' in frame:
+                    yield f'data: {json.dumps({"error": frame["error"]}, ensure_ascii=False)}\n\n'
+                elif frame.get('end'):
+                    yield 'data: {"end": true}\n\n'
+        finally:
+            # 生成器可能已被提前关闭/上下文已回收，close 异常一律忽略
             try:
-                yield f'data: {json.dumps({"error": str(e)}, ensure_ascii=False)}\n\n'
+                frames.close()
             except Exception:
                 pass
-        finally:
-            # 客户端断开/正常结束时：通知读取线程退出并关闭底层 K8s 日志流
-            stop.set()
-            if stream is not None:
-                try:
-                    stream.close()
-                except Exception:
-                    pass
 
     return Response(generate(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})

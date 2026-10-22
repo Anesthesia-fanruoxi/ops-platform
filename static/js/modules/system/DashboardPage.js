@@ -79,7 +79,7 @@ const DashboardPage = {
     return {
       now: '', location: window.location.host || '', entryGroups: [],
       loadingStats: false, stats: {}, recentBuilds: [],
-      monitor: null, monitorChecks: {}, lastUpdate: '', es: null, _timer: null,
+      monitor: null, monitorChecks: {}, lastUpdate: '', _timer: null,
     };
   },
   computed: {
@@ -194,22 +194,18 @@ const DashboardPage = {
     // 监控数据走 SSE（/api/monitor/stream，同监控信息页）：一帧同时更新整体状态 + 六维度卡片
     connect() {
       this.closeMonitor();
-      const token = localStorage.getItem('auth_token') || '';
-      this.es = new EventSource('/api/monitor/stream?token=' + encodeURIComponent(token));
-      this.es.onmessage = (e) => {
-        try {
-          const d = JSON.parse(e.data);
+      this.monitorUnsub = SseHub.subscribe('monitor', {
+        onmessage: (d) => {
           if (d.type === 'health' && d.data) {
             this.monitor = d.data;
             this.monitorChecks = d.data.checks || {};
             this.lastUpdate = new Date().toLocaleTimeString('zh-CN', { hour12: false });
           }
-        } catch (err) { /* 忽略解析错误 */ }
-      };
-      this.es.onerror = () => { /* EventSource 自动重连 */ };
+        },
+      });
     },
     closeMonitor() {
-      if (this.es) { this.es.close(); this.es = null; }
+      if (this.monitorUnsub) { this.monitorUnsub(); this.monitorUnsub = null; }
     },
     // 快捷入口：按父菜单分组（每组展示子菜单），按权限过滤，取前 5 组
     buildEntryGroups() {

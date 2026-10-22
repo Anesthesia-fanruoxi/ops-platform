@@ -66,26 +66,42 @@ def dashboard_monitor_check(check_key):
 
 
 # 首页监控 SSE：登录即可（全局 token 校验兜底），保留供聚合/兼容
+def monitor_frames(app_obj, interval=5):
+    """监控健康检查 payload 生成器（SSE 端点与 /api/stream 多路复用共用）。
+
+    yield {'type': 'health'|'error', ...}；interval 限制在 2~30 秒。
+    """
+    from modules.system.healthz import run_checks_cached
+    interval = max(2, min(interval, 30))
+    while True:
+        # app context 按次收窄：每轮检查独立推入、结束即 teardown 归还 DB 连接；
+        # 若整体持有，每条 SSE 连接会常驻占用连接池，池满后全部 API 排队等连接（P99 飙高）
+        try:
+            with app_obj.app_context():
+                result = run_checks_cached()
+            yield {'type': 'health', 'data': result}
+        except Exception as e:
+            yield {'type': 'error', 'data': {'detail': str(e)[:200]}}
+        time.sleep(interval)
+
+
 def monitor_stream():
     """监控信息 SSE 流：定时推送平台多维度健康检查结果（缓存层：N 个连接共享同一份结果）"""
-    from modules.system.healthz import run_checks_cached
+    from flask import current_app
     app_obj = current_app._get_current_object()
     interval = request.args.get('interval', 5, type=int)
-    interval = max(2, min(interval, 30))
 
     def generate():
-        # 生成器懒执行（响应返回后请求上下文已 pop）。app context 按次收窄：
-        # 每轮检查独立推入、结束即 teardown 归还 DB 连接；若整体持有，
-        # 每条 SSE 连接会常驻占用连接池，池满后全部 API 排队等连接（P99 飙高）
-        while True:
+        frames = monitor_frames(app_obj, interval)
+        try:
+            for frame in frames:
+                yield f'data: {json.dumps(frame, ensure_ascii=False)}\n\n'
+        finally:
+            # 生成器可能已被提前关闭/上下文已回收，close 异常一律忽略
             try:
-                with app_obj.app_context():
-                    result = run_checks_cached()
-                payload = json.dumps({'type': 'health', 'data': result}, ensure_ascii=False)
-            except Exception as e:
-                payload = json.dumps({'type': 'error', 'data': {'detail': str(e)[:200]}}, ensure_ascii=False)
-            yield f'data: {payload}\n\n'
-            time.sleep(interval)
+                frames.close()
+            except Exception:
+                pass
 
     return Response(
         generate(),

@@ -25,19 +25,21 @@ def _sse(data, event=None):
     return prefix + 'data: ' + json.dumps(data, ensure_ascii=False) + '\n\n'
 
 
-@require_permission('page:service_info')
-def service_info_stream():
-    """服务卡片 SSE 流：快照 → 订阅共享 watch hub → 心跳；K8s 不可用推 error 后关闭"""
-    project = request.args.get('project', '')
-    env = request.args.get('env', '')
-    if not project or not env:
-        return error_response('缺少参数 project / env', 400)
+def svc_stream_frames(app_obj, project, env):
+    """服务卡片 SSE 的 payload 生成器：快照 → 订阅共享 watch hub → 心跳。
+
+    yield 的是 dict 帧（{'type': 'snapshot'|'update'|'error'|'heartbeat', ...}），
+    SSE 端点与 /api/stream 多路复用共用本生成器。
+
+    注意：所有 yield 都在 app context 之外（app context 只包住「读 DB/建 watch」那一段），
+    否则客户端中途断开时生成器在 with 块内被关闭，会触发 context 重复 pop 的 LookupError。
+    """
     namespace = f'{project}-{env}-service'
 
-    from flask import current_app
-    app_obj = current_app._get_current_object()
-
-    def generate():
+    sid = None
+    q = None
+    snapshot = None
+    try:
         # app context 按需收窄：仅快照/订阅等需要读 DB 配置的段持有，用完即归还连接；
         # watch 循环（纯内存队列消费 + 心跳）不再长期持有，避免 SSE 常驻占用连接池
         with app_obj.app_context():
@@ -47,34 +49,65 @@ def service_info_stream():
                 from modules.deploy.services.nacos_http_client import env_has_nacos
                 env_nacos = env_has_nacos(project, env)
                 services = kube_client.build_service_snapshot(namespace, env_nacos=env_nacos)
-                yield _sse({'type': 'snapshot', 'services': services,
-                            'env_has_nacos': env_nacos})
+                snapshot = {'type': 'snapshot', 'services': services,
+                            'env_has_nacos': env_nacos}
             except Exception as e:
-                yield _sse({'type': 'error', 'error': str(e)})
-                return
+                snapshot = {'type': 'error', 'error': str(e)}
+            if snapshot.get('type') != 'error':
+                # 订阅共享 hub（同 namespace 多连接共用一组 K8s watch）
+                sid, q = kube_watch_hub.subscribe(namespace)
+    except LookupError:
+        # 外层请求上下文已被清理（客户端提前断开）：直接结束
+        return
 
-            # 订阅共享 hub（同 namespace 多连接共用一组 K8s watch）
-            sid, q = kube_watch_hub.subscribe(namespace)
+    yield snapshot
+    if snapshot.get('type') == 'error':
+        return
 
-        last_heartbeat = time.time()
+    last_heartbeat = time.time()
+    try:
+        while True:
+            try:
+                frame = q.get(timeout=1)
+            except queue.Empty:
+                frame = None
+            if frame is not None:
+                if frame.get('type') == 'error':
+                    yield frame
+                    return
+                yield frame
+            if time.time() - last_heartbeat >= 30:
+                last_heartbeat = time.time()
+                yield {'type': 'heartbeat', 'ts': int(time.time())}
+    finally:
         try:
-            while True:
-                try:
-                    frame = q.get(timeout=1)
-                except queue.Empty:
-                    frame = None
-                if frame is not None:
-                    if frame.get('type') == 'error':
-                        yield _sse(frame)
-                        return
-                    yield _sse(frame)
-                if time.time() - last_heartbeat >= 30:
-                    last_heartbeat = time.time()
-                    yield _sse({'type': 'heartbeat', 'ts': int(time.time())})
-        except GeneratorExit:
-            return
-        finally:
             kube_watch_hub.unsubscribe(namespace, sid)
+        except Exception:
+            pass
+
+
+@require_permission('page:service_info')
+def service_info_stream():
+    """服务卡片 SSE 流：快照 → 订阅共享 watch hub → 心跳；K8s 不可用推 error 后关闭"""
+    project = request.args.get('project', '')
+    env = request.args.get('env', '')
+    if not project or not env:
+        return error_response('缺少参数 project / env', 400)
+
+    from flask import current_app
+    app_obj = current_app._get_current_object()
+
+    def generate():
+        frames = svc_stream_frames(app_obj, project, env)
+        try:
+            for frame in frames:
+                yield _sse(frame)
+        finally:
+            # 生成器可能已被提前关闭/上下文已回收，close 异常一律忽略
+            try:
+                frames.close()
+            except Exception:
+                pass
 
     return Response(generate(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})

@@ -19,7 +19,7 @@ const SvcMixinLog = {
       logSearchInput: '',    // 输入框实时值（不参与日志行渲染）
       logSearchWord: '',     // 已提交的搜索词（回车/清空才变化）
       logSearchIdx: -1,
-      logStream: null,
+      logUnsub: null,        // 日志 SSE 退订函数（SseHub 多路复用）
       streamConnected: false,
       logPaused: false,      // 手动暂停渲染：SSE 保持连接，新行只进积压区
       logReading: false,     // 上滚阅读（不在底部）：同样只积压不渲染
@@ -198,41 +198,36 @@ const SvcMixinLog = {
       this._logPending = [];
       this._logRaf = null;
       this.streamConnected = false;
-      const token = localStorage.getItem('auth_token') || '';
-      const params = new URLSearchParams({
-        project: this.selectedProject,
-        env: this.selectedEnv,
-        pod: this.logPod,
-        service: this.logServiceName || '',
-        tail: String(this.logTail),
-        token: token,
-      });
-      const es = new EventSource('/api/deploy/service-info/log/stream?' + params.toString());
-      this.logStream = es;
+      // 走 SseHub 多路复用：与首页监控/服务列表/构建状态共用同一条浏览器连接
       const self = this;
-      es.onopen = () => {
-        self.streamConnected = true;
-        self._scheduleLogFlush();
-      };
-      es.onmessage = (e) => {
-        let d;
-        try { d = JSON.parse(e.data); } catch (err) { return; }  // 忽略非法帧
-        if (d.error) {
-          self.onStreamEnd('[错误] ' + d.error);
-          return;
-        }
-        if (d.end) {
-          self.onStreamEnd('── 日志流结束（Pod 退出或重启）──');
-          return;
-        }
-        self.receiveLogLine(d.line);
-      };
-      es.onerror = () => {
-        // 日志流断连不自动重连（避免历史行重复刷屏），置为未连接由用户手动重连
-        self.streamConnected = false;
-        es.close();
-        if (self.logStream === es) self.logStream = null;
-      };
+      const topic = 'log:' + this.selectedProject + ':' + this.selectedEnv + ':'
+        + this.logPod + ':' + (this.logServiceName || '') + ':' + String(this.logTail);
+      this.logUnsub = SseHub.subscribe(topic, {
+        onopen: () => {
+          // 连接（重）建 = 重建：清空已渲染行，服务器会重放最近 tail 行
+          self.streamConnected = true;
+          self.logLines = [];
+          svcLogKeySeq = 0;
+          self._logPending = [];
+          self._logRaf = null;
+          self._scheduleLogFlush();
+        },
+        onmessage: (d) => {
+          if (d.error) {
+            self.onStreamEnd('[错误] ' + d.error);
+            return;
+          }
+          if (d.end) {
+            self.onStreamEnd('── 日志流结束（Pod 退出或重启）──');
+            return;
+          }
+          if (d.line !== undefined) self.receiveLogLine(d.line);
+        },
+        onerror: () => {
+          // 断连：置为未连接（EventSource/SseHub 会按原 URL 自动重连）
+          self.streamConnected = false;
+        },
+      });
     },
     // 流结束/出错：提示行排在积压尾部（有积压时继续按节奏吐），随后断开
     onStreamEnd(text) {
@@ -363,9 +358,9 @@ const SvcMixinLog = {
       this.logDetached = false;
     },
     closeLogStream() {
-      if (this.logStream) {
-        this.logStream.close();
-        this.logStream = null;
+      if (this.logUnsub) {
+        this.logUnsub();
+        this.logUnsub = null;
       }
       if (this._logRaf) {
         cancelAnimationFrame(this._logRaf);

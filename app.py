@@ -11,8 +11,9 @@ from modules.deploy import routes as deploy_routes
 from modules.nginx import routes as nginx_routes
 from modules.database import routes as database_routes
 from modules.cicd import routes as cicd_routes
+from modules.stream import routes as stream_routes
 
-MODULES = [system_routes, deploy_routes, nginx_routes, database_routes, cicd_routes]
+MODULES = [system_routes, deploy_routes, nginx_routes, database_routes, cicd_routes, stream_routes]
 
 
 def create_app(config_name='default'):
