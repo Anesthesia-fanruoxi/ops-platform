@@ -122,11 +122,13 @@ const SvcLogViewPage = {
   mounted() {
     document.title = this.lvTitle + ' - 运维平台';
     window.addEventListener('keydown', this.onKeydown);
+    document.addEventListener('visibilitychange', this.onDocumentVisibility);
     if (this.lvType === 'file') this.loadFile();
     else this.connectStream();
   },
   beforeUnmount() {
     window.removeEventListener('keydown', this.onKeydown);
+    document.removeEventListener('visibilitychange', this.onDocumentVisibility);
     this.stopDrain();
     this.closeStream();
   },
@@ -187,6 +189,23 @@ const SvcLogViewPage = {
       });
     },
     // ─── live：SSE 实时追踪 ─────────────────────────────────
+    // 浏览器标签页切到后台时断开 SSE、回到前台重连：
+    // 浏览器对同一域名只允许 6 条 HTTP/1.1 连接，每个日志标签页常驻 1 条 SSE，
+    // 开着多个日志页就会把配额吃满，导致新页签/首页监控一直「检测中」
+    onDocumentVisibility() {
+      if (this.lvType !== 'live') return;
+      if (document.hidden) {
+        this._hiddenClosed = true;
+        this.closeStream();
+        return;
+      }
+      if (!this._hiddenClosed) return;
+      this._hiddenClosed = false;
+      if (this.detached) return;
+      const wasPaused = this.paused;
+      this.connectStream();
+      if (wasPaused) this.paused = true;
+    },
     connectStream() {
       this.closeStream();
       this.resetBuffer();

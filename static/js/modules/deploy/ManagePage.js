@@ -1644,13 +1644,38 @@ const ManagePage = {
         this.detailBuildType = (tab === 'builds_frontend') ? 'frontend' : 'backend';
         if (this._detailEnvId) this.loadEnvBuilds(this._detailEnvId);
       }
+    },
+    // 浏览器标签页切后台：断开全局构建状态 SSE（回前台重连），
+    // 避免 SPA 各页签的长连接 + 多个日志标签页把浏览器 6 连接/域配额占满
+    onPageVisibility() {
+      if (document.hidden) {
+        this._sseHidden = true;
+        if (this.buildsEventSource) { this.buildsEventSource.close(); this.buildsEventSource = null; }
+        return;
+      }
+      if (!this._sseHidden) return;
+      this._sseHidden = false;
+      if (this._pageDeactivated) return;
+      this.connectBuildsSSE();
     }
   },
   beforeUnmount() {
+    document.removeEventListener('visibilitychange', this.onPageVisibility);
     if (this.progressEventSource) { this.progressEventSource.close(); this.progressEventSource = null; }
     if (this.syncEventSource) { this.syncEventSource.close(); this.syncEventSource = null; }
     if (this.buildsEventSource) { this.buildsEventSource.close(); this.buildsEventSource = null; }
     this.stopBpPolling();
+  },
+  // keep-alive 缓存页：切到别的页签时断开全局构建状态 SSE，切回再连
+  activated() {
+    if (this._pageDeactivated) {
+      this._pageDeactivated = false;
+      this.connectBuildsSSE();
+    }
+  },
+  deactivated() {
+    this._pageDeactivated = true;
+    if (this.buildsEventSource) { this.buildsEventSource.close(); this.buildsEventSource = null; }
   },
   created() {
     // 无回收站操作权限时强制停留在“运行中”标签页
@@ -1660,6 +1685,7 @@ const ManagePage = {
     this.loadProjects();
     this.loadEnvs();
     this.connectBuildsSSE();
+    document.addEventListener('visibilitychange', this.onPageVisibility);
   }
 };
 
