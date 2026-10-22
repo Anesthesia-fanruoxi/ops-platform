@@ -1372,7 +1372,8 @@ def _run_deploy_task(app, task_key, data):
                 elif data.get('source_env'):
                     # 新增环境/服务：从源环境继承
                     source_env_name = data.get('source_env')
-                    source_env = Environment.query.join(Project).filter(
+                    # DB 层无外键，注意显式写 ON，否则 SQLAlchemy 无法推断 join
+                    source_env = Environment.query.join(Project, Project.id == Environment.project_id).filter(
                         Project.name == project_name,
                         Environment.name == source_env_name
                     ).first()
@@ -1896,9 +1897,11 @@ def _run_create_service_task(app, task_key, data):
             log('INFO', f'  环境: {env_name}')
             log('INFO', f'  服务: {svc_name} (xms={service.get("xms", 2)}G, xmx={service.get("xmx", 8)}G, replicas={service.get("replicas", 1)})')
             try:
-                svc_index = _save_service_config(env, service, svc_name)
+                svc_index, svc_ports = _save_service_config(env, service, svc_name, project_name, env_name)
                 success_count += 1
                 log('OK', '配置保存成功（已追加到环境服务列表）')
+                log('INFO', f'  自动分配端口: debug={svc_ports["debug"]} '
+                            f'node={svc_ports["node"]} jmx={svc_ports["jmx"]} (偏移 +{svc_index + 1})')
             except Exception as e:
                 fail_count += 1
                 log('ERROR', f'配置保存失败: {str(e)}')
@@ -1912,7 +1915,7 @@ def _run_create_service_task(app, task_key, data):
             try:
                 project_config = _build_service_project_config(env, project_name, env_name)
                 generator = YAMLGenerator()
-                service['index'] = svc_index  # 端口偏移 = 已有服务数
+                service['index'] = svc_index  # 端口偏移（已避开环境内已占用的 nodePort）
                 yaml_content = {
                     'project_name': project_name,
                     'env_name': env_name,
@@ -2024,11 +2027,92 @@ def _run_create_service_task(app, task_key, data):
                 _deploy_tasks[task_key]['status'] = 'failed'
 
 
-def _save_service_config(env, service, svc_name):
+# 端口段步长：generate_service 用 base + index + 1 计算 nodePort，
+# debug / node / jmx 三组基址相隔 30，因此每个环境最多容纳 29 个服务
+_SERVICE_PORT_SEGMENT = 30
+
+
+def _collect_used_ports(config, project_name, env_name):
+    """收集环境内已被占用的 nodePort（debug / node / jmx 三组）
+
+    两个来源，任一命中都算占用：
+      1. deploy_config.services 里显式记录的端口（同步导入的环境会带真实端口）
+      2. 本地输出目录 {yaml_output_dir}/{project}-{env}/service/*.yaml 中的 nodePort
+         （YAML 是最终下发到 K8s 的事实来源，服务从 DB 删掉但 YAML 还在时也能兜住）
+    """
+    used = set()
+
+    def _add(v):
+        try:
+            n = int(v)
+            if n > 0:
+                used.add(n)
+        except (TypeError, ValueError):
+            pass
+
+    for s in (config.get('services') or []):
+        if isinstance(s, dict):
+            for k in ('debug_port', 'node_port', 'jmx_port'):
+                _add(s.get(k))
+
+    try:
+        setting = Setting.query.filter_by(key='yaml_output_dir').first()
+        output_dir = (setting.value if setting and setting.value else './output')
+        svc_dir = os.path.join(output_dir, f'{project_name}-{env_name}', 'service')
+        if os.path.isdir(svc_dir):
+            import yaml as _yaml
+            for f in os.listdir(svc_dir):
+                if not f.endswith(('.yaml', '.yml')):
+                    continue
+                try:
+                    with open(os.path.join(svc_dir, f), 'r', encoding='utf-8') as fp:
+                        doc = _yaml.safe_load(fp)
+                    for p in ((doc or {}).get('spec', {}) or {}).get('ports', []) or []:
+                        _add(p.get('nodePort'))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    return used
+
+
+def _alloc_service_index(start_index, project_config, used_ports):
+    """为新服务分配一个端口不冲突的 index
+
+    从「已有服务数」开始往后找第一个三组端口都不冲突的 index；
+    不足时继续向后找（例如中间有服务被删/端口被外部占用而留出空洞）。
+    """
+    def _base(key, default):
+        try:
+            return int(project_config.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    base_debug = _base('debug_port', 30000)
+    base_node = _base('node_port', base_debug + _SERVICE_PORT_SEGMENT)
+    base_jmx = _base('jmx_port', base_debug + _SERVICE_PORT_SEGMENT * 2)
+
+    for idx in range(max(0, int(start_index)), _SERVICE_PORT_SEGMENT - 1):
+        cand = {base_debug + idx + 1, base_node + idx + 1, base_jmx + idx + 1}
+        if not (cand & used_ports):
+            return idx, base_debug + idx + 1, base_node + idx + 1, base_jmx + idx + 1
+
+    raise Exception(
+        f'端口段已满：该环境每段最多 {_SERVICE_PORT_SEGMENT - 1} 个服务'
+        f'（调试端口 {base_debug + 1}~{base_debug + _SERVICE_PORT_SEGMENT - 1}），'
+        f'请调整环境端口起始值或改用其他环境'
+    )
+
+
+def _save_service_config(env, service, svc_name, project_name, env_name):
     """保存新增服务：读取已有环境 deploy_config，追加服务后更新（不覆盖已有服务）
 
+    端口不再简单按 len(services)+1 推算，而是先扫描已被占用的 nodePort
+    （DB 记录 + 本地 service YAML），取第一个不冲突的偏移，避免新增服务端口撞车。
+
     Returns:
-        int: 新服务在服务列表中的 index（作为端口偏移）
+        (index, ports): 端口偏移与服务实际分配到的三个 nodePort
     """
     config = {}
     if env.deploy_config:
@@ -2051,18 +2135,28 @@ def _save_service_config(env, service, svc_name):
         except (TypeError, ValueError):
             return default
 
+    # 基址取自环境已有配置（不传前端 data，避免覆盖环境端口段）
+    project_config = _build_service_project_config(env, project_name, env_name)
+    used_ports = _collect_used_ports(config, project_name, env_name)
+    index, debug_port, node_port, jmx_port = _alloc_service_index(
+        len(services), project_config, used_ports)
+
     new_svc = {
         'name': svc_name,
         'xms': _to_int(service.get('xms'), 2),
         'xmx': _to_int(service.get('xmx'), 8),
         'replicas': _to_int(service.get('replicas'), 1),
+        # 落库实际端口：后续新增服务可直接识别占用，不必依赖 YAML 是否还在
+        'index': index,
+        'debug_port': debug_port,
+        'node_port': node_port,
+        'jmx_port': jmx_port,
     }
-    index = len(services)
     services.append(new_svc)
     config['services'] = services
     env.deploy_config = json.dumps(config, ensure_ascii=False)
     db.session.commit()
-    return index
+    return index, {'debug': debug_port, 'node': node_port, 'jmx': jmx_port}
 
 
 def _build_service_project_config(env, project_name, env_name):

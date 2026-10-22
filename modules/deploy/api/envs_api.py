@@ -175,7 +175,8 @@ def validate_service():
 
     # 1. 数据库：环境 deploy_config.services 中是否已有同名服务（权威来源）
     from modules.deploy.models import Environment, Project
-    env_obj = Environment.query.join(Project).filter(
+    # DB 层无外键，ORM 无法自动推断 join 条件，必须显式写 ON
+    env_obj = Environment.query.join(Project, Project.id == Environment.project_id).filter(
         Project.name == project,
         Environment.name == env,
         (Environment.is_deleted == False) | (Environment.is_deleted == None)  # noqa: E712
