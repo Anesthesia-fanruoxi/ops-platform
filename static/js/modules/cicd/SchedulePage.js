@@ -638,7 +638,14 @@ const SchedulePage = {
       if (this.metricsEs) { this.metricsEs.close(); this.metricsEs = null; }
     },
     initCharts() {
-      if (typeof echarts === 'undefined') return;
+      // echarts 改为按需加载（本地 vendor）：其它页面不再为这 1MB 阻塞首屏
+      if (typeof echarts === 'undefined') {
+        const self = this;
+        loadScriptOnce('/static/vendor/echarts.min.js?v=1')
+          .then(function() { self.initCharts(); })
+          .catch(function() {});
+        return;
+      }
       const refs = ['chartCpu', 'chartMem', 'chartDisk', 'chartNet', 'chartLoad'];
       const titles = ['CPU 使用率 (%)', '内存使用率 (%)', '磁盘 IO (KB/s)', '网络流量 (KB/s)', '系统负载'];
       refs.forEach((ref, i) => {

@@ -60,3 +60,19 @@ function toast(message, type) {
   document.body.appendChild(el);
   setTimeout(function() { el.remove(); }, 3000);
 }
+
+// 按需加载脚本（同一 URL 只加载一次，失败不重试）：
+// 用于 echarts 这类只有个别页面用的大库，避免所有页面首屏都为它付出阻塞下载
+var __scriptCache = {};
+function loadScriptOnce(url) {
+  if (__scriptCache[url]) return __scriptCache[url];
+  __scriptCache[url] = new Promise(function(resolve, reject) {
+    var s = document.createElement('script');
+    s.src = url;
+    s.async = true;
+    s.onload = function() { resolve(true); };
+    s.onerror = function() { reject(new Error('脚本加载失败: ' + url)); };
+    document.head.appendChild(s);
+  });
+  return __scriptCache[url];
+}

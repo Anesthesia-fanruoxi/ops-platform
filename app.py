@@ -31,6 +31,9 @@ def create_app(config_name='default'):
     # 加载配置
     app.config.from_object(config[config_name])
     app.json.ensure_ascii = False
+    # 静态资源长缓存：模板里所有资源都带 ?v=<mtime>（static_asset），文件一变 URL 就变，
+    # 因此可以放心让浏览器缓存一年 —— 新开标签页/刷新时直接命中本地缓存，不再发 57 个条件请求
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000
 
     @app.template_global('static_asset')
     def static_asset(filename):
