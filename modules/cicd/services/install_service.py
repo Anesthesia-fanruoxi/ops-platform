@@ -675,13 +675,13 @@ def _run_uninstall(task_id, app):
         _exec(ssh, 'systemctl daemon-reload')
         _emit(task_id, 2, '移除 Agent 服务', 'success', '服务已停止，二进制和 service 文件已删除')
 
-        # Step 3: 工作目录（卸载始终删除；重置默认保留，前端可勾选删除）
+        # Step 3: 工作目录（卸载始终清除；重置默认保留，前端可勾选清除）
         workdir = p.get('work_dir', '/data/cicd')
         if p.get('remove_workdir', True):
-            _emit(task_id, 3, '删除工作目录', 'running', f'正在删除 {workdir} ...')
+            _emit(task_id, 3, '清除工作目录', 'running', f'正在清除 {workdir} ...')
             # 构建产物小文件海量（.git/node_modules/target），rm 耗时可能分钟级，超时放宽到 10 分钟
             _exec(ssh, f'rm -rf {workdir}', timeout=600)
-            _emit(task_id, 3, '删除工作目录', 'success', f'{workdir} 已删除')
+            _emit(task_id, 3, '清除工作目录', 'success', f'{workdir} 已清除')
         else:
             _emit(task_id, 3, '保留工作目录', 'skipped', f'已保留 {workdir}')
 

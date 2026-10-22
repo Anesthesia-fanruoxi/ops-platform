@@ -384,7 +384,7 @@ def _do_remote_cleanup(agent_id, delete_record):
         'work_dir': agent.work_dir or '/data/cicd',
         'frontend_mount_dir': agent.frontend_mount_dir or '',
         'remove_nfs': data.get('remove_nfs', delete_record),  # 卸载默认 True，重置由前端勾选
-        'remove_workdir': data.get('remove_workdir', delete_record),  # 卸载默认 True；重置默认保留，前端可勾选删除
+        'remove_workdir': data.get('remove_workdir', delete_record),  # 卸载默认 True；重置默认保留，前端可勾选清除
         'remove_docker': data.get('remove_docker', False),
         'delete_record': delete_record,
     }

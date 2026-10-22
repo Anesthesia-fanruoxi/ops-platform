@@ -54,6 +54,8 @@ const routes = [
   { path: '/projects', component: ProjectsPage, meta: { title: '项目信息', permission: 'page:projects' } },
   { path: '/manage',   component: ManagePage,   meta: { title: '环境信息', permission: 'page:manage' } },
   { path: '/services', component: ServiceInfoPage, meta: { title: '服务信息', permission: 'page:service_info' } },
+  // 服务日志独立标签页（由服务信息页弹框「新标签页」打开；standalone 不渲染侧边栏/顶栏）
+  { path: '/log-view', component: SvcLogViewPage, meta: { standalone: true, permission: 'page:service_info' } },
   { path: '/nginx',    component: NginxPage,    meta: { title: 'Nginx配置', permission: 'page:nginx' } },
   { path: '/datasources', component: DatasourcesPage, meta: { title: '数据源', permission: 'page:datasources' } },
   { path: '/database', component: CollationPage, meta: { title: '字符集排序修正', permission: 'page:database' } },

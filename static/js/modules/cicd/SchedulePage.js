@@ -343,18 +343,17 @@ const SchedulePage = {
     <el-alert v-else type="warning" :closable="false" show-icon style="margin-bottom:14px">
       <template #title>重置将执行以下操作（保留本地记录，可重新安装）</template>
       <template #default>
-        <div style="line-height:1.8">1. 停止并移除 cicd-agent 服务<br>2. 删除远程二进制 /usr/local/bin/cicd-agent<br>3. [[ cleanupForm.remove_workdir ? '删除' : '保留' ]]工作目录 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]]<br>4. [[ cleanupAgent && cleanupAgent.frontend_mount_dir ? '（可选）卸载 NFS 挂载 ' + cleanupAgent.frontend_mount_dir : '' ]]</div>
+        <div style="line-height:1.8">1. 停止并移除 cicd-agent 服务<br>2. 删除远程二进制 /usr/local/bin/cicd-agent<br>3. [[ cleanupForm.remove_workdir ? '清除' : '保留' ]]工作目录 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]]<br>4. [[ cleanupAgent && cleanupAgent.frontend_mount_dir ? '（可选）卸载 NFS 挂载 ' + cleanupAgent.frontend_mount_dir : '' ]]</div>
       </template>
     </el-alert>
     <el-form label-width="100px" size="small">
       <el-form-item label="主机"><span style="font-weight:bold">[[ cleanupAgent?cleanupAgent.host:'' ]]</span></el-form-item>
-      <!-- 开启=保留：active-value 反向绑定 remove_workdir -->
-      <el-form-item v-if="cleanupMode==='reset'" label="保留工作目录">
-        <el-switch v-model="cleanupForm.remove_workdir" :active-value="false" :inactive-value="true" />
-        <span style="margin-left:8px;color:#909399;font-size:12px">开启则保留 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]]，重新安装后可复用构建数据</span>
+      <el-form-item v-if="cleanupMode==='reset'" label="清除数据">
+        <el-switch v-model="cleanupForm.remove_workdir" />
+        <span style="margin-left:8px;color:#909399;font-size:12px">默认保留；开启则清除工作目录中的构建数据（不可恢复）</span>
       </el-form-item>
       <el-alert v-if="cleanupMode==='reset' && cleanupForm.remove_workdir" type="warning" :closable="false" show-icon style="margin:-4px 0 12px 100px">
-        <template #default>将删除 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]]（构建产物/缓存，不可恢复）</template>
+        <template #default>将清除 [[ cleanupAgent?cleanupAgent.work_dir:'/data/cicd' ]] 中的数据（构建产物/缓存，不可恢复）</template>
       </el-alert>
       <el-form-item label="卸载 Docker">
         <el-switch v-model="cleanupForm.remove_docker" />
@@ -428,7 +427,7 @@ const SchedulePage = {
       installVisible: false, installStep: 0, installLogs: [], installDone: false, installSource: null, installAutoClose: null,
       installTitle: 'Agent 安装进度', installStepTitles: ['SSH 连接', '磁盘扩容', '安装 Docker', '上传文件', '启动服务'],
       cleanupVisible: false, cleanupMode: 'uninstall', cleanupAgent: null,
-      cleanupForm: { remove_docker: false, remove_nfs: false, remove_workdir: true },
+      cleanupForm: { remove_docker: false, remove_nfs: false, remove_workdir: false },
     };
   },
   computed: {
@@ -900,7 +899,7 @@ const SchedulePage = {
     openCleanupDialog(row, mode) {
       this.cleanupAgent = row;
       this.cleanupMode = mode;
-      this.cleanupForm = { remove_docker: false, remove_nfs: (mode === 'uninstall'), remove_workdir: true };
+      this.cleanupForm = { remove_docker: false, remove_nfs: (mode === 'uninstall'), remove_workdir: (mode === 'uninstall') };
       this.cleanupVisible = true;
     },
     confirmCleanup() {

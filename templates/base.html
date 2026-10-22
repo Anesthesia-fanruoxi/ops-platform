@@ -34,6 +34,11 @@
       <router-view></router-view>
     </template>
 
+    <!-- 独立标签页视图（如日志独立查看）：整页铺满，不渲染侧边栏/顶栏 -->
+    <template v-else-if="$route.meta.standalone">
+      <router-view></router-view>
+    </template>
+
     <!-- 登录后：正常布局 -->
     <template v-else>
       <div class="layout">
@@ -151,6 +156,7 @@
     <script src="{{ static_asset('js/modules/deploy/serviceinfo/mixin-diff.js') }}"></script>
     <script src="{{ static_asset('js/modules/deploy/serviceinfo/mixin-misc.js') }}"></script>
     <script src="{{ static_asset('js/modules/deploy/serviceinfo/svc-template.js') }}"></script>
+    <script src="{{ static_asset('js/modules/deploy/serviceinfo/LogViewPage.js') }}"></script>
   <script src="{{ static_asset('js/modules/deploy/ServiceInfoPage.js') }}"></script>
   <!-- nginx 域 -->
   <script src="{{ static_asset('js/modules/nginx/NginxPage.js') }}"></script>

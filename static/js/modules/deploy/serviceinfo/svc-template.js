@@ -277,19 +277,22 @@ window.SvcTemplate = `
 
   <!-- 运行日志弹窗（SSE 终端式；支持全屏，ESC 退出全屏） -->
   <el-dialog v-model="logVisible" width="80%" top="10vh"
-             class="svc-log-dialog" :close-on-press-escape="!logFullscreen"
+             class="svc-log-dialog" :close-on-press-escape="false"
              :fullscreen="logFullscreen" :class="{ 'svc-log-fs': logFullscreen }" @close="onLogDialogClose">
     <template #header>
       <div class="svc-log-header">
         <span class="svc-log-title">运行日志 - [[ logServiceName ]]</span>
         <span class="svc-log-count">共 [[ logLines.length ]] 行</span>
         <span class="svc-log-status">
-          <span :style="{ width:'8px',height:'8px',borderRadius:'50%',background: streamConnected ? '#67c23a' : (logPaused ? '#e6a23c' : '#f56c6c') }"></span>
-          [[ streamConnected ? '实时跟随中' : (logPaused ? '已暂停追踪' : '未连接') ]]
+          <span :style="{ width:'8px',height:'8px',borderRadius:'50%',background: logStatusColor }"></span>
+          [[ logStatusText ]]
         </span>
+        <!-- 积压：点击回到底部，立即吐完积压并恢复实时渲染 -->
+        <span v-if="logBacklogCount" class="svc-log-backlog"
+              title="点击回到底部并恢复实时渲染（会清空搜索）" @click="logJumpToLive">积压 [[ logBacklogCount ]] 行 ⇩</span>
         <span class="svc-log-header-tools">
           <el-input v-model="logSearchInput" ref="logSearch" size="small" style="width:260px;" clearable
-                    placeholder="搜索（回车触发，自动暂停追踪）" @focus="onLogSearchFocus" @clear="commitLogSearch" @keydown.enter="onLogSearchEnter">
+                    placeholder="搜索（回车定位，Ctrl+F 聚焦）" @clear="commitLogSearch" @keydown.enter="onLogSearchEnter">
             <template #prefix><span class="svc-input-icon">🔍</span></template>
           </el-input>
           <span v-if="logSearchWord" style="color:#a8bcc0;font-size:12px;white-space:nowrap">[[ logSearchMatches.length ? (logSearchIdx + 1) + '/' + logSearchMatches.length : '无匹配' ]]</span>
@@ -300,10 +303,11 @@ window.SvcTemplate = `
           <el-button size="small" :type="logPaused ? 'warning' : ''" @click="toggleLogPause">[[ logPaused ? '▶ 恢复追踪' : '⏸ 暂停追踪' ]]</el-button>
           <el-button size="small" @click="connectLogStream">重连</el-button>
           <el-button size="small" plain @click="clearLogScreen">清屏</el-button>
+          <el-button size="small" @click="openLogInNewTab">↗ 新标签页</el-button>
         </span>
       </div>
     </template>
-    <div class="svc-log-terminal" ref="logBox"><svc-log-lines :lines="logLines" :search-word="logSearchWord"></svc-log-lines></div>
+    <div class="svc-log-terminal" ref="logBox" @scroll="onLogBoxScroll"><svc-log-lines :lines="logLines" :search-word="logSearchWord" :current-key="logCurrentKey"></svc-log-lines></div>
   </el-dialog>
 
   <!-- 环境变量弹窗 -->
@@ -374,9 +378,10 @@ window.SvcTemplate = `
         <el-button size="small" :disabled="!lfMatchIndices.length" @click="lfSearchJump(1)">↓</el-button>
       </template>
       <span style="color:#6f94a0;font-size:12px;white-space:nowrap;">共 [[ lfLines.length ]] 行[[ lfSearchWord ? '，匹配 ' + lfMatchCount + ' 行' : '' ]]</span>
+      <el-button size="small" style="margin-left:auto;" @click="openLogfileInNewTab">↗ 新标签页打开</el-button>
     </div>
     <pre class="svc-logfile-pre" ref="lfContentBox" v-loading="lfContentLoading"
-         element-loading-background="rgba(10, 46, 60, 0.9)"><div v-for="(line, i) in lfLines" :key="i" :id="'lfline-' + i" :class="{ 'lf-cur-match': isLfCurMatch(i) }" v-html="lfRenderLine(line)"></div></pre>
+         element-loading-background="rgba(10, 46, 60, 0.9)"><div v-for="(line, i) in lfLines" :key="i" :id="'lfline-' + i" :class="{ 'lf-cur-match': isLfCurMatch(i) }" v-html="lfRenderLine(line, i)"></div></pre>
   </el-dialog>
   <!-- 部署配置弹窗 -->
   <el-dialog v-model="yamlVisible" :title="'部署配置 - ' + (yamlFile || '')" width="900px">

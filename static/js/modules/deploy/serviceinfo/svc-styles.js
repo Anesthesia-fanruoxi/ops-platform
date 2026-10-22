@@ -101,7 +101,10 @@
 .svc-log-dialog .el-dialog__headerbtn .el-dialog__close { color: #7fa3ad; }
 .svc-log-dialog .el-dialog__headerbtn .el-dialog__close:hover { color: #d4e6ea; }
 .svc-log-dialog .el-dialog__body { background: #0a2e3c !important; padding-top: 12px; }
-.svc-log-match { background: rgba(230, 162, 60, 0.28); }
+/* 搜索命中行：整行淡青蓝底（与行内黄色 mark 形成冷暖对比，贴合终端时间戳配色） */
+.svc-log-match { background: rgba(108, 182, 232, 0.10); }
+/* 当前定位到的匹配行：底色加深 + 左侧青色标记条 */
+.svc-log-current { background: rgba(108, 182, 232, 0.20); box-shadow: inset 3px 0 0 #6cb6e8; }
 .svc-log-time { color: #6cb6e8; }
 .svc-log-method { color: #c678dd; }
 .svc-log-line { color: #e5c07b; }
@@ -601,8 +604,27 @@
   scrollbar-color: #2f5a6b #0a2e3c; scrollbar-width: thin;
 }
 .svc-logfile-pre { --sb-thumb: #2f5a6b; --sb-thumb-hover: #3f7a8f; --sb-track: #0a2e3c; }
-/* 搜索定位当前行：比行内 <mark> 更明显的行级高亮 */
-.lf-cur-match { background: rgba(230, 162, 60, 0.18); box-shadow: inset 3px 0 0 #e6a23c; }
+/* 搜索定位当前行：与运行日志终端同款青色整行底 + 左侧标记条 */
+.lf-cur-match { background: rgba(108, 182, 232, 0.20); box-shadow: inset 3px 0 0 #6cb6e8; }
+/* 服务日志独立标签页（/log-view）：整页只放日志，无侧边栏/顶栏 */
+.svc-logview { height: 100vh; display: flex; flex-direction: column; background: #0a2e3c; overflow: hidden; }
+.svc-logview-bar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px; border-bottom: 1px solid #1c4a5e;
+}
+/* 文件名可能很长：标题限宽省略，工具区右对齐且可换行 */
+.svc-logview .svc-log-title { max-width: 42vw; overflow: hidden; text-overflow: ellipsis; }
+.svc-logview .svc-log-header-tools { flex-wrap: wrap; justify-content: flex-end; }
+.svc-logview .svc-logview-body { flex: 1 1 auto; min-height: 0; height: auto; border-radius: 0; }
+.svc-logview-empty { color: #6f94a0; font-size: 13px; padding: 12px 0; }
+/* 积压提示：可点击 → 回到底部并恢复实时渲染 */
+.svc-log-backlog {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  padding: 2px 9px; border-radius: 10px; font-size: 12px; white-space: nowrap;
+  color: #e6a23c; background: rgba(230, 162, 60, 0.14); border: 1px solid rgba(230, 162, 60, 0.45);
+  transition: background .15s, color .15s;
+}
+.svc-log-backlog:hover { background: rgba(230, 162, 60, 0.26); color: #f3c37a; }
 `;
 
   document.head.appendChild(style);

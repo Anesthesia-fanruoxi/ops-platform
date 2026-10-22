@@ -41,9 +41,9 @@ const SvcMixinLogfile = {
       const parts = (this.lfPath || '').split('/').filter(Boolean);
       return parts.slice(-2).join('/');
     },
-    // 内容弹窗行渲染：复用通用高亮（时间/方法着色 + 搜索高亮）
-    lfRenderLine(line) {
-      return svcHighlightLine(line, this.lfSearchWord);
+    // 内容弹窗行渲染：复用通用高亮（时间/方法着色 + 搜索高亮；当前匹配深黄，其余浅黄）
+    lfRenderLine(line, i) {
+      return svcHighlightLine(line, this.lfSearchWord, this.isLfCurMatch(i));
     },
     // ─── 文件内容搜索定位（与运行日志弹窗同款：回车跳首个，之后循环 ↑/↓） ──
     onLfSearchEnter() {
@@ -161,6 +161,18 @@ const SvcMixinLogfile = {
         service: this.lfServiceName, file: row.name, token: token,
       });
       window.open('/api/deploy/service-info/logfile/download?' + params.toString());
+    },
+    // 在独立浏览器标签页打开当前日志文件（/log-view 独立整页视图，含搜索/下载）
+    openLogfileInNewTab() {
+      if (!this.lfContentFile) return;
+      const params = new URLSearchParams({
+        type: 'file',
+        project: this.selectedProject,
+        env: this.selectedEnv,
+        service: this.lfServiceName || '',
+        file: this.lfContentFile,
+      });
+      window.open('/#/log-view?' + params.toString(), '_blank');
     },
   },
 };
