@@ -23,47 +23,4 @@ const ServiceInfoPage = {
   components: { SvcLogLines },
   mixins: [SvcMixinServiceList, SvcMixinQuickBuild, SvcMixinBuildProgress, SvcMixinLog, SvcMixinLogfile, SvcMixinNacos, SvcMixinNacosRender, SvcMixinNacosMinimap, SvcMixinDiff, SvcMixinMisc],
   template: window.SvcTemplate,
-  // keep-alive 缓存页：切到别的页签时断开 SSE，切回再连。
-  // 浏览器对同一域名只允许 6 条 HTTP/1.1 连接，SSE 是长连接：
-  // 若每个打开过的页签都留着 SSE，再开新页签/新标签页时连接配额会被占满，表现为页面/健康监控一直「检测中」
-  activated() {
-    if (this._pageDeactivated) {
-      this._pageDeactivated = false;
-      if (this.selectedProject && this.selectedEnv) this.connectSvcStream();
-      this.subscribeEnvBuilds();
-    }
-  },
-  deactivated() {
-    this._pageDeactivated = true;
-    this.closeSvcStream();
-    this.closeEnvBuildStream();
-    // 日志弹窗是 append-to-body 的，切走页签会一直浮在上面；顺带关掉并断开它的 SSE
-    if (this.logVisible) {
-      this.logVisible = false;
-      this.onLogDialogClose();
-    }
-  },
-  mounted() {
-    document.addEventListener('visibilitychange', this.onPageVisibility);
-  },
-  beforeUnmount() {
-    document.removeEventListener('visibilitychange', this.onPageVisibility);
-  },
-  methods: {
-    // 浏览器标签页切后台：断开列表类 SSE（回到前台重连），
-    // 避免多个标签页的长连接把浏览器 6 连接/域配额占满（表现为其它页打开卡住/「检测中」）
-    onPageVisibility() {
-      if (document.hidden) {
-        this._sseHidden = true;
-        this.closeSvcStream();
-        this.closeEnvBuildStream();
-        return;
-      }
-      if (!this._sseHidden) return;
-      this._sseHidden = false;
-      if (this._pageDeactivated) return;
-      if (this.selectedProject && this.selectedEnv) this.connectSvcStream();
-      this.subscribeEnvBuilds();
-    },
-  },
 };

@@ -136,13 +136,12 @@ const DashboardPage = {
     setTimeout(() => this.buildEntryGroups(), 300); // 菜单异步加载兜底：稍后重建入口卡
     this.fetchStats();
     this.connect();
-    document.addEventListener('visibilitychange', this.onVisibilityChange);
   },
   // keep-alive 缓存首页：切走断开 SSE、切回重连（首次挂载 mounted 已连接，用标志避免重复建连）
   activated() {
     if (this._deactivated) {
       this._deactivated = false;
-      if (!document.hidden) this.connect();
+      this.connect();
     }
   },
   deactivated() {
@@ -150,7 +149,6 @@ const DashboardPage = {
     this.closeMonitor();
   },
   beforeUnmount() {
-    document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.closeMonitor();
     if (this._timer) { clearInterval(this._timer); this._timer = null; }
   },
@@ -158,16 +156,6 @@ const DashboardPage = {
     '$root.menuItems': { deep: true, handler() { this.buildEntryGroups(); } },
   },
   methods: {
-    // 浏览器标签页切后台时断开监控 SSE，回前台重连（SSE 长连接会占用浏览器 6 连接/域配额）
-    onVisibilityChange() {
-      if (document.hidden) {
-        this._hiddenClosed = true;
-        this.closeMonitor();
-      } else if (this._hiddenClosed) {
-        this._hiddenClosed = false;
-        if (!this._deactivated) this.connect();
-      }
-    },
     formatNow() {
       const d = new Date();
       const p = (n) => String(n).padStart(2, '0');
