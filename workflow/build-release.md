@@ -59,6 +59,7 @@ DELETE {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts
 | 1.26 | 2026-10-22 | 修复新增服务端口冲突：不再按 len(services)+1 推算偏移，改为扫描 deploy_config 与本地 service YAML 已占用的 nodePort 后取首个不冲突偏移（三组端口一并避让，29 个/段用尽报明确错误），新服务端口落库；修复 /api/manage/validate/service 因 Environment 与 Project 无外键导致的 JOIN 500（改为显式 ON 条件） | 63e7ae1 | sha256:def9ec18081070e58020c57277b36acfcea1a7a47e2581b05984ecc078b9348f |
 | 1.27 | 2026-10-22 | 修复新标签页打开极慢：去掉 base.html 中阻塞首屏的公网 CDN echarts（改为本地 vendor + 调度中心按需加载），静态资源启用一年强缓存（配合 ?v=mtime 主动失效）；修复 Pod 日志 SSE 线程/连接泄漏（后台线程读流 + 20s 心跳，写失败即关流，避免线程耗尽导致整站变慢与 ERR_INCOMPLETE_CHUNKED_ENCODING）；修复 tail 缺省值类型错误 | 99643e7 | sha256:e9de23e24058030aed954c7001fdb9e1a2ecc3a09082e74d7fffe9aeaf1efc35 |
 | 1.28 | 2026-10-22 | 日志新标签页改为独立轻量页（8 个资源，不再启动整个后台 SPA）+ SSE 连接治理（页签切走/标签页切后台自动断开）+ SSE 多路复用（新增 /api/stream，每个标签页只占 1 条浏览器连接；首页监控/服务列表/构建状态/日志流全部走 SseHub 按 topic 分发）；顺带修复 svc 生成器在 app context 块内 yield 导致的 LookupError | ca5abf1 | sha256:baa73ad1ac1b2ca3d5cfe1f8485c3cfc030c996da438c5b7c4b23df6ce5c8d3e |
+| 1.29 | 2026-10-22 | 去掉「切换页签/标签页切后台就断 SSE」：多路复用后每标签页仅 1 条连接，连接数已有保障，断连只会带来反复重连、重放历史与丢失滚动位置/暂停态；保留 SseHub 多路复用与 SchedulePage 原有逻辑 | ef407e4 | sha256:90702381aa82fdea10ee3a1194e939eca5b4af7936a61bc6afbab782142118ac |
 
-> 下一版本：**1.29**（build 时自动递增并回填本表）
+> 下一版本：**1.30**（build 时自动递增并回填本表）
 > 历史行中 tag 已从仓库清理（仅保留最近 3 个），行本身保留作构建历史记录
