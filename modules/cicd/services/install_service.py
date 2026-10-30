@@ -100,11 +100,50 @@ for target in $targets; do
 
     if [ -n "$pkname" ] && [ -n "$partn" ]; then
         disk="/dev/$pkname"
+        disk_base=$(basename "$disk")
+
+        # ① 云盘扩容后内核可能仍持有旧容量/旧分区大小：先重扫磁盘，再让内核重读分区表。
+        #    这一步很关键——growpart 读的是磁盘上的分区表，而 blockdev 读的是内核视图，
+        #    两者不一致时会把"表已扩好、内核还没同步"误判成"还需要扩容"。
+        if [ -w "/sys/class/block/$disk_base/device/rescan" ]; then
+            echo 1 > "/sys/class/block/$disk_base/device/rescan" 2>/dev/null || true
+        fi
+        partx -u "$disk" >/dev/null 2>&1 || partprobe "$disk" >/dev/null 2>&1 || true
+        sleep 1
+
         disk_size=$(blockdev --getsize64 "$disk")
         part_size=$(blockdev --getsize64 "$target")
+        echo "磁盘 $disk：$((disk_size / 1024 / 1024))MB；分区 $target：$((part_size / 1024 / 1024))MB"
+
+        need_grow=0
         if [ "$part_size" -ge "$disk_size" ]; then
             echo "分区 $target 已占满磁盘，无需扩容分区"
         else
+            need_grow=1
+        fi
+
+        if [ "$need_grow" = "1" ]; then
+            # ② 用分区表本身判断末尾还剩多少空间（fdisk 直接读盘，不受内核缓存影响）。
+            #    分区表已扩到盘尾时末尾只剩 1MB 对齐间隙，growpart 会因 fudge 报
+            #    "NOCHANGE: partition N could only be grown by 2015 [fudge=2048]"——那是"已到顶"，
+            #    不是失败，不该中断安装。
+            end_sect=$(fdisk -l -o Device,End "$disk" 2>/dev/null | awk -v t="$target" '$1==t {print $2}' | tail -n1)
+            if [ -z "$end_sect" ]; then
+                part_start=$(lsblk -no START "$target" 2>/dev/null | head -n1 | tr -d ' ')
+                [ -n "$part_start" ] && end_sect=$((part_start + part_size / 512))
+            fi
+            disk_sect=$(blockdev --getsz "$disk")
+            if [ -n "$end_sect" ] && [ -n "$disk_sect" ]; then
+                free_sect=$((disk_sect - end_sect))
+                echo "分区表末尾剩余：$free_sect 扇区（约 $((free_sect * 512 / 1024 / 1024))MB）"
+                if [ "$free_sect" -lt 2048 ]; then
+                    echo "分区表已延伸到磁盘末尾（仅余对齐间隙），无需 growpart"
+                    need_grow=0
+                fi
+            fi
+        fi
+
+        if [ "$need_grow" = "1" ]; then
             if ! command -v growpart >/dev/null 2>&1; then
                 echo "缺少 growpart，正在安装 $GROWPART_PKG ..."
                 install_pkgs "$GROWPART_PKG" || fail "growpart 安装失败，请检查软件源后重试"
@@ -114,10 +153,27 @@ for target in $targets; do
             grow_out=$(growpart "$disk" "$partn" 2>&1)
             grow_rc=$?
             echo "$grow_out"
-            [ "$grow_rc" -eq 0 ] || fail "分区扩容失败：$grow_out"
+            if [ "$grow_rc" -ne 0 ]; then
+                # growpart 失败：先让内核重读分区表再判断——可能是"表已扩好、内核没同步"
+                partx -u "$disk" >/dev/null 2>&1 || partprobe "$disk" >/dev/null 2>&1 || true
+                sleep 1
+                after_size=$(blockdev --getsize64 "$target")
+                if [ "$after_size" -gt "$part_size" ]; then
+                    echo "growpart 未改动分区表，但内核重读后分区已扩大至 $((after_size / 1024 / 1024))MB，按已扩容继续"
+                elif echo "$grow_out" | grep -q "NOCHANGE"; then
+                    # 分区表已在盘尾（末尾不足 1MB 对齐间隙），本就没有可扩空间，不算失败
+                    echo "分区表已处于磁盘末尾（growpart: NOCHANGE），跳过分区扩容继续后续步骤"
+                else
+                    fail "分区扩容失败：$grow_out"
+                fi
+            fi
             partx -u "$disk" >/dev/null 2>&1 || partprobe "$disk" >/dev/null 2>&1 || true
+            sleep 1
             new_part_size=$(blockdev --getsize64 "$target")
-            [ "$new_part_size" -gt "$part_size" ] || fail "分区扩容未生效（内核未识别新分区大小），请重启后重试"
+            if [ "$new_part_size" -le "$part_size" ]; then
+                fail "分区扩容未生效（内核未识别新分区大小，当前 $((part_size / 1024 / 1024))MB），请执行 partx -u $disk 后重新安装"
+            fi
+            echo "分区扩容完成：$((part_size / 1024 / 1024))MB → $((new_part_size / 1024 / 1024))MB"
         fi
     elif [ -n "$pkname" ] || [ -n "$partn" ]; then
         fail "无法解析设备 $target 的磁盘/分区信息"
@@ -163,6 +219,15 @@ case "$root_fs" in
         ;;
 esac
 
+# 收尾诊断：磁盘实际容量 vs 文件系统容量，方便判断「是真的没空间」还是「没扩到」
+phys_disk=""
+for target in $targets; do
+    pk=$(lsblk -no PKNAME "$target" 2>/dev/null | head -n1 | tr -d ' ')
+    [ -n "$pk" ] && phys_disk="/dev/$pk"
+done
+if [ -n "$phys_disk" ]; then
+    echo "磁盘 $phys_disk 实际容量：$(( $(blockdev --getsize64 "$phys_disk") / 1024 / 1024 ))MB"
+fi
 df -h / | awk 'NR==2{print "扩容后容量： "$2"（已用 "$3"，可用 "$4"）"}'
 echo "磁盘扩容完成"
 exit 0
