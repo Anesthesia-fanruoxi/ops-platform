@@ -67,6 +67,11 @@ install_pkgs() {
 GROWPART_PKG=cloud-utils-growpart
 if command -v apt-get >/dev/null 2>&1; then GROWPART_PKG=cloud-guest-utils; fi
 
+# 判定「末尾还有可扩空间」的门槛：2MB（4096 扇区）。
+# growpart 自己的 fudge 是 1MB(2048 扇区)，GPT 备份头还要再占 33 扇区，
+# 所以不足 2MB 的尾部空间对它来说只是对齐间隙，扩了也没意义。
+MIN_GROW_SECT=4096
+
 # 计算目标分区末尾「真正可扩」的空间（单位：512B 扇区）
 #   - 后面还有分区：与下一分区起始之间的空隙
 #   - 已是最后一个分区：到磁盘末尾的空隙
@@ -74,6 +79,7 @@ if command -v apt-get >/dev/null 2>&1; then GROWPART_PKG=cloud-guest-utils; fi
 # 云盘扩容后内核常常还持有旧容量，会把「有整块空间」误判成「只剩 1MB 间隙」）
 calc_tail_free() {
     local tgt="$1" dsk="$2" dsk_sect="$3"
+    # 输出两列：① 分区末尾可扩空间（扇区）② 分区表里该分区的大小（字节）
     fdisk -l -o Device,Start,End "$dsk" 2>/dev/null | awk -v t="$tgt" -v dsend="$dsk_sect" '
         $1 ~ /^\/dev\// { dev[++n]=$1; st[n]=$2; en[n]=$3 }
         END {
@@ -82,8 +88,9 @@ calc_tail_free() {
             if (ti==0) exit 1
             ni=0
             for (i=1;i<=n;i++) if (i!=ti && st[i]>st[ti] && (ni==0 || st[i]<st[ni])) ni=i
-            if (ni>0) print st[ni]-1-en[ti]
-            else print dsend-1-en[ti]
+            if (ni>0) free = st[ni]-1-en[ti]
+            else free = dsend-1-en[ti]
+            printf "%d\t%d\n", free, (en[ti]-st[ti]+1)*512
         }'
 }
 
@@ -137,12 +144,20 @@ for target in $targets; do
         echo "磁盘 $disk：$((disk_size / 1024 / 1024))MB；分区 $target：$((part_size / 1024 / 1024))MB"
 
         # ② 探测分区末尾是否真的还有可扩空间（读分区表，不看内核视图）
-        free_sect=$(calc_tail_free "$target" "$disk" "$disk_sect")
+        tail_info=$(calc_tail_free "$target" "$disk" "$disk_sect")
+        free_sect=$(echo "$tail_info" | awk '{print $1}')
+        table_bytes=$(echo "$tail_info" | awk '{print $2}')
         if [ -z "$free_sect" ]; then
             echo "未能读取分区表信息，跳过分区扩容（不影响后续步骤）"
-        elif [ "$free_sect" -lt 2048 ]; then
-            # 末尾不足 1MB：只是 1MB 对齐间隙，没有真正的多余空间
-            echo "分区 $target 末尾无多余空间（仅余 $free_sect 扇区对齐间隙，约 $((free_sect * 512 / 1024 / 1024))MB），无需扩容分区"
+        elif [ "$free_sect" -lt "$MIN_GROW_SECT" ]; then
+            # 末尾不足 2MB：只是对齐间隙，分区表里已无可扩空间
+            echo "分区 $target 末尾无多余空间（仅余 $free_sect 扇区，约 $((free_sect * 512 / 1024 / 1024))MB），无需扩容分区"
+            if [ "$table_bytes" -gt "$part_size" ]; then
+                # 分区表比内核记录大：分区表早就扩好了，只是内核没同步。
+                # 根分区在用时内核不允许在线调整分区大小，只能重启后生效——不是失败。
+                echo "提示：分区表比内核记录大 $(( (table_bytes - part_size) / 1024 / 1024 ))MB（内核尚未同步分区表；根分区在用时无法在线调整大小），重启后系统即可识别完整容量，本次安装不受影响"
+                expand_result="无多余空间（分区表已到磁盘末尾，内核待重启后同步）"
+            fi
         else
             echo "检测到可扩空间 $((free_sect * 512 / 1024 / 1024))MB，开始扩容分区 ..."
             if ! command -v growpart >/dev/null 2>&1; then
@@ -161,6 +176,7 @@ for target in $targets; do
                 after_size=$(blockdev --getsize64 "$target")
                 if [ "$after_size" -gt "$part_size" ]; then
                     echo "growpart 未改动分区表，但内核重读后分区已扩大至 $((after_size / 1024 / 1024))MB，按已扩容继续"
+                    part_size=$after_size
                 elif echo "$grow_out" | grep -q "NOCHANGE"; then
                     # 分区表已在盘尾，确无多余空间，不算失败
                     echo "分区表已处于磁盘末尾（growpart: NOCHANGE），无多余空间，跳过分区扩容继续后续步骤"
@@ -171,11 +187,23 @@ for target in $targets; do
             partx -u "$disk" >/dev/null 2>&1 || partprobe "$disk" >/dev/null 2>&1 || true
             sleep 1
             new_part_size=$(blockdev --getsize64 "$target")
-            if [ "$new_part_size" -le "$part_size" ]; then
-                fail "分区扩容未生效（内核未识别新分区大小，当前 $((part_size / 1024 / 1024))MB），请执行 partx -u $disk 后重新安装"
+            if [ "$new_part_size" -gt "$part_size" ]; then
+                expand_result="分区已扩容 $((part_size / 1024 / 1024))MB → $((new_part_size / 1024 / 1024))MB"
+                echo "$expand_result"
+                part_size=$new_part_size
+            else
+                # 内核没识别到新大小：重读一次分区表再判断
+                tail_info=$(calc_tail_free "$target" "$disk" "$disk_sect")
+                free_sect=$(echo "$tail_info" | awk '{print $1}')
+                table_bytes=$(echo "$tail_info" | awk '{print $2}')
+                if [ -n "$free_sect" ] && [ "$free_sect" -lt "$MIN_GROW_SECT" ]; then
+                    # 分区表已到盘尾 → 本来就没有可扩空间，内核未同步不算失败
+                    echo "提示：分区表已到磁盘末尾，内核仍显示 $((part_size / 1024 / 1024))MB；根分区在用时内核不允许在线调整分区大小，重启后即可识别完整容量，本次安装不受影响"
+                    expand_result="无多余空间（分区表已到磁盘末尾，内核待重启后同步）"
+                else
+                    fail "分区扩容未生效（内核未识别新分区大小，当前 $((part_size / 1024 / 1024))MB），请执行 partx -u $disk 后重新安装"
+                fi
             fi
-            expand_result="分区已扩容 $((part_size / 1024 / 1024))MB → $((new_part_size / 1024 / 1024))MB"
-            echo "$expand_result"
         fi
     elif [ -n "$pkname" ] || [ -n "$partn" ]; then
         fail "无法解析设备 $target 的磁盘/分区信息"
