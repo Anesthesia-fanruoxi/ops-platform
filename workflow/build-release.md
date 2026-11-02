@@ -60,6 +60,7 @@ DELETE {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts
 | 1.27 | 2026-10-22 | 修复新标签页打开极慢：去掉 base.html 中阻塞首屏的公网 CDN echarts（改为本地 vendor + 调度中心按需加载），静态资源启用一年强缓存（配合 ?v=mtime 主动失效）；修复 Pod 日志 SSE 线程/连接泄漏（后台线程读流 + 20s 心跳，写失败即关流，避免线程耗尽导致整站变慢与 ERR_INCOMPLETE_CHUNKED_ENCODING）；修复 tail 缺省值类型错误 | 99643e7 | sha256:e9de23e24058030aed954c7001fdb9e1a2ecc3a09082e74d7fffe9aeaf1efc35 |
 | 1.28 | 2026-10-22 | 日志新标签页改为独立轻量页（8 个资源，不再启动整个后台 SPA）+ SSE 连接治理（页签切走/标签页切后台自动断开）+ SSE 多路复用（新增 /api/stream，每个标签页只占 1 条浏览器连接；首页监控/服务列表/构建状态/日志流全部走 SseHub 按 topic 分发）；顺带修复 svc 生成器在 app context 块内 yield 导致的 LookupError | ca5abf1 | sha256:baa73ad1ac1b2ca3d5cfe1f8485c3cfc030c996da438c5b7c4b23df6ce5c8d3e |
 | 1.29 | 2026-10-22 | 去掉「切换页签/标签页切后台就断 SSE」：多路复用后每标签页仅 1 条连接，连接数已有保障，断连只会带来反复重连、重放历史与丢失滚动位置/暂停态；保留 SseHub 多路复用与 SchedulePage 原有逻辑 | ef407e4 | sha256:90702381aa82fdea10ee3a1194e939eca5b4af7936a61bc6afbab782142118ac |
+| 1.30 | 2026-11-02 | 修复 Rocky 10 磁盘扩容失败（growpart NOCHANGE 中断安装）：扩容改为「先探测、按需扩容」——用分区表（fdisk）算分区末尾真正可扩空间，有才 growpart，没有多余空间就跳过；扩容前 rescan 磁盘 + partx -u 同步内核视图；growpart 失败三段兜底（内核重读已变大 / NOCHANGE 视为无多余空间 / 其他才失败）；收尾摘要反映实际结果 | e64def9 | sha256:ac8ca97959c3a72f787a9b86d9c07776f78bf495d3dd7e17da2ec335ae62a1d4 |
 
-> 下一版本：**1.30**（build 时自动递增并回填本表）
+> 下一版本：**1.31**（build 时自动递增并回填本表）
 > 历史行中 tag 已从仓库清理（仅保留最近 3 个），行本身保留作构建历史记录
