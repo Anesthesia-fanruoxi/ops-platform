@@ -61,6 +61,7 @@ DELETE {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts
 | 1.28 | 2026-10-22 | 日志新标签页改为独立轻量页（8 个资源，不再启动整个后台 SPA）+ SSE 连接治理（页签切走/标签页切后台自动断开）+ SSE 多路复用（新增 /api/stream，每个标签页只占 1 条浏览器连接；首页监控/服务列表/构建状态/日志流全部走 SseHub 按 topic 分发）；顺带修复 svc 生成器在 app context 块内 yield 导致的 LookupError | ca5abf1 | sha256:baa73ad1ac1b2ca3d5cfe1f8485c3cfc030c996da438c5b7c4b23df6ce5c8d3e |
 | 1.29 | 2026-10-22 | 去掉「切换页签/标签页切后台就断 SSE」：多路复用后每标签页仅 1 条连接，连接数已有保障，断连只会带来反复重连、重放历史与丢失滚动位置/暂停态；保留 SseHub 多路复用与 SchedulePage 原有逻辑 | ef407e4 | sha256:90702381aa82fdea10ee3a1194e939eca5b4af7936a61bc6afbab782142118ac |
 | 1.30 | 2026-11-02 | 修复 Rocky 10 磁盘扩容失败（growpart NOCHANGE 中断安装）：扩容改为「先探测、按需扩容」——用分区表（fdisk）算分区末尾真正可扩空间，有才 growpart，没有多余空间就跳过；扩容前 rescan 磁盘 + partx -u 同步内核视图；growpart 失败三段兜底（内核重读已变大 / NOCHANGE 视为无多余空间 / 其他才失败）；收尾摘要反映实际结果 | e64def9 | sha256:ac8ca97959c3a72f787a9b86d9c07776f78bf495d3dd7e17da2ec335ae62a1d4 |
+| 1.31 | 2026-11-02 | 磁盘扩容判定再修：末尾可扩空间门槛提到 2MB（此前 1MB 对齐间隙被误判为可扩空间，白跑 growpart）；区分「分区表已到盘尾但内核未同步」——根分区在用时 partx -u 会 EBUSY 静默失败、内核不允许在线调整分区大小，此时提示「重启后即可识别完整容量」并继续安装，不再误判为失败中断 | d73b5ad | sha256:8782611676162632d6f75e3af828039188471d6c4f7bd3985062e007dedeaa43 |
 
-> 下一版本：**1.31**（build 时自动递增并回填本表）
+> 下一版本：**1.32**（build 时自动递增并回填本表）
 > 历史行中 tag 已从仓库清理（仅保留最近 3 个），行本身保留作构建历史记录
