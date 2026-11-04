@@ -95,21 +95,39 @@ def _fmt_duration(seconds):
     return f'{secs} sec'
 
 
+def _project_display_name(build):
+    """项目展示名：优先中文名（projects.description，如 ysh → 云盛花）。
+
+    自动导入项目的 description 为「自动导入: xxx」或无意义长文本，这类回退用 name。
+    """
+    proj = build.project
+    if not proj:
+        return '-'
+    name = (proj.name or '').strip()
+    desc = (getattr(proj, 'description', '') or '').strip()
+    if desc and not desc.startswith('自动导入') and len(desc) <= 20:
+        return desc
+    return name or '-'
+
+
 def build_card(build, deploy_status=None, deploy_error=''):
-    """组装飞书消息卡片（emoji 逐行样式）：标题=项目 » 环境 + 状态，绿=成功、红=失败；
+    """组装飞书消息卡片（emoji 逐行样式）：标题=项目中文名 » 项目名-环境名 + 状态，绿=成功、红=失败；
     正文逐行展示任务名称 / 构建编号 / 分支 / 构建状态 / 构建用时 / 执行者 / 镜像版本，
     分隔线下为发版时间与固定署名。
     """
-    project_name = (build.project.name if build.project else '') or '-'
+    project_name = _project_display_name(build)
     env_name = (build.environment.name if build.environment else '') or '-'
+    # 标题后半段固定为 projects.name-environments.name（如 ysh-dev），与部署目录/镜像命名一致
+    proj_code = (build.project.name if build.project else '') or env_name
+    env_full = f'{proj_code}-{env_name}' if proj_code else env_name
     # 构建失败或部署失败都算发版失败（红色），其余为成功（绿色）
     ok = build.status == 'success' and deploy_status != 'failed'
     status_text = '成功' if ok else '失败'
-    title = f'📢 {project_name} » {env_name} {status_text}'
+    title = f'📢 {project_name} » {env_full} {status_text}'
     finished = build.finished_at or datetime.now()
 
     lines = [
-        f'📋 任务名称：{project_name} » {env_name}',
+        f'📋 任务名称：{project_name} » {env_full}',
         f'🔢 构建编号：{build.build_no or "-"}',
         f'🌿 分　　支：{build.branch or "-"}',
         f'🌟 构建状态：{status_text}',
