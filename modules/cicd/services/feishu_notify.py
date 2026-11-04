@@ -78,26 +78,48 @@ def _field(label, value, short=True):
     return {'is_short': short, 'text': {'tag': 'lark_md', 'content': f'**{label}**\n{text}'}}
 
 
+def _fmt_duration(seconds):
+    """秒 → 构建用时文案（对齐截图风格：3 min 3 sec）"""
+    try:
+        total = int(float(seconds or 0))
+    except (TypeError, ValueError):
+        return '-'
+    if total <= 0:
+        return '-'
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f'{hours} h {minutes} min' if minutes else f'{hours} h'
+    if minutes:
+        return f'{minutes} min {secs} sec'
+    return f'{secs} sec'
+
+
 def build_card(build, deploy_status=None, deploy_error=''):
-    """组装飞书消息卡片：标题=项目名称+环境，绿色=成功、红色=失败；
-    正文为 分支 / 构建编号 / 执行人 / 镜像版本 + 发版时间，底部固定署名（不展示服务列表）。
+    """组装飞书消息卡片（emoji 逐行样式）：标题=项目 » 环境 + 状态，绿=成功、红=失败；
+    正文逐行展示任务名称 / 构建编号 / 分支 / 构建状态 / 构建用时 / 执行者 / 镜像版本，
+    分隔线下为发版时间与固定署名。
     """
     project_name = (build.project.name if build.project else '') or '-'
     env_name = (build.environment.name if build.environment else '') or '-'
     # 构建失败或部署失败都算发版失败（红色），其余为成功（绿色）
     ok = build.status == 'success' and deploy_status != 'failed'
-    title = f'{project_name} {env_name} 发版{"成功" if ok else "失败"}'
+    status_text = '成功' if ok else '失败'
+    title = f'📢 {project_name} » {env_name} {status_text}'
     finished = build.finished_at or datetime.now()
 
-    fields = [
-        _field('分支', build.branch or '-'),
-        _field('构建编号', build.build_no or '-'),
-        _field('执行人', build.triggered_by or '-'),
-        _field('镜像版本', build.image_tag or '-'),
+    lines = [
+        f'📋 任务名称：{project_name} » {env_name}',
+        f'🔢 构建编号：{build.build_no or "-"}',
+        f'🌿 分　　支：{build.branch or "-"}',
+        f'🌟 构建状态：{status_text}',
+        f'🕐 构建用时：{_fmt_duration(build.duration)}',
+        f'👤 执 行 者：{build.triggered_by or "-"}',
+        f'🏷 镜像版本：{build.image_tag or "-"}',
     ]
 
     elements = [
-        {'tag': 'div', 'fields': fields},
+        {'tag': 'div', 'text': {'tag': 'lark_md', 'content': '\n'.join(lines)}},
         {'tag': 'hr'},
         {'tag': 'div', 'text': {'tag': 'lark_md',
                                 'content': f'**发版时间**：{finished.strftime("%Y-%m-%d %H:%M:%S")}'}},
