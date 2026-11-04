@@ -13,6 +13,7 @@
 | 调度 | 评分选优、排队、重跑钉住原节点、调度决策日志 |
 | 构建 | 全量/部分构建、步骤状态、日志 SSE、取消、重跑 |
 | 自动部署 | 构建成功后改远程 YAML 镜像 tag + `kubectl apply` |
+| 发版通知 | 流程模板可开关的末步（`notify`），构建/部署结束推送飞书卡片 |
 | 调度中心 | 概览 SSE、调度日志、节点评分，实时看板 |
 
 ## Agent 通信协议
@@ -33,6 +34,20 @@
 - 排队：无可用节点时保持 `pending`，心跳/构建完成时触发重新派发。
 - 重跑：钉住原节点（构建目录在节点磁盘上），支持指定起始步骤。
 - 调度日志：每次派发决策记录到 `cicd_schedule_logs`，可回溯评分与选优过程。
+
+## 发版通知（飞书）
+
+- 步骤定义：后端 7 步、前端 5 步，末步 `key='notify'`（Webhook通知），由 Master 执行，Agent 不感知。
+- 开关：流程模板「发版通知」区（`notify_enabled` / `notify_webhook_url` / `notify_webhook_secret`，前后端各自独立）。
+- 地址三级兜底：模板填了地址 → 用模板地址 + 模板密钥；模板只开启未填地址 → 整体回退系统设置
+  `feishu_webhook_url` / `feishu_webhook_secret`（地址与密钥成对取）；两处都空 → 通知步骤标记 `skipped`，不影响发版。
+  系统设置 → 平台设置提供全局地址与「发送测试」。
+- 触发时机：构建失败 → 回调即推送；构建成功 → 自动部署结束（含跳过）后推送。
+- 卡片内容：标题为「项目名称 环境 发版成功/失败」，成功绿色、失败红色（构建失败或部署失败均为红）；
+  正文为分支、构建编号、执行人、镜像版本，分隔线下展示发版时间与「运维平台 · 自动发版通知」署名（不展示服务列表）。
+- 步骤状态：未开启/未配置 → `skipped`；发送成功 → `success`；发送失败 → `failed`（不影响构建/部署终态）。
+- 防重：Redis `build:notify:{build_no}`（7 天），重跑时清除；Webhook 异常只记日志。
+- 关键文件：`modules/cicd/services/feishu_notify.py`。
 
 ## Redis 关联
 
@@ -108,6 +123,7 @@
   - `agent_service.py`：节点配置 CRUD、Redis 心跳 / 在线 / 负载
   - `install_service.py`：SSH 远程安装 / 卸载 / 更新 Agent
   - `auto_deploy.py`：构建成功自动改 YAML tag 并 kubectl apply
+  - `feishu_notify.py`：发版完成飞书卡片组装、签名、发送与通知步骤状态回写
   - `build_log.py`：日志分片追加 + SSE tail
   - `comm_crypto.py`：AES-GCM + gzip 加密通讯
   - `credential_service.py`：AES 加解密、Git 分支 / 凭据读取

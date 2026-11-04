@@ -144,13 +144,26 @@ def stream_build(build_id):
 
 
 def _deploy_step_done(steps, build_status):
-    """部署步骤是否已结束：终态（含 waiting=未配置服务目录）即结束；构建已失败/取消（非 success）
-    且部署未执行也视为结束，避免步骤 SSE 永久挂着；仅构建成功时等待部署步骤推进（pending → running → 终态）。"""
-    deploy = next((st for st in (steps or {}).get('steps', []) if st.get('key') == 'deploy'), None)
-    if deploy is None:
+    """Master 末步（部署/Webhook通知）是否已结束：终态（含 waiting=未配置服务目录）即结束；
+    构建已失败/取消（非 success）且末步未执行也视为结束，避免步骤 SSE 永久挂着；
+    仅构建成功时等待末步推进（pending → running → 终态）。"""
+    master_steps = [st for st in (steps or {}).get('steps', [])
+                    if st.get('key') in ('deploy', 'notify')]
+    if not master_steps:
         return True
-    if deploy.get('status') in ('success', 'failed', 'skipped', 'waiting'):
+    if all(st.get('status') in ('success', 'failed', 'skipped', 'waiting') for st in master_steps):
         return True
+    # 兜底：部署已结束但通知步骤长时间未推进（进程重启/线程异常），不再无限挂住 SSE
+    deploy = next((st for st in master_steps if st.get('key') == 'deploy'), None)
+    finished_at = (deploy or {}).get('finished_at') or ''
+    if finished_at:
+        try:
+            from datetime import datetime
+            dt = datetime.strptime(finished_at.split('.')[0], '%Y-%m-%d %H:%M:%S')
+            if (datetime.now() - dt).total_seconds() > 60:
+                return True
+        except ValueError:
+            pass
     return build_status != 'success'
 
 

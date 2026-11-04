@@ -538,6 +538,8 @@ def init_db(app):
             {'key': 'authplatform_platform_id', 'value': '', 'description': '统一鉴权中心平台标识（如 ops-platform），在鉴权中心后台注册'},
             {'key': 'authplatform_secret', 'value': '', 'description': '统一鉴权中心平台加密盐（仅创建时展示一次，用于请求签名）'},
             {'key': 'chat_room_url', 'value': '', 'description': '局域网聊天室地址（如 http://192.168.6.2:3000），留空则顶部不显示聊天室入口'},
+            {'key': 'feishu_webhook_url', 'value': '', 'description': '飞书群机器人 Webhook 地址（流程模板未单独配置时作兜底）'},
+            {'key': 'feishu_webhook_secret', 'value': '', 'description': '飞书群机器人签名密钥（开启「签名校验」时填写，可选）'},
         ]
         for item in defaults:
             if not Setting.query.filter_by(key=item['key']).first():

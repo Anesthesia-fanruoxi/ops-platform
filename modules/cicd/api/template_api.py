@@ -33,6 +33,7 @@ def list_templates():
         'language': (t.configs_dict().get(t.project_type) or {}).get('language', ''),
         'git_url': (t.configs_dict().get(t.project_type) or {}).get('git_url', ''),
         'build_docker_image': (t.configs_dict().get(t.project_type) or {}).get('build_docker_image', ''),
+        'notify_enabled': bool((t.configs_dict().get(t.project_type) or {}).get('notify_enabled')),
         'description': t.description,
         'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M:%S') if t.updated_at else None,
     } for t in templates])
@@ -99,7 +100,8 @@ def update_template(template_id):
     _ptype = tpl.project_type or 'backend'
     _new_cfg = tpl.configs_dict()
     _fields = ('language', 'git_docker_image', 'git_url', 'git_credential_id', 'build_docker_image',
-               'build_command', 'artifact_dirs', 'artifact_dir', 'dockerfile_template_id')
+               'build_command', 'artifact_dirs', 'artifact_dir', 'dockerfile_template_id',
+               'notify_enabled', 'notify_webhook_url', 'notify_webhook_secret')
     record_audit_diff('template', 'update', tpl.id,
                       _old_cfg.get(_ptype) or {}, _new_cfg.get(_ptype) or {}, fields=_fields)
     return success_response(tpl.to_dict(), '更新成功')

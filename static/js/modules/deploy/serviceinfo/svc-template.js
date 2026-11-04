@@ -201,7 +201,7 @@ window.SvcTemplate = `
         <template #title>总览</template>
       </el-step>
       <el-step v-for="s in bpSteps" :key="s.step_no" :status="bpStepStatus(s)"
-               :class="{ 'bp-step-selected': bpLogMode === bpStepType(s.step_no) }" @click="switchBpLog(s.step_no)">
+               :class="{ 'bp-step-selected': bpLogMode === bpStepType(s.step_no, s.key) }" @click="switchBpLog(s.step_no, s.key)">
         <template #title>
           <span>[[ s.name ]]</span>
           <span v-if="s.status === 'running' && s.started_at" style="font-size:12px;color:#e6a23c;margin-left:6px;font-family:monospace">⏱ [[ bpStepDuration(s) ]]</span>

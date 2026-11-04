@@ -78,6 +78,12 @@ def _run(app, build_id):
                 update_deploy_step(build.build_no, 'failed', f'自动部署异常: {e}')
             except Exception:
                 pass
+            # 部署异常同样推送发版通知（卡片标注部署失败）
+            try:
+                from modules.cicd.services.feishu_notify import trigger_release_notify
+                trigger_release_notify(build_id, deploy_status='failed', deploy_error=f'自动部署异常: {e}')
+            except Exception:
+                pass
 
 
 def auto_deploy_build(build):
@@ -86,6 +92,8 @@ def auto_deploy_build(build):
     env_name = build.environment.name if build.environment else ''
     if not project_name or not env_name:
         logger.warning(f'[AutoDeploy] 构建#{build.id} 缺少项目/环境信息，跳过自动部署')
+        from modules.cicd.services.build_service import update_step_by_key
+        update_step_by_key(build.build_no, 'notify', 'skipped', '缺少项目/环境信息，未执行通知')
         return
 
     env_full = f'{project_name}-{env_name}'
@@ -121,12 +129,20 @@ def auto_deploy_build(build):
     from modules.cicd.services.build_service import update_deploy_step
     update_deploy_step(build.build_no, 'running')
 
+    def notify(deploy_status, deploy_error=''):
+        """推送发版通知（后台线程，best-effort；受流程模板 notify_enabled 开关控制）"""
+        from modules.cicd.services.feishu_notify import trigger_release_notify
+        trigger_release_notify(build.id, deploy_status=deploy_status, deploy_error=deploy_error)
+
     def finish():
-        """根据是否有 ERROR 结束部署步骤（不影响构建终态）"""
+        """根据是否有 ERROR 结束部署步骤（不影响构建终态），随后推送发版通知"""
         if has_error[0]:
             update_deploy_step(build.build_no, 'failed', '部署过程中存在错误，详见部署日志')
+            notify('failed', '部署过程中存在错误，详见部署日志')
         else:
             update_deploy_step(build.build_no, 'success')
+            # 前端无「部署」步骤（发布到 Web 目录即完成），卡片按发布结果展示
+            notify(None if build.project_type == 'frontend' else 'success')
 
     log('INFO', f'开始自动部署：环境={env_full} tag={new_tag} 范围={"全部" if is_full else "部分"} 服务={target}')
 
@@ -140,15 +156,18 @@ def auto_deploy_build(build):
             '未配置服务目录，请配置后重新构建',
             action='configure_artifact_dirs',
         )
+        notify('skipped', '未配置服务目录，未执行部署')
         return
 
     if not new_tag:
         log('WARN', '构建无镜像 tag，跳过自动部署')
         update_deploy_step(build.build_no, 'success')
+        notify('skipped', '构建无镜像 tag，未执行部署')
         return
     if not target:
         log('WARN', '无可部署的服务，跳过自动部署')
         update_deploy_step(build.build_no, 'success')
+        notify('skipped', '无可部署的服务，未执行部署')
         return
 
     # 懒导入 deploy 模块，避免 cicd↔deploy 循环依赖
@@ -159,6 +178,7 @@ def auto_deploy_build(build):
     if not k8s.host:
         log('WARN', '未配置 K8s 控制节点（k8s_master_ip），跳过自动部署')
         update_deploy_step(build.build_no, 'success')
+        notify('skipped', '未配置 K8s 控制节点，未执行部署')
         return
 
     deploy_dir = f'{get_k8s_yaml_remote_dir()}/{env_full}/deployment'
@@ -173,6 +193,7 @@ def auto_deploy_build(build):
         if not k8s.remote_directory_exists(deploy_dir):
             log('WARN', f'远程部署目录不存在（环境未部署）：{deploy_dir}，跳过自动部署')
             update_deploy_step(build.build_no, 'success')
+            notify('skipped', '远程部署目录不存在（环境未部署），未执行部署')
             return
 
         # 1. 修改镜像 tag：远程为主（远程文件可能是最新变更，不能用本地覆盖），

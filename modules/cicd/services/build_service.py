@@ -47,6 +47,7 @@ BACKEND_STEPS = [
     {'step_no': 4, 'key': 'docker_build', 'name': 'Docker Build'},
     {'step_no': 5, 'key': 'docker_push', 'name': 'Docker Push'},
     {'step_no': 6, 'key': 'deploy', 'name': '部署'},
+    {'step_no': 7, 'key': 'notify', 'name': 'Webhook通知'},
 ]
 
 FRONTEND_STEPS = [
@@ -54,7 +55,11 @@ FRONTEND_STEPS = [
     {'step_no': 2, 'key': 'build', 'name': '编译构建'},
     {'step_no': 3, 'key': 'collect', 'name': '产物收集'},
     {'step_no': 4, 'key': 'publish', 'name': '发布到Web目录'},
+    {'step_no': 5, 'key': 'notify', 'name': 'Webhook通知'},
 ]
+
+# 由 Master 执行的步骤（Agent 不感知、不可作为重跑起点）
+MASTER_STEP_KEYS = ('deploy', 'notify')
 
 def get_build_steps_def(project_type):
     """根据项目类型获取步骤定义"""
@@ -288,10 +293,10 @@ def rerun_build(build_id, start_step):
         return None, 'start_step 无效'
     if not (1 <= start_step <= total):
         return None, f'start_step 必须在 1~{total} 之间'
-    # 部署步骤（key='deploy'）由 Master 自动执行，Agent 不感知，禁止作为重跑起点
+    # 部署/通知步骤由 Master 自动执行，Agent 不感知，禁止作为重跑起点
     for s in steps:
-        if s.get('key') == 'deploy' and start_step == s['step_no']:
-            return None, f'部署步骤（第{start_step}步）由平台自动执行，不能作为重跑起点，请选择 1~{total - 1}'
+        if s.get('key') in MASTER_STEP_KEYS and start_step == s['step_no']:
+            return None, f'「{s["name"]}」步骤（第{start_step}步）由平台自动执行，不能作为重跑起点，请选择 1~{start_step - 1}'
     for s in steps:
         if s['step_no'] < start_step and s['status'] != 'success':
             return None, f'前置步骤「{s["name"]}」未完成（{s["status"]}），请从更早步骤重跑'
@@ -324,6 +329,8 @@ def rerun_build(build_id, start_step):
     # 清除可能残留的领取标记，保证重跑可被正常领取
     from core.redis_client import cache_delete
     cache_delete(f'build:claim:{build.id}')
+    # 清除通知防重标记：重跑需要重新推送发版结果
+    cache_delete(f'build:notify:{build.build_no}')
 
     # 触发调度：重跑任务优先派发；节点繁忙/不可用则保持 pending 排队等待
     from modules.cicd.services.dispatch_service import dispatch_pending
@@ -597,10 +604,10 @@ def get_build_steps(build_no):
     """读取步骤状态（Redis）"""
     return _read_build_steps(build_no)
 
-def update_deploy_step(build_no, status, error='', action=''):
-    """更新「部署」步骤（key='deploy'）的状态（Redis）。
-    由 Master 自动部署调用（Agent 不感知此步）；不重算 build 总状态，
-    展示以 DB build.status 为准（部署失败不影响构建终态）。
+def update_step_by_key(build_no, key, status, error='', action=''):
+    """按 key 更新 Master 侧步骤状态（Redis）。
+    用于「部署」(deploy) 与「Webhook通知」(notify)：由 Master 执行（Agent 不感知）。
+    不重算 build 总状态，展示以 DB build.status 为准（通知/部署失败不影响构建终态）。
     status=waiting：后端未配置服务目录，等待平台勾选回填后重新构建。"""
     with _build_json_lock:
         data = _read_build_steps(build_no)
@@ -608,7 +615,7 @@ def update_deploy_step(build_no, status, error='', action=''):
             return
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
         for step in data['steps']:
-            if step.get('key') != 'deploy':
+            if step.get('key') != key:
                 continue
             if status == 'running':
                 step['status'] = 'running'
@@ -627,9 +634,14 @@ def update_deploy_step(build_no, status, error='', action=''):
         _write_build_steps(build_no, data)
 
 
+def update_deploy_step(build_no, status, error='', action=''):
+    """更新「部署」步骤（key='deploy'）的状态（Redis）"""
+    update_step_by_key(build_no, 'deploy', status, error, action)
+
+
 def fill_skipped_steps(build_no):
     """构建终态后补齐未回调步骤（Agent 跳过的步骤无回调），避免步骤永久 pending。
-    跳过部署步骤：部署由 Master 自动部署推进（Agent 不回调），不能补成 skipped。"""
+    跳过 Master 步骤：部署由自动部署推进、通知由发版通知推进（Agent 不回调），不能补成 skipped。"""
     with _build_json_lock:
         data = _read_build_steps(build_no)
         if not data or not data.get('steps'):
@@ -637,7 +649,7 @@ def fill_skipped_steps(build_no):
         changed = False
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
         for step in data['steps']:
-            if step.get('key') == 'deploy':
+            if step.get('key') in MASTER_STEP_KEYS:
                 continue
             if step['status'] not in ('success', 'failed', 'skipped'):
                 step['status'] = 'skipped'

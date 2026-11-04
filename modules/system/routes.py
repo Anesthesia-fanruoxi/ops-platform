@@ -16,7 +16,7 @@ from modules.system.role_api import (
 )
 from modules.system.settings_api import (
     list_settings, update_settings, debug_settings,
-    test_ssh, test_k8s_ssh, test_nginx_ssh, test_harbor
+    test_ssh, test_k8s_ssh, test_nginx_ssh, test_harbor, test_feishu
 )
 from modules.system.menu_api import list_menus
 
@@ -67,6 +67,7 @@ settings_bp.add_url_rule('/test-ssh', 'test_ssh', test_ssh, methods=['POST'])
 settings_bp.add_url_rule('/test-k8s-ssh', 'test_k8s_ssh', test_k8s_ssh, methods=['POST'])
 settings_bp.add_url_rule('/test-nginx-ssh', 'test_nginx_ssh', test_nginx_ssh, methods=['POST'])
 settings_bp.add_url_rule('/test-harbor', 'test_harbor', test_harbor, methods=['POST'])
+settings_bp.add_url_rule('/test-feishu', 'test_feishu', test_feishu, methods=['POST'])
 
 
 # ── 菜单（前端侧边栏数据源，来自 menus 表） ──

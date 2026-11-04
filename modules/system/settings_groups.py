@@ -42,6 +42,8 @@ SETTING_GROUPS = {
         'authplatform_platform_id',
         'authplatform_secret',
         'chat_room_url',
+        'feishu_webhook_url',
+        'feishu_webhook_secret',
     ],
 }
 

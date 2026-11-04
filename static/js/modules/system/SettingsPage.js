@@ -33,7 +33,9 @@ const SETTING_FORM_MAP = {
     authplatform_base_url: '',
     authplatform_platform_id: '',
     authplatform_secret: '',
-    chat_room_url: ''
+    chat_room_url: '',
+    feishu_webhook_url: '',
+    feishu_webhook_secret: ''
   }
 };
 
@@ -371,6 +373,25 @@ const SettingsPage = {
           </div>
         </div>
 
+        <div class="subsection-title" style="display:flex;align-items:center;gap:12px">发版通知（飞书）
+          <button class="btn btn-default btn-sm" @click="testFeishu">🔔 发送测试</button>
+          <span class="test-hint">保存后测试</span>
+          <span :class="['test-result', feishuTestResult.type]">[[ feishuTestResult.text ]]</span>
+        </div>
+        <div class="form-row">
+          <div class="form-group w-url">
+            <label class="form-label">Webhook 地址</label>
+            <input class="form-input" v-model="form.feishu_webhook_url" @input="detectChange"
+                   placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxxx">
+            <small style="color:#888">飞书群 → 设置 → 群机器人 → 添加自定义机器人；流程模板开启「发版通知」后作为兜底地址</small>
+          </div>
+          <div class="form-group w-pass">
+            <label class="form-label">签名密钥（可选）</label>
+            <input class="form-input" type="password" v-model="form.feishu_webhook_secret" @input="detectChange"
+                   placeholder="机器人开启「签名校验」时填写">
+          </div>
+        </div>
+
         <div class="subsection-title">认证</div>
         <div class="form-row">
           <div class="form-group w-port">
@@ -446,7 +467,8 @@ const SettingsPage = {
       sshTestResult: { text: '', type: '' },
       harborTestResult: { text: '', type: '' },
       k8sTestResult: { text: '', type: '' },
-      nginxTestResult: { text: '', type: '' }
+      nginxTestResult: { text: '', type: '' },
+      feishuTestResult: { text: '', type: '' }
     };
   },
   computed: {
@@ -533,6 +555,14 @@ const SettingsPage = {
         this.harborTestResult = r.code === 200
           ? { text: '✅ ' + r.msg + ' (' + ver + ')', type: 'success' }
           : { text: '❌ ' + r.msg, type: 'error' };
+      });
+    },
+    testFeishu() {
+      this.feishuTestResult = { text: '发送中...', type: 'testing' };
+      ajax('POST', '/api/settings/test-feishu', {}, (r) => {
+        this.feishuTestResult = r.code === 200
+          ? { text: '✅ ' + (r.msg || '已发送'), type: 'success' }
+          : { text: '❌ ' + (r.msg || '发送失败'), type: 'error' };
       });
     },
     testK8sSSH() {

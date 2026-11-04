@@ -191,6 +191,11 @@ def agent_build_result(build_id):
     if build.status == 'success':
         from modules.cicd.services.auto_deploy import trigger_auto_deploy
         trigger_auto_deploy(build.id)
+    elif build.status == 'failed':
+        # 构建失败不会进入部署，直接推送发版失败通知（受流程模板 notify_enabled 开关控制）
+        from modules.cicd.services.feishu_notify import trigger_release_notify
+        trigger_release_notify(build.id, deploy_status='skipped',
+                               deploy_error=build.error_msg or '构建失败')
 
     return encrypt_response({'ok': True})
 

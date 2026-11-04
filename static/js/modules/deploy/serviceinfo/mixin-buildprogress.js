@@ -165,8 +165,11 @@ const SvcMixinBuildProgress = {
     disconnectBpLog() {
       if (this.bpES) { this.bpES.close(); this.bpES = null; }
     },
-    bpStepType(stepNo) {
-      return { 1: 'git', 2: 'mvn', 3: 'product', 4: 'build', 5: 'push', 6: 'deploy' }[stepNo] || 'git';
+    bpStepType(stepNo, stepKey) {
+      // 通知步骤沿用部署日志面板；前端发布日志归入 build
+      if (stepKey === 'notify') return 'deploy';
+      if (stepKey === 'publish') return 'build';
+      return { 1: 'git', 2: 'mvn', 3: 'product', 4: 'build', 5: 'push', 6: 'deploy', 7: 'deploy' }[stepNo] || 'git';
     },
     bpStatusType(status) {
       const map = { success: 'success', failed: 'danger', running: 'warning', pending: 'info', cancelled: 'info' };
@@ -219,9 +222,9 @@ const SvcMixinBuildProgress = {
       }
       return text;
     },
-    switchBpLog(stepNo) {
+    switchBpLog(stepNo, stepKey) {
       // 切换步骤只改本地视图，不重连 SSE
-      this.bpLogMode = this.bpStepType(stepNo);
+      this.bpLogMode = this.bpStepType(stepNo, stepKey);
     },
     switchBpLogAll() {
       this.bpLogMode = 'all';

@@ -36,6 +36,10 @@ const CicdConfigPage = {
               <span class="tpl-meta-label">服务</span>
               <span class="tpl-meta-val">[[ tplServiceCount(t) ]] 个目录</span>
             </div>
+            <div class="tpl-meta-row">
+              <span class="tpl-meta-label">通知</span>
+              <span class="tpl-meta-val" :style="t.notify_enabled ? 'color:#67c23a' : 'color:#c0c4cc'">[[ t.notify_enabled ? '飞书通知已开启' : '未开启' ]]</span>
+            </div>
             <div class="tpl-meta-row tpl-desc" v-if="t.description">
               <span class="tpl-meta-label">描述</span>
               <span class="tpl-meta-val tpl-truncate" :title="t.description">[[ t.description ]]</span>
@@ -208,6 +212,26 @@ const CicdConfigPage = {
           </el-select>
         </el-form-item>
       </template>
+
+      <div class="cicd-section-title">
+        发版通知
+        <div class="cicd-section-hint">开启后，构建/部署结束由平台自动推送飞书卡片。地址留空则使用「系统设置 → 平台设置」中的全局机器人；两处都未配置时通知步骤标记为「跳过」，不影响发版</div>
+      </div>
+      <el-form-item label="开启通知">
+        <el-switch :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].notify_enabled" />
+        <span style="font-size:12px;color:#909399;margin-left:8px">关闭时通知步骤标记为「跳过」</span>
+      </el-form-item>
+      <template v-if="tplForm.configs[tplForm.project_type].notify_enabled">
+        <el-form-item label="Webhook 地址">
+          <el-input :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].notify_webhook_url" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxxx" />
+          <div class="cicd-field-hint" style="font-size:12px;color:#909399;line-height:1.6;margin-top:4px">
+            填写后只发到该群；留空则用系统设置里的全局 Webhook（适合「只开启不单独配置」）
+          </div>
+        </el-form-item>
+        <el-form-item label="签名密钥">
+          <el-input :disabled="tplReadonly" v-model="tplForm.configs[tplForm.project_type].notify_webhook_secret" type="password" show-password placeholder="机器人开启「签名校验」时填写，未开启可留空" />
+        </el-form-item>
+      </template>
     </el-form>
 
         <template #footer>
@@ -378,8 +402,8 @@ const CicdConfigPage = {
     // 前后端双份配置默认值（切换类型只切展示，数据互不覆盖）
     emptyConfigs() {
       return {
-        backend: { language: 'java', git_docker_image: '', git_url: '', git_credential_id: null, build_docker_image: '', build_command: '', artifact_dirs: '', artifact_dir: '', dockerfile_template_id: null },
-        frontend: { language: 'vue', git_docker_image: '', git_url: '', git_credential_id: null, build_docker_image: '', build_command: '', artifact_dirs: '', artifact_dir: '', dockerfile_template_id: null },
+        backend: { language: 'java', git_docker_image: '', git_url: '', git_credential_id: null, build_docker_image: '', build_command: '', artifact_dirs: '', artifact_dir: '', dockerfile_template_id: null, notify_enabled: false, notify_webhook_url: '', notify_webhook_secret: '' },
+        frontend: { language: 'vue', git_docker_image: '', git_url: '', git_credential_id: null, build_docker_image: '', build_command: '', artifact_dirs: '', artifact_dir: '', dockerfile_template_id: null, notify_enabled: false, notify_webhook_url: '', notify_webhook_secret: '' },
       };
     },
     normalizeConfigs(cfg) {

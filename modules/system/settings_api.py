@@ -228,6 +228,16 @@ def test_nginx_ssh():
 
 
 @require_permission('op:settings')
+def test_feishu():
+    """发送飞书测试卡片（使用已保存的 Webhook 配置，验证地址/签名是否正确）"""
+    from modules.cicd.services.feishu_notify import send_test_message
+    ok, msg = send_test_message()
+    if ok:
+        return success_response({'message': msg}, '测试消息已发送，请到飞书群查看')
+    return error_response(f'发送失败: {msg}', 500)
+
+
+@require_permission('op:settings')
 def test_harbor():
     """测试Harbor连接（从数据库读取密码）"""
     # 从数据库读取配置

@@ -334,7 +334,7 @@ const ManagePage = {
           <template #title>总览</template>
         </el-step>
         <el-step v-for="s in bpSteps" :key="s.step_no" :status="bpStepStatus(s)"
-                 :class="{ 'bp-step-selected': bpLogMode === bpStepType(s.step_no) }" @click="switchBpLog(s.step_no)">
+                 :class="{ 'bp-step-selected': bpLogMode === bpStepType(s.step_no, s.key) }" @click="switchBpLog(s.step_no, s.key)">
           <template #title>
             <span>[[ s.name ]]</span>
             <span v-if="s.status === 'running' && s.started_at" style="font-size:12px;color:#e6a23c;margin-left:6px;font-family:monospace">⏱ [[ bpStepDuration(s) ]]</span>
@@ -1413,9 +1413,11 @@ const ManagePage = {
     disconnectBpLog() {
       if (this.bpES) { this.bpES.close(); this.bpES = null; }
     },
-    // step_no → SSE 日志类型（git/mvn/product/build/push/deploy）
-    bpStepType(stepNo) {
-      return { 1: 'git', 2: 'mvn', 3: 'product', 4: 'build', 5: 'push', 6: 'deploy' }[stepNo] || 'git';
+    // step_no → SSE 日志类型（git/mvn/product/build/push/deploy）；通知步骤复用部署日志
+    bpStepType(stepNo, stepKey) {
+      if (stepKey === 'notify') return 'deploy';
+      if (stepKey === 'publish') return 'build';
+      return { 1: 'git', 2: 'mvn', 3: 'product', 4: 'build', 5: 'push', 6: 'deploy', 7: 'deploy' }[stepNo] || 'git';
     },
     // 解析步骤时间字符串，兼容秒级与毫秒级（后端新格式带 .mmm）
     parseStepTime(str) {
@@ -1460,8 +1462,8 @@ const ManagePage = {
       return text;
     },
     // 点击步骤圈：只看该步骤日志（本地切分，不重连）
-    switchBpLog(stepNo) {
-      this.bpLogMode = this.bpStepType(stepNo);
+    switchBpLog(stepNo, stepKey) {
+      this.bpLogMode = this.bpStepType(stepNo, stepKey);
     },
     // 总览模式（本地切分，不重连）
     switchBpLogAll() {
