@@ -70,6 +70,7 @@ DELETE {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts
 | 1.37 | 2026-11-26 | 独立多仓发版页与批次查询接口；Agent 支持 --max-concurrent；m2 缓存只挂 repository、settings 按需单独挂载，修复 Docker 在宿主缓存目录生成 0 字节 settings.xml 导致后续构建 Maven FATAL | e70bc6a | sha256:4fc0958e3f2debc2dd01865f71019800fb46671b6d3dbbaa701b6c9453fd5cdd |
 | 1.38 | 2026-11-26 | 移除独立多仓发版页与菜单，批次进度收敛到服务信息页（构建记录/构建中/最近构建）；修复制品发布：同会话 package + maven-deploy-plugin 3.1.1 alt 仓库新语法 | e8b9269 | sha256:4debf66056bc0a00b47a7df93b028f31b2d6c145182faa2698e62d4d3f3e3867 |
 | 1.39 | 2026-11-26 | Agent 多仓产物落盘修复：Dockerfile 为 ADD/COPY pkg 时把产物放入 pkg/（修复 docker build "/pkg": not found），java8 的 ADD {{jar_name}} 保持平铺；实测 2 服务批次全链路成功 | aa7222e | sha256:7b6f3dffc6a159ebba4e8bd82ea31ca1e15152a782532888b278f1897ec4b92f |
+| 1.40 | 2026-11-26 | 多仓批次按仓库展示、服务名推导仓库（同仓多服务只建一个构建）；保留策略按批次且跳过运行中目录；日志 SSE 提速（Agent 200ms 增量读+首帧只回放 200KB，Master 用 DB 状态兜底结束判定、轮询 0.2s，前端按帧渲染） | f2336d8 | sha256:e210b11b27e51d2251e9a5930365f7b29aa7273a28ea283fe7f5f04afa2de760 |
 
-> 下一版本：**1.40**（build 时自动递增并回填本表）
+> 下一版本：**1.41**（build 时自动递增并回填本表）
 > 历史行中 tag 已从仓库清理（仅保留最近 3 个），行本身保留作构建历史记录
