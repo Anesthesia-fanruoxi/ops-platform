@@ -219,27 +219,44 @@ func streamBuildLog(w http.ResponseWriter, r *http.Request, path, marker string,
 		fmt.Fprintf(w, ": connected\n\n")
 		flusher.Flush()
 
+		const initialTail = 200 * 1024 // 首帧只回放尾部 200KB，避免大日志首屏卡顿
 		var offset int64
 
 		// 立即读取已有内容（历史日志秒出）
-		data, _ := os.ReadFile(path)
-		if len(data) > 0 {
+		if fi, err := os.Stat(path); err == nil {
+			size := fi.Size()
+			data, _ := os.ReadFile(path)
 			if marker == "" {
-				fmt.Fprintf(w, "data: %s\n\n", sseEscape(data))
-				offset = int64(len(data))
+				start := int64(0)
+				if size > initialTail {
+					start = size - initialTail
+				}
+				if int64(len(data)) > start {
+					chunk := data[start:]
+					if start > 0 {
+						chunk = append([]byte(fmt.Sprintf("...（仅显示最近 %dKB 日志）...\n", initialTail/1024)), chunk...)
+					}
+					fmt.Fprintf(w, "data: %s\n\n", sseEscape(chunk))
+					offset = int64(len(data))
+					flusher.Flush()
+				}
 			} else {
 				start, end := findSection(data, marker)
 				if start >= 0 {
-					fmt.Fprintf(w, "data: %s\n\n", sseEscape(data[start:end]))
+					secStart := start
+					if end-secStart > initialTail {
+						secStart = end - initialTail
+					}
+					fmt.Fprintf(w, "data: %s\n\n", sseEscape(data[secStart:end]))
 					offset = int64(end)
+					flusher.Flush()
 				}
 			}
-			flusher.Flush()
 		}
 
-		ticker := time.NewTicker(500 * time.Millisecond)
+		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
-		timeout := time.After(5 * time.Minute)
+		timeout := time.After(30 * time.Minute)
 		heartbeat := time.NewTicker(15 * time.Second)
 		defer heartbeat.Stop()
 
@@ -253,27 +270,36 @@ func streamBuildLog(w http.ResponseWriter, r *http.Request, path, marker string,
 				fmt.Fprintf(w, ": keepalive\n\n")
 				flusher.Flush()
 			case <-ticker.C:
-				data, err := os.ReadFile(path)
-				if err != nil {
-					continue
-				}
 				if marker == "" {
-					// 总览：从 offset 追加
-					if int64(len(data)) > offset {
-						chunk := data[offset:]
-						fmt.Fprintf(w, "data: %s\n\n", sseEscape(chunk))
-						offset = int64(len(data))
+					// 总览：按 offset 增量读，避免每次全量读文件
+					fi, err := os.Stat(path)
+					if err != nil || fi.Size() <= offset {
+						continue
+					}
+					f, err := os.Open(path)
+					if err != nil {
+						continue
+					}
+					buf := make([]byte, fi.Size()-offset)
+					n, _ := f.ReadAt(buf, offset)
+					f.Close()
+					if n > 0 {
+						fmt.Fprintf(w, "data: %s\n\n", sseEscape(buf[:n]))
+						offset += int64(n)
 						flusher.Flush()
 					}
 				} else {
 					// 步骤模式：重新定位区间，发送增量
+					data, err := os.ReadFile(path)
+					if err != nil {
+						continue
+					}
 					start, end := findSection(data, marker)
 					if start >= 0 && int64(end) > offset {
 						if offset < int64(start) {
 							offset = int64(start)
 						}
-						chunk := data[offset:end]
-						fmt.Fprintf(w, "data: %s\n\n", sseEscape(chunk))
+						fmt.Fprintf(w, "data: %s\n\n", sseEscape(data[offset:end]))
 						offset = int64(end)
 						flusher.Flush()
 					}

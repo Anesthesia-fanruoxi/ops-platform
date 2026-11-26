@@ -97,6 +97,14 @@ def assemble_task(build, agent):
         else:
             logger.warning('[dispatch] Maven Settings#%s 不存在', maven_settings_id)
 
+    # 多仓批次号：Agent 用它把同批构建目录作为保留单位，避免互相清理
+    batch_no = ''
+    if getattr(build, 'batch_id', None):
+        from modules.cicd.multi_models import CicdBuildBatch
+        mb = CicdBuildBatch.query.get(build.batch_id)
+        if mb:
+            batch_no = mb.batch_no
+
     # 部分构建：下发前将 artifact_dirs 筛成仅选中的服务（按 basename 匹配），
     # Agent 收到的是自包含任务，照常遍历即可，无需感知“选择”逻辑。空=全部
     artifact_dirs = _clean_artifact_dirs(steps.get('artifact_dirs'))
@@ -132,6 +140,7 @@ def assemble_task(build, agent):
             'build_docker_image': steps.get('build_docker_image', ''),
             'build_command': steps.get('build_command', ''),
             'maven_settings_content': maven_settings_content,
+            'batch_no': batch_no,
             'artifact_dirs': artifact_dirs,
             'artifact_dir': steps.get('artifact_dir', ''),
             # 服务名映射（多仓库构建才下发；单仓为空，Agent 沿用目录 basename）

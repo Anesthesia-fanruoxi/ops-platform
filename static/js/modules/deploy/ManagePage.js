@@ -354,7 +354,13 @@ const ManagePage = {
       <el-alert v-if="bpBuild && bpBuild.status === 'failed' && bpBuild.error_msg"
                 :title="bpBuild.error_msg" type="error" :closable="false" show-icon style="margin-bottom:12px" />
       <!-- 日志区域 -->
-      <div ref="bpLogContainer" class="bp-log-box">[[ bpLogView() || '等待日志输出...' ]]</div>
+      <div ref="bpLogContainer" class="bp-log-box">
+        <template v-if="bpLogMode === 'all'">
+          <span v-if="!bpLogFrames.length">等待日志输出...</span>
+          <span v-for="f in bpLogFrames" :key="f.id">[[ f.text ]]</span>
+        </template>
+        <template v-else>[[ bpLogView() || '等待日志输出...' ]]</template>
+      </div>
     </el-drawer>
 
     <!-- 详情对话框 -->
@@ -608,7 +614,9 @@ const ManagePage = {
       bpDrawerVisible: false,
       bpBuild: null,
       bpSteps: [],
-      bpLogFull: '',  // 全量日志缓冲（仅 all 模式 SSE 累积）
+      bpLogFrames: [],     // 总览日志按帧追加渲染（只重画新帧，不重算全量字符串）
+      bpLogFrameSeq: 0,
+      bpLogFrameChars: 0,
       bpLogByStep: {},  // 步骤归属日志缓冲（后端帧带 step，前端纯渲染）
       bpLogMode: 'all',
       bpStepES: null,
@@ -1475,8 +1483,7 @@ const ManagePage = {
     openProgressDrawer(build) {
       this.bpBuild = build;
       this.bpSteps = [];
-      this.bpLogFull = '';
-      this.bpLogByStep = {};
+      this.resetBpLog();
       this.bpLogMode = 'all';
       this.bpDrawerVisible = true;
       // 启动实时计时器（每 100ms 更新 bpNow 触发步骤耗时重算）
@@ -1550,7 +1557,7 @@ const ManagePage = {
         try { obj = JSON.parse(evt.data); } catch (e) { return; }
         const text = obj.text || '';
         if (!text) return;
-        this.bpLogFull += text;
+        this.pushLogFrame(text);
         if (obj.step) {
           this.bpLogByStep[obj.step] = (this.bpLogByStep[obj.step] || '') + text;
         }
@@ -1602,9 +1609,25 @@ const ManagePage = {
       }
       return '';
     },
-    // 当前视图日志（后端已按步骤归属拆分，前端仅取缓冲 + 渲染限量 500KB）
+    // 总览日志按帧追加：只新增 DOM 节点，不重算全量字符串；超过 500KB 丢弃最旧帧
+    pushLogFrame(text) {
+      const MAX = 512000;
+      this.bpLogFrames.push({ id: ++this.bpLogFrameSeq, text });
+      this.bpLogFrameChars += text.length;
+      while (this.bpLogFrameChars > MAX && this.bpLogFrames.length > 1) {
+        const drop = this.bpLogFrames.shift();
+        this.bpLogFrameChars -= drop.text.length;
+      }
+    },
+    resetBpLog() {
+      this.bpLogFrames = [];
+      this.bpLogFrameSeq = 0;
+      this.bpLogFrameChars = 0;
+      this.bpLogByStep = {};
+    },
+    // 分步骤视图日志（总览走帧渲染，不再拼大字符串）
     bpLogView() {
-      let text = this.bpLogMode === 'all' ? this.bpLogFull : (this.bpLogByStep[this.bpLogMode] || '');
+      let text = this.bpLogByStep[this.bpLogMode] || '';
       if (!text) return '';
       const MAX = 512000;  // 500KB
       if (text.length > MAX) {
@@ -1654,8 +1677,7 @@ const ManagePage = {
             ElementPlus.ElMessage.success(res.msg || '已加入重跑队列');
             // 用后端返回的真实状态刷新（重跑进入调度队列，可能为 pending 等待派发）
             this.bpBuild = Object.assign({}, this.bpBuild, res.data || {}, { error_msg: '' });
-            this.bpLogFull = '';
-            this.bpLogByStep = {};
+            this.resetBpLog();
             // 重新拉取步骤 SSE 获取真实状态（首帧即重置后的快照）
             this.connectBuildSteps();
             this.connectBuildLog('all');

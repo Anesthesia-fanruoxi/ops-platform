@@ -219,7 +219,13 @@ window.SvcTemplate = `
     </el-steps>
     <el-alert v-if="bpBuild && bpBuild.status === 'failed' && bpBuild.error_msg"
               :title="bpBuild.error_msg" type="error" :closable="false" show-icon style="margin-bottom:12px" />
-    <div ref="bpLogContainer" class="bp-log-box">[[ bpLogView() || '等待日志输出...' ]]</div>
+    <div ref="bpLogContainer" class="bp-log-box">
+      <template v-if="bpLogMode === 'all'">
+        <span v-if="!bpLogFrames.length">等待日志输出...</span>
+        <span v-for="f in bpLogFrames" :key="f.id">[[ f.text ]]</span>
+      </template>
+      <template v-else>[[ bpLogView() || '等待日志输出...' ]]</template>
+    </div>
   </el-drawer>
 
   <!-- 多仓批次进度抽屉：一次发版按服务逐行展示各自构建进度，点击行查看该构建步骤/日志 -->
@@ -243,12 +249,22 @@ window.SvcTemplate = `
           / 失败 <b style="color:#f56c6c;font-weight:500">[[ batchData.build_status_counts.failed ]]</b>
           / 运行 <b style="color:#409eff;font-weight:500">[[ batchData.build_status_counts.running + batchData.build_status_counts.pending ]]</b></span>
       </div>
-      <el-table :data="(batchData && batchData.services) || []" size="small" border stripe max-height="68vh"
-                style="width:100%;margin-top:10px" highlight-current-row @row-click="openBatchService">
-        <el-table-column prop="service_name" label="服务" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="repo_name" label="仓库" min-width="150" show-overflow-tooltip />
+      <el-table :data="(batchData && batchData.repos) || []" size="small" border stripe max-height="68vh"
+                style="width:100%;margin-top:10px" highlight-current-row @row-click="openBatchRepo">
+        <el-table-column prop="repo_name" label="仓库" min-width="170" show-overflow-tooltip />
+        <el-table-column label="服务" width="70" align="center">
+          <template #default="s">
+            <el-tooltip :content="(s.row.services || []).join('、')" placement="top" :disabled="(s.row.service_count || 0) <= 1">
+              <span>[[ s.row.service_count ]]</span>
+            </el-tooltip>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="90" align="center">
-          <template #default="s"><el-tag :type="bpStatusType(s.row.status)" size="small">[[ bpStatusText(s.row.status) ]]</el-tag></template>
+          <template #default="s">
+            <el-tooltip :content="s.row.error" placement="top" :disabled="!s.row.error">
+              <el-tag :type="bpStatusType(s.row.status)" size="small">[[ bpStatusText(s.row.status) ]]</el-tag>
+            </el-tooltip>
+          </template>
         </el-table-column>
         <el-table-column prop="current_step" label="当前步骤" width="110" align="center" />
         <el-table-column label="进度" width="160">
@@ -262,10 +278,10 @@ window.SvcTemplate = `
           <template #default="s">[[ s.row.duration ? Math.round(s.row.duration) + 's' : '-' ]]</template>
         </el-table-column>
         <el-table-column label="操作" width="90" align="center">
-          <template #default="s"><el-button link type="primary" size="small" @click.stop="openBatchService(s.row)">查看步骤</el-button></template>
+          <template #default="s"><el-button link type="primary" size="small" @click.stop="openBatchRepo(s.row)">查看步骤</el-button></template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!batchLoading && batchData && !(batchData.services || []).length" description="批次暂无服务进度" :image-size="60" />
+      <el-empty v-if="!batchLoading && batchData && !(batchData.repos || []).length" description="批次暂无仓库进度" :image-size="60" />
     </div>
   </el-drawer>
 

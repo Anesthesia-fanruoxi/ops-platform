@@ -301,18 +301,22 @@ def _merge_step_segments(segments):
     return merged
 
 
-def _should_stop_log_stream(build_no, agent_done=False):
-    """日志流统一终止判定：
-    ① deploy 终态(success/failed/skipped/waiting) 且 (Agent 流已毕 或 构建终态)；
-    ② 构建 failed 且 deploy 未开始（只认 failed，不捕 running）"""
+def _should_stop_log_stream(build_no, agent_done=False, db_status=None):
+    """日志流统一终止判定（以 DB 构建状态兜底：Redis 步骤快照的 status 可能长期停留在 pending）：
+    ① 步骤快照缺失：Agent 流已毕或 DB 已终态即结束；
+    ② deploy 终态 且（Agent 流已毕 / 构建终态）→ 结束；
+    ③ 构建 failed 且 deploy 未开始（不会触发部署）→ 结束。"""
     steps = build_service.get_build_steps(build_no) or {}
     step_list = steps.get('steps', [])
+    terminal_db = db_status in ('success', 'failed', 'cancelled')
+    if not step_list:
+        return agent_done or terminal_db
     deploy_status = next((st.get('status') for st in step_list if st.get('key') == 'deploy'), None)
     build_st = steps.get('status')
     deploy_done = deploy_status in ('success', 'failed', 'skipped', 'waiting')
-    if deploy_done and (agent_done or build_st in ('success', 'failed')):
+    if deploy_done and (agent_done or build_st in ('success', 'failed') or terminal_db):
         return True
-    return build_st == 'failed' and deploy_status in (None, 'pending')
+    return (build_st == 'failed' or db_status == 'failed') and deploy_status in (None, 'pending')
 
 
 @require_any_permission('page:cicd', 'op:cicd_build')
@@ -384,10 +388,14 @@ def _stream_all_log(build, agent_url):
     import queue
     import threading
 
-    # 构建已终态：Agent 日志不再变化，一次性拉全量（follow=false）+ 部署日志全文后立即结束，
-    # 不走 follow 流 —— Agent 端 follow 连接 5 分钟才超时，且异步流在途数据易被提前 break 截断导致日志丢失
+    # 构建已终态且没有仍在跑的步骤（含部署）：一次性拉全量（follow=false）+ 部署日志全文后立即结束。
+    # 注意 Redis 步骤快照的 status 可能长期为 pending，必须结合 DB 构建状态 + 步骤终态判断
     steps = build_service.get_build_steps(build.build_no) or {}
-    if steps.get('status') in ('success', 'failed'):
+    step_list = steps.get('steps') or []
+    steps_settled = not step_list or all(
+        st.get('status') in ('success', 'failed', 'skipped', 'waiting') for st in step_list)
+    if steps.get('status') in ('success', 'failed') or (
+            build.status in ('success', 'failed', 'cancelled') and steps_settled):
         return _stream_final_log(build, agent_url)
 
     deploy_path = os.path.join('logs', 'cicd', f'{build.build_no}.deploy.log')
@@ -425,6 +433,8 @@ def _stream_all_log(build, agent_url):
     def generate():
         sent = 0
         idle = 0
+        tick = 0
+        db_status = build.status  # 步骤快照缺失时的终止兜底
         agent_done = False
         parser = _AgentSseParser()
         splitter = _StepLineSplitter()
@@ -466,16 +476,25 @@ def _stream_all_log(build, agent_url):
                     idle += 1
 
                 # 3. 统一终止判定；终止前排空 Agent 在途数据（≤3s）
-                if _should_stop_log_stream(build.build_no, agent_done):
+                tick += 1
+                if tick % 25 == 0:  # 每 ~5s 刷新一次 DB 状态，供 Redis 快照缺失时兜底
+                    try:
+                        from modules.cicd.models import Build as _Build
+                        b2 = _Build.query.get(build.id)
+                        if b2:
+                            db_status = b2.status
+                    except Exception:
+                        pass
+                if _should_stop_log_stream(build.build_no, agent_done, db_status):
                     wait = 0
-                    while not agent_done and wait < 3:
-                        time.sleep(1)
+                    while not agent_done and wait < 6:
+                        time.sleep(0.5)
                         wait += 1
                         yield from drain_agent_queue()
                     break
-                if idle >= 300:
+                if idle >= 1500:  # 0.2s * 1500 = 5min 无数据才空转退出
                     break
-                time.sleep(1)
+                time.sleep(0.2)
         finally:
             # 主生成器退出时通知 pump 线程停止，释放 Agent 连接
             stop_pump.set()
@@ -556,9 +575,9 @@ def _stream_deploy_log(build, follow):
             # 部署终态（含 waiting）且日志无新增 → 结束；构建失败且部署未开始（不会触发部署）→ 直接结束
             if (deploy_done and len(content) <= sent) or (deploy_never and build_st == 'failed'):
                 break
-            if idle >= 300:
+            if idle >= 1000:  # 0.3s * 1000 = 5min 无新增退出
                 break
-            time.sleep(1)
+            time.sleep(0.3)
 
     return Response(
         stream_with_context(generate()),

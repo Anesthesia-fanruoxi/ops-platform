@@ -10,7 +10,9 @@ const SvcMixinBuildProgress = {
       bpDrawerVisible: false,
       bpBuild: null,
       bpSteps: [],
-      bpLogFull: '',  // 全量日志缓冲（仅 all 模式 SSE 累积）
+      bpLogFrames: [],     // 总览日志按帧追加渲染（只重画新帧，不重算全量字符串）
+      bpLogFrameSeq: 0,
+      bpLogFrameChars: 0,
       bpLogByStep: {},  // 步骤归属日志缓冲（后端帧带 step，前端纯渲染）
       bpLogMode: 'all',
       bpStepES: null,
@@ -149,7 +151,7 @@ const SvcMixinBuildProgress = {
       this.batchData = null;
       this.stopBatchTimer();
     },
-    openBatchService(row) {
+    openBatchRepo(row) {
       if (!row || !row.build_id) return;
       this.openProgressDrawer({
         id: row.build_id, build_no: row.build_no, status: row.status,
@@ -160,8 +162,7 @@ const SvcMixinBuildProgress = {
     openProgressDrawer(build) {
       this.bpBuild = build;
       this.bpSteps = [];
-      this.bpLogFull = '';
-      this.bpLogByStep = {};
+      this.resetBpLog();
       this.bpLogMode = 'all';
       this.bpDrawerVisible = true;
       this.stopBpTimer();
@@ -229,7 +230,7 @@ const SvcMixinBuildProgress = {
         try { obj = JSON.parse(evt.data); } catch (e) { return; }
         const text = obj.text || '';
         if (!text) return;
-        this.bpLogFull += text;
+        this.pushLogFrame(text);
         if (obj.step) {
           this.bpLogByStep[obj.step] = (this.bpLogByStep[obj.step] || '') + text;
         }
@@ -290,9 +291,25 @@ const SvcMixinBuildProgress = {
       if (s.duration) return this.fmtDuration(s.duration);
       return '';
     },
-    // 当前视图日志（后端已按步骤归属拆分，前端仅取缓冲 + 渲染限量 500KB）
+    // 总览日志按帧追加：只新增 DOM 节点，不重算全量字符串；超过 500KB 丢弃最旧帧
+    pushLogFrame(text) {
+      const MAX = 512000;
+      this.bpLogFrames.push({ id: ++this.bpLogFrameSeq, text });
+      this.bpLogFrameChars += text.length;
+      while (this.bpLogFrameChars > MAX && this.bpLogFrames.length > 1) {
+        const drop = this.bpLogFrames.shift();
+        this.bpLogFrameChars -= drop.text.length;
+      }
+    },
+    resetBpLog() {
+      this.bpLogFrames = [];
+      this.bpLogFrameSeq = 0;
+      this.bpLogFrameChars = 0;
+      this.bpLogByStep = {};
+    },
+    // 分步骤视图日志（总览走帧渲染，不再拼大字符串）
     bpLogView() {
-      let text = this.bpLogMode === 'all' ? this.bpLogFull : (this.bpLogByStep[this.bpLogMode] || '');
+      let text = this.bpLogByStep[this.bpLogMode] || '';
       if (!text) return '';
       const MAX = 512000;  // 500KB
       if (text.length > MAX) {
@@ -339,7 +356,7 @@ const SvcMixinBuildProgress = {
           if (res.code === 200) {
             ElementPlus.ElMessage.success(res.msg || '已加入重跑队列');
             this.bpBuild = Object.assign({}, this.bpBuild, res.data || {}, { error_msg: '' });
-            this.bpLogFull = '';
+            this.resetBpLog();
             this.connectBuildSteps();
             this.connectBuildLog('all');
           } else {

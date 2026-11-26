@@ -418,8 +418,9 @@ def complete_build(build_id, status, image_digest='', error=''):
     return build
 
 def cleanup_old_build_records(environment_id, keep):
-    """与 Agent 目录保留策略同步：每个环境仅保留最近 keep 条构建记录。
-    超出且为终态的记录，同步删除其日志文件、关联调度日志与 DB 记录
+    """与 Agent 目录保留策略同步：每个环境保留最近 keep 个"构建单位"。
+    多仓同批次（batch_id 相同）整体算一个单位，避免把同批兄弟记录/日志删掉；
+    单仓构建各自为单位。只删除终态记录，批次仍在跑时整批跳过。
     （步骤状态在 Redis 由 TTL 自动过期，无需清理）。"""
     if not environment_id:
         return
@@ -429,10 +430,24 @@ def cleanup_old_build_records(environment_id, keep):
         keep = 5
     if keep < 1:
         keep = 1
-    builds = Build.query.filter_by(environment_id=environment_id).order_by(Build.created_at.desc()).all()
-    if len(builds) <= keep:
+    builds = Build.query.filter_by(environment_id=environment_id) \
+        .order_by(Build.created_at.desc(), Build.id.desc()).all()
+    # 按单位分组（保持创建时间倒序）
+    units = []
+    unit_map = {}
+    for b in builds:
+        key = ('batch', b.batch_id) if b.batch_id else ('build', b.id)
+        if key not in unit_map:
+            unit_map[key] = []
+            units.append(unit_map[key])
+        unit_map[key].append(b)
+    if len(units) <= keep:
         return
-    doomed = [b for b in builds[keep:] if b.status not in ('pending', 'running')]
+    doomed = []
+    for unit in units[keep:]:
+        if any(b.status in ('pending', 'running') for b in unit):
+            continue
+        doomed.extend(unit)
     if not doomed:
         return
     try:

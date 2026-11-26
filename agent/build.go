@@ -15,8 +15,12 @@ import (
 	"time"
 )
 
-// keepBuilds 工作目录中保留的最近构建目录数量（含当前构建），超出的旧目录自动清理
+// keepBuilds 工作目录中保留的最近构建单位数量（含当前构建），超出的旧目录自动清理；
+// 多仓同批次目录算一个单位
 const keepBuilds = 5
+
+// activeBuildDirs 本节点正在执行的构建目录集合（清理旧构建时跳过）
+var activeBuildDirs sync.Map
 
 // ─── 构建任务结构 ────────────────────────────────────────────────
 
@@ -49,6 +53,7 @@ type StepConfig struct {
 	DockerfileContent string         `json:"dockerfile_content"`
 	ImageName         string         `json:"image_name"`
 	ImageTag          string         `json:"image_tag"`
+	BatchNo           string         `json:"batch_no"` // 多仓批次号：同批构建目录按批次整体保留
 	WebDir            string         `json:"web_dir"` // 前端发布目录：Agent 机 NFS web 挂载根 + 项目/环境/web（空=跳过发布）
 }
 
@@ -162,6 +167,10 @@ func executeBuild(task *BuildTask) {
 		startStep = 1
 	}
 
+	// 登记运行中构建目录：清理旧构建时跳过，避免并发构建时删掉同节点的代码/日志
+	activeBuildDirs.Store(buildDir, struct{}{})
+	defer activeBuildDirs.Delete(buildDir)
+
 	if startStep > 1 {
 		// 重跑：保留已有构建目录（复用代码/产物），仅校验与补齐；目录被清理则无法续跑
 		if _, err := os.Stat(codeDir); err != nil {
@@ -175,6 +184,12 @@ func executeBuild(task *BuildTask) {
 		os.MkdirAll(codeDir, 0755)
 		os.MkdirAll(productDir, 0755)
 		os.MkdirAll(logDir, 0755)
+	}
+	// 批次标记：同批构建目录在清理时整体保留/淘汰（单仓构建无标记，各自为一个单位）
+	if bn := strings.TrimSpace(task.Steps.BatchNo); bn != "" {
+		if err := os.WriteFile(filepath.Join(buildDir, ".batch_no"), []byte(bn), 0644); err != nil {
+			log.Printf("[Build#%d] 写入批次标记失败(不影响构建): %v", task.BuildID, err)
+		}
 	}
 
 	steps := getStepsDef(task.ProjectType)
@@ -406,7 +421,8 @@ func listBuiltImages(task *BuildTask, productDir string) []string {
 	return images
 }
 
-// cleanupOldBuilds 按修改时间降序保留 projEnvDir 下最近 keep 个构建目录，删除更旧的
+// cleanupOldBuilds 按"构建单位"保留最近 keep 个：同批次（.batch_no 相同）目录算一个单位，
+// 单仓构建各自为单位；单位时间取目录最新 mtime。运行中的构建目录不删。
 func cleanupOldBuilds(projEnvDir string, keep int) {
 	entries, err := os.ReadDir(projEnvDir)
 	if err != nil {
@@ -415,8 +431,10 @@ func cleanupOldBuilds(projEnvDir string, keep int) {
 	type buildEntry struct {
 		name    string
 		modTime time.Time
+		unit    string
 	}
-	var builds []buildEntry
+	var dirs []buildEntry
+	unitTime := map[string]time.Time{}
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -425,13 +443,38 @@ func cleanupOldBuilds(projEnvDir string, keep int) {
 		if infoErr != nil {
 			continue
 		}
-		builds = append(builds, buildEntry{name: e.Name(), modTime: info.ModTime()})
+		unit := "build:" + e.Name()
+		if data, rerr := os.ReadFile(filepath.Join(projEnvDir, e.Name(), ".batch_no")); rerr == nil {
+			if bn := strings.TrimSpace(string(data)); bn != "" {
+				unit = "batch:" + bn
+			}
+		}
+		dirs = append(dirs, buildEntry{name: e.Name(), modTime: info.ModTime(), unit: unit})
+		if t, ok := unitTime[unit]; !ok || info.ModTime().After(t) {
+			unitTime[unit] = info.ModTime()
+		}
 	}
-	log.Printf("[Cleanup] 目录=%s 当前构建数=%d 保留数=%d", projEnvDir, len(builds), keep)
-	sort.Slice(builds, func(i, j int) bool { return builds[i].modTime.After(builds[j].modTime) })
-	for i := keep; i < len(builds); i++ {
-		os.RemoveAll(filepath.Join(projEnvDir, builds[i].name))
-		log.Printf("[Cleanup] 已清理旧构建目录: %s (mtime=%s)", builds[i].name, builds[i].modTime.Format("2006-01-02 15:04:05"))
+	var units []string
+	for u := range unitTime {
+		units = append(units, u)
+	}
+	sort.Slice(units, func(i, j int) bool { return unitTime[units[i]].After(unitTime[units[j]]) })
+	log.Printf("[Cleanup] 目录=%s 当前构建数=%d 单位数=%d 保留单位=%d", projEnvDir, len(dirs), len(units), keep)
+	drop := map[string]bool{}
+	for i := keep; i < len(units); i++ {
+		drop[units[i]] = true
+	}
+	for _, d := range dirs {
+		if !drop[d.unit] {
+			continue
+		}
+		full := filepath.Join(projEnvDir, d.name)
+		if _, running := activeBuildDirs.Load(full); running {
+			log.Printf("[Cleanup] 跳过运行中构建目录: %s", d.name)
+			continue
+		}
+		os.RemoveAll(full)
+		log.Printf("[Cleanup] 已清理旧构建目录: %s (mtime=%s, unit=%s)", d.name, d.modTime.Format("2006-01-02 15:04:05"), d.unit)
 	}
 }
 

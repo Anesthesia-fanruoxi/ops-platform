@@ -350,32 +350,36 @@ def trigger_items_build(template_id, item_ids, environment_id, branch, triggered
         return None, '环境与模板不属于同一项目'
 
     ids = [int(x) for x in (item_ids or []) if str(x).strip().isdigit()]
-    if not ids:
-        return None, '请至少选择一个仓库'
-    items = CicdMultiItem.query.filter(
-        CicdMultiItem.template_id == tpl.id,
-        CicdMultiItem.id.in_(ids),
-        CicdMultiItem.enabled.is_(True),
-    ).all()
-    by_id = {item.id: item for item in items}
-    ordered = [by_id[i] for i in ids if i in by_id]
-    if len(ordered) != len(set(ids)):
-        return None, '包含不存在、已禁用或不属于该模板的仓库'
-
-    # 只构建选中的服务：按服务名过滤到各自仓库，未选服务的仓库不产生构建
+    # 选服务即选仓库：以服务名在模板内反查仓库，同仓多服务只产生一个构建；
+    # item_ids 仅在未提供服务名时使用（前端映射过期也以服务名为准）
     wanted_services = set(service_names or [])
     if wanted_services:
+        all_items = CicdMultiItem.query.filter_by(template_id=tpl.id, enabled=True) \
+            .order_by(CicdMultiItem.sort_no.asc(), CicdMultiItem.id.asc()).all()
+        ordered = []
         known = set()
-        for item in ordered:
-            for svc in item.services():
-                if svc.service_name in wanted_services:
-                    known.add(svc.service_name)
+        for item in all_items:
+            hit = wanted_services & {s.service_name for s in item.services()}
+            if hit:
+                ordered.append(item)
+                known |= hit
         missing = wanted_services - known
         if missing:
-            return None, '服务未关联到所选仓库: ' + ', '.join(sorted(missing))
-        ordered = [item for item in ordered if any(s.service_name in wanted_services for s in item.services())]
+            return None, '服务未关联到模板中的仓库: ' + ', '.join(sorted(missing))
         if not ordered:
             return None, '选中的服务没有对应的仓库'
+    else:
+        if not ids:
+            return None, '请至少选择一个仓库'
+        items = CicdMultiItem.query.filter(
+            CicdMultiItem.template_id == tpl.id,
+            CicdMultiItem.id.in_(ids),
+            CicdMultiItem.enabled.is_(True),
+        ).all()
+        by_id = {item.id: item for item in items}
+        ordered = [by_id[i] for i in ids if i in by_id]
+        if len(ordered) != len(set(ids)):
+            return None, '包含不存在、已禁用或不属于该模板的仓库'
 
     # 先做统一校验，避免批量创建到一半才失败
     for item in ordered:
@@ -472,14 +476,17 @@ def batch_lock_active(project_id, environment_id):
 
 
 def batch_detail(batch):
-    """批次详情：展开为服务行，供多仓发版页展示。"""
+    """批次详情：按仓库（一个构建）一行展示，附带该仓库包含的服务名。"""
     from modules.cicd.models import Build
     builds = Build.query.filter_by(batch_id=batch.id).order_by(Build.id.asc()).all()
     rows = []
     for b in builds:
         snap = b.get_steps_snapshot()
         services = snap.get('services') or []
-        service_rows = services if services else [{'name': b.image_name or snap.get('repo_name') or '', 'jar_name': ''}]
+        svc_names = [s.get('name') or '' for s in services if s.get('name')]
+        repo_name = snap.get('repo_name') or b.image_name or ''
+        if not svc_names:
+            svc_names = [repo_name]
         progress = 0
         current_step = ''
         try:
@@ -499,25 +506,24 @@ def batch_detail(batch):
             progress = 100
         elif b.status in ('pending',):
             progress = 0
-        for svc in service_rows:
-            rows.append({
-                'build_id': b.id,
-                'build_no': b.build_no,
-                'repo_name': snap.get('repo_name') or b.image_name,
-                'service_name': svc.get('name') or '',
-                'jar_name': svc.get('jar_name') or '',
-                'branch': b.branch,
-                'status': b.status,
-                'progress': progress,
-                'current_step': current_step,
-                'agent_name': b.agent.name if b.agent else '',
-                'started_at': b.started_at.strftime('%Y-%m-%d %H:%M:%S') if b.started_at else None,
-                'finished_at': b.finished_at.strftime('%Y-%m-%d %H:%M:%S') if b.finished_at else None,
-                'duration': round(b.duration, 1) if b.duration else None,
-                'error': b.error_msg or '',
-            })
+        rows.append({
+            'build_id': b.id,
+            'build_no': b.build_no,
+            'repo_name': repo_name,
+            'services': svc_names,
+            'service_count': len(svc_names),
+            'branch': b.branch,
+            'status': b.status,
+            'progress': progress,
+            'current_step': current_step,
+            'agent_name': b.agent.name if b.agent else '',
+            'started_at': b.started_at.strftime('%Y-%m-%d %H:%M:%S') if b.started_at else None,
+            'finished_at': b.finished_at.strftime('%Y-%m-%d %H:%M:%S') if b.finished_at else None,
+            'duration': round(b.duration, 1) if b.duration else None,
+            'error': b.error_msg or '',
+        })
     data = batch.to_dict(include_builds=True)
-    data['services'] = rows
+    data['repos'] = rows
     return data
 
 
