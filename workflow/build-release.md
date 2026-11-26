@@ -65,6 +65,7 @@ DELETE {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts
 | 1.32 | 2026-11-04 | 新增发版完成飞书卡片通知：流程模板可开关末步「Webhook通知」（后端 7 步 / 前端 5 步，Master 执行），标题「项目 环境 发版成功/失败」（成功绿、失败红），正文分支/构建编号/执行人/镜像版本 + 发版时间与署名；Webhook 三级兜底（模板地址 → 系统设置 → 跳过），系统设置新增全局地址/签名密钥与发送测试 | 2642dd7 | sha256:f53f043d77d33da0927c89f47d12d773670ebdc8631627a731db4e6cfdde8ced |
 | 1.33 | 2026-11-04 | 发版通知卡片改版：标题带 📢、正文改为 emoji 逐行样式（📋任务名称 / 🔢构建编号 / 🌿分支 / 🌟构建状态 / 🕐构建用时 / 👤执行者 / 🏷镜像版本），新增构建用时（取 duration，格式 3 min 3 sec / 45 sec / 1 h 2 min） | 49390a3 | sha256:4fb2bc05e0985df2f99d1e01d26c7025bc03de4f99c2bfc4b3df7b5bf7f92e4e |
 | 1.34 | 2026-11-04 | 发版通知卡片标题改为「中文项目名 » 项目名-环境名」（如 云盛花 » ysh-dev）：前半段取 projects.description（自动导入回退 name），后半段固定 projects.name-environments.name，任务名称同步 | 716a568 | sha256:07ee089f6d1252b0aad6062220f5824bd10dd4a9c1c7cac3e2d4dfea5a7a57b8 |
+| 1.35 | 2026-11-26 | 多仓 CICD 模板/批量构建/首个服务分支规则；Agent 多仓服务映射、精确 jar 与 Maven Settings；仓库 K8s 模板/APOLLO_META；中间件 NodePort 固定槽位与账号映射；环境详情展示优化 | 9486165 | sha256:6611ccb880f380a3d70a3167e4b1d2519678c5a127ee6e11c506bc3a35f9d622 |
 
-> 下一版本：**1.35**（build 时自动递增并回填本表）
+> 下一版本：**1.36**（build 时自动递增并回填本表）
 > 历史行中 tag 已从仓库清理（仅保留最近 3 个），行本身保留作构建历史记录
