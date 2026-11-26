@@ -26,11 +26,15 @@ const CreateEnvironment = {
         </div>
         <div v-if="sourceServices.length" class="info-box">
           <div style="font-weight:bold;margin-bottom:8px">将复制的服务 ([[ sourceServices.length ]]个)</div>
-          <div v-for="s in sourceServices" :key="s.name"><span class="text-primary">[[ s.name ]]</span> — [[ s.xms ]]G/[[ s.xmx ]]G, [[ s.replicas ]]副本</div>
+          <div class="copy-info-list">
+            <div v-for="s in sourceServices" :key="s.name"><span class="text-primary">[[ s.name ]]</span> — [[ s.xms ]]G/[[ s.xmx ]]G, [[ s.replicas ]]副本</div>
+          </div>
         </div>
         <div v-if="sourceMiddleware.length" class="info-box">
           <div style="font-weight:bold;margin-bottom:8px">将复制的中间件 ([[ sourceMiddleware.length ]]个)</div>
-          <div v-for="m in sourceMiddleware" :key="m"><span class="text-primary">[[ m ]]</span></div>
+          <div class="copy-info-list">
+            <div v-for="m in sourceMiddleware" :key="m"><span class="text-primary">[[ m ]]</span></div>
+          </div>
         </div>
 
         <div class="sttl">环境配置</div>

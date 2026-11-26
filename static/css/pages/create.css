@@ -15,6 +15,15 @@
 .summary-table td:last-child { color: #303133; }
 .summary-table tr:hover { background: #f5f7fa; }
 .page-content { animation: fadeIn 0.3s; }
+/* 新增环境：复制清单固定高度内部滚动，避免 41 个服务把底部按钮顶出屏幕 */
+.copy-info-list {
+  max-height: 260px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+}
+.copy-info-list > div { line-height: 1.8; }
 /* 服务列表：内容框固定占满剩余高度，行数超出时内部滚动 */
 .page-content.svc-page { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .svc-list-box {
