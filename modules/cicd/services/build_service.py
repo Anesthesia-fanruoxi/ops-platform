@@ -677,6 +677,52 @@ def update_deploy_step(build_no, status, error='', action=''):
     update_step_by_key(build_no, 'deploy', status, error, action)
 
 
+def fail_stale_agent_builds(agent_id, reason='Agent 重启，构建中断'):
+    """Agent 新进程上报 running_count=0 时自愈：把它上个进程遗留的在途构建置失败、
+    补跳步骤、释放环境锁与占用，并触发一次调度消化排队任务。"""
+    if not agent_id:
+        return 0
+    builds = Build.query.filter(
+        Build.agent_id == agent_id,
+        Build.status.in_(('running', 'pending', 'waiting')),
+    ).all()
+    if not builds:
+        return 0
+    from core.redis_client import cache_delete
+    now = datetime.now()
+    now_str = now.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    for b in builds:
+        b.status = 'failed'
+        b.finished_at = now
+        b.error_msg = reason
+        try:
+            data = get_build_steps(b.build_no) or {}
+            st_list = data.get('steps') or []
+            changed = False
+            for st in st_list:
+                if st.get('status') == 'running':
+                    st['status'] = 'failed'
+                    st['finished_at'] = now_str
+                    st['error'] = reason
+                    changed = True
+            if changed:
+                _write_build_steps(b.build_no, data)
+            fill_skipped_steps(b.build_no)
+        except Exception:
+            logger.exception('[build] 中断构建步骤收尾失败 #%s', b.id)
+        cache_delete(f'build:claim:{b.id}')
+        if b.environment_id:
+            cache_delete(f'lock:env:{b.project_id}:{b.environment_id}')
+    db.session.commit()
+    logger.warning('[build] Agent#%s 重启，已中断 %d 个在途构建', agent_id, len(builds))
+    try:
+        from modules.cicd.services.dispatch_service import dispatch_pending
+        dispatch_pending()
+    except Exception:
+        logger.exception('[build] 中断在途构建后触发调度失败')
+    return len(builds)
+
+
 def fill_skipped_steps(build_no):
     """构建终态后补齐未回调步骤（Agent 跳过的步骤无回调），避免步骤永久 pending。
     跳过 Master 步骤：部署由自动部署推进、通知由发版通知推进（Agent 不回调），不能补成 skipped。"""

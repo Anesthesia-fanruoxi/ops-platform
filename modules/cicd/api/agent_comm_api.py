@@ -57,6 +57,13 @@ def agent_register():
         # 当前运行任务数（Agent 自行上报，Master 并发依据）
         running_count=data.get('running_count'),
     )
+    # Agent 重启自愈：新进程 running_count=0，旧进程的在途构建已中断，
+    # 统一置失败并释放环境锁，避免卡在 running、占锁导致后续构建一直 pending
+    try:
+        if int(data.get('running_count') or 0) == 0:
+            build_service.fail_stale_agent_builds(agent.id)
+    except Exception:
+        pass
     return encrypt_response({'ok': True, 'agent_id': agent.id})
 
 
