@@ -67,6 +67,7 @@ DELETE {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts
 | 1.34 | 2026-11-04 | 发版通知卡片标题改为「中文项目名 » 项目名-环境名」（如 云盛花 » ysh-dev）：前半段取 projects.description（自动导入回退 name），后半段固定 projects.name-environments.name，任务名称同步 | 716a568 | sha256:07ee089f6d1252b0aad6062220f5824bd10dd4a9c1c7cac3e2d4dfea5a7a57b8 |
 | 1.35 | 2026-11-26 | 多仓 CICD 模板/批量构建/首个服务分支规则；Agent 多仓服务映射、精确 jar 与 Maven Settings；仓库 K8s 模板/APOLLO_META；中间件 NodePort 固定槽位与账号映射；环境详情展示优化 | 9486165 | sha256:6611ccb880f380a3d70a3167e4b1d2519678c5a127ee6e11c506bc3a35f9d622 |
 | 1.36 | 2026-11-26 | 新增环境复制服务/中间件清单固定高度滚动，避免服务数量过多把底部操作栏顶出屏幕 | 1be78a7 | sha256:298d791f7758552f20654ac0e6c46dae44f5a2c9c2c1e7aa405a564424562575 |
+| 1.37 | 2026-11-26 | 独立多仓发版页与批次查询接口；Agent 支持 --max-concurrent；m2 缓存只挂 repository、settings 按需单独挂载，修复 Docker 在宿主缓存目录生成 0 字节 settings.xml 导致后续构建 Maven FATAL | e70bc6a | sha256:4fc0958e3f2debc2dd01865f71019800fb46671b6d3dbbaa701b6c9453fd5cdd |
 
-> 下一版本：**1.37**（build 时自动递增并回填本表）
+> 下一版本：**1.38**（build 时自动递增并回填本表）
 > 历史行中 tag 已从仓库清理（仅保留最近 3 个），行本身保留作构建历史记录
