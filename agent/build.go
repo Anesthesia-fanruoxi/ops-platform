@@ -323,9 +323,9 @@ func executeBuild(task *BuildTask) {
 
 	// Step 4 & 5: Docker Build + Push（仅后端）
 	if success && task.ProjectType == "backend" {
-		// 构建前清理当前项目环境的旧镜像（非致命，保留最新一个）
+		// 构建前清理本次涉及服务的旧镜像（非致命，每服务保留最新一个）
 		if startStep <= 4 {
-			execCleanupImages(runner, stepLog, task)
+			execCleanupImages(runner, stepLog, task, productDir)
 		}
 		// Step 4: Docker Build（多线程）
 		if startStep <= 4 {
@@ -1300,41 +1300,65 @@ func copyFile(src, dst string) error {
 
 // ─── Docker 镜像清理（构建前执行）──────────────────────────────
 
-// execCleanupImages 清理当前项目环境的所有旧 Docker 镜像，保留最新一个
+// execCleanupImages 只清理本次构建涉及服务的旧镜像（每个服务仓库保留最新一个）
+// 不能按整个命名空间清理：同一批次的并发构建共用 {project}-{env} 命名空间，
+// 命名空间维度清理会把兄弟服务刚构建好的镜像删掉，导致推送时报「镜像本地不存在」。
 // 非致命：清理失败不影响构建流程
-func execCleanupImages(runner *buildRunner, logger *stepLogger, task *BuildTask) {
+func execCleanupImages(runner *buildRunner, logger *stepLogger, task *BuildTask, productDir string) {
 	if task.Harbor.URL == "" {
 		return
 	}
-	// 过滤：{harbor_url}/{project_env}/*
-	imageFilter := fmt.Sprintf("%s/%s/*", task.Harbor.URL, task.ImageNamespace)
-	logger.log(fmt.Sprintf("\n=== 清理旧镜像 ===\n过滤: %s\n", imageFilter))
+	prefix := fmt.Sprintf("%s/%s/", task.Harbor.URL, task.ImageNamespace)
+	targets := map[string]bool{}
+	if entries, err := os.ReadDir(productDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				targets[prefix+e.Name()] = true
+			}
+		}
+	}
+	if len(targets) == 0 {
+		logger.log("\n=== 清理旧镜像 ===\n未识别到本次构建的服务镜像，跳过清理")
+		return
+	}
 
-	// 获取所有匹配的镜像 ID（按创建时间排序，-q 只返回 ID）
-	cmd := exec.Command("docker", "images", "--filter", "reference="+imageFilter, "-q")
-	output, err := cmd.Output()
+	// 用 Repository 精确分组，不依赖 docker 的 reference 过滤（各版本对无 tag 的匹配行为不一致）
+	output, err := exec.Command("docker", "images", "--format", "{{.Repository}} {{.ID}}").Output()
 	if err != nil {
 		logger.log(fmt.Sprintf("查询旧镜像失败（跳过清理）: %v", err))
 		return
 	}
-	ids := strings.Fields(string(output))
-	if len(ids) == 0 {
-		logger.log("无旧镜像需清理")
-		return
+	// docker images 默认按创建时间倒序，每个仓库第一条即最新，其余为旧版本
+	keptIDs := map[string]string{}
+	removeSet := map[string]bool{}
+	for _, row := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		fields := strings.Fields(row)
+		if len(fields) < 2 || !targets[fields[0]] {
+			continue
+		}
+		repo, id := fields[0], fields[1]
+		if _, ok := keptIDs[repo]; !ok {
+			keptIDs[repo] = id
+			continue
+		}
+		// 同一镜像多 tag（如 latest 与构建 tag）时保留，不能把自己删掉
+		if keptIDs[repo] == id {
+			continue
+		}
+		removeSet[id] = true
 	}
-
-	// 保留最后一个（最新构建的），删除其余
-	keep := 1
-	if keep >= len(ids) {
-		keep = 0
+	var removeIDs []string
+	for id := range removeSet {
+		removeIDs = append(removeIDs, id)
 	}
-	removeIDs := ids[:len(ids)-keep]
-
-	logger.log(fmt.Sprintf("发现 %d 个旧镜像，保留 %d 个，删除 %d 个", len(ids), keep, len(removeIDs)))
 
 	if len(removeIDs) == 0 {
+		logger.log(fmt.Sprintf("\n=== 清理旧镜像 ===\n范围: %s（本批 %d 个服务，各保留最新 1 个）\n无旧镜像需清理",
+			prefix, len(targets)))
 		return
 	}
+	logger.log(fmt.Sprintf("\n=== 清理旧镜像 ===\n范围: %s（本批 %d 个服务，各保留最新 1 个）\n发现 %d 个旧镜像待删除",
+		prefix, len(targets), len(removeIDs)))
 
 	// 分批删除（避免参数过长）
 	batchSize := 10
