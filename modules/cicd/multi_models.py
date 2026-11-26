@@ -73,6 +73,11 @@ class CicdMultiItem(db.Model):
     build_docker_image = db.Column(db.String(200), default='')
     build_command = db.Column(db.Text, default='')
     dockerfile_template_id = db.Column(db.Integer, nullable=True)
+    # 仅制品仓库：只编译并发布 jar 到私仓（如 ruoyi-common），不打镜像、不部署；
+    # 批次内作为前置，其他仓库等它发布完成后再开始
+    artifact_only = db.Column(db.Boolean, default=False)
+    # 仓库自身默认分支（仅制品仓库用，批次统一分支时以它为准）
+    git_branch = db.Column(db.String(100), default='')
     description = db.Column(db.String(200), default='')
     enabled = db.Column(db.Boolean, default=True)
     sort_no = db.Column(db.Integer, default=0)
@@ -101,6 +106,8 @@ class CicdMultiItem(db.Model):
             'build_docker_image': self.build_docker_image or '',
             'build_command': self.build_command or '',
             'dockerfile_template_id': self.dockerfile_template_id,
+            'artifact_only': bool(self.artifact_only),
+            'git_branch': self.git_branch or '',
             'description': self.description or '',
             'enabled': bool(self.enabled),
             'sort_no': self.sort_no or 0,

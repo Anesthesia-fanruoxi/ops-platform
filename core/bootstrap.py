@@ -64,6 +64,13 @@ def init_db(app):
             if 'snapshot_url' not in mcols:
                 cursor.execute(_add_col_sql('cicd_maven_settings', 'snapshot_url', "VARCHAR(300) DEFAULT ''"))
                 conn.commit()
+            icols = _get_columns(cursor, 'cicd_multi_items')
+            if 'artifact_only' not in icols:
+                cursor.execute(_add_col_sql('cicd_multi_items', 'artifact_only', 'BOOLEAN DEFAULT 0'))
+                conn.commit()
+            if 'git_branch' not in icols:
+                cursor.execute(_add_col_sql('cicd_multi_items', 'git_branch', "VARCHAR(100) DEFAULT ''"))
+                conn.commit()
             cursor.close()
             conn.close()
         except Exception as e:

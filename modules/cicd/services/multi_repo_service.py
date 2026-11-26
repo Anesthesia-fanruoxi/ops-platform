@@ -156,6 +156,8 @@ def save_template(data, tpl_id=None):
         item.build_docker_image = (raw.get('build_docker_image') or '').strip()[:200]
         item.build_command = build_command
         item.dockerfile_template_id = raw.get('dockerfile_template_id') or None
+        item.artifact_only = bool(raw.get('artifact_only'))
+        item.git_branch = (raw.get('git_branch') or '').strip()[:100]
         item.description = (raw.get('description') or '').strip()[:200]
         item.enabled = bool(raw.get('enabled', True))
         item.sort_no = idx
@@ -248,16 +250,36 @@ def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_sett
             return None, 'Maven Settings 不存在'
 
     branch = (branch or 'master').strip()
-    services = item_services(item.id)
-    if service_names:
-        wanted = set(service_names)
-        services = [s for s in services if s.service_name in wanted]
-        if not services:
-            return None, '选中的服务不在该仓库的服务映射中'
-    srv_map = _service_map(item, services)
+    artifact_only = bool(item.artifact_only)
+    if artifact_only and (item.git_branch or '').strip():
+        # 仅制品仓库跟随自己的分支（如 ruoyi-common 只有 main），不受批次统一分支影响
+        branch = item.git_branch.strip()
+    if artifact_only:
+        srv_map = []
+    else:
+        services = item_services(item.id)
+        if service_names:
+            wanted = set(service_names)
+            services = [s for s in services if s.service_name in wanted]
+            if not services:
+                return None, '选中的服务不在该仓库的服务映射中'
+        srv_map = _service_map(item, services)
 
     build_command = item.build_command.strip()
-    if tpl.publish_artifacts:
+    if artifact_only:
+        if not settings:
+            return None, '仅制品仓库需要发布到私仓，请先选择 Maven Settings'
+        if not settings.release_url or not settings.snapshot_url:
+            return None, '所选 Maven Settings 未配置 release / snapshot 发布地址'
+        # 仅制品：仓库自己就是被消费的 jar，一次 Maven 会话 package + deploy 才能带上产物；
+        # 不能再像服务仓库那样跑第二次 mvn，否则第二次的 ${revision} 回到 pom 默认版本，
+        # 发布出消费方拉不到的版本号
+        build_command += (
+            " org.apache.maven.plugins:maven-deploy-plugin:3.1.1:deploy"
+            f" -DaltReleaseDeploymentRepository=nexus-releases::{settings.release_url}"
+            f" -DaltSnapshotDeploymentRepository=nexus-snapshots::{settings.snapshot_url}"
+        )
+    elif tpl.publish_artifacts:
         if not settings:
             return None, '已开启制品发布，请先选择 Maven Settings'
         if not settings.release_url or not settings.snapshot_url:
@@ -273,7 +295,7 @@ def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_sett
         )
 
     dockerfile_content = ''
-    if item.dockerfile_template_id:
+    if item.dockerfile_template_id and not artifact_only:
         dockerfile_content = render_for_build(item.dockerfile_template_id, {
             'image_name': item.repo_name,
             'project_type': item.language or '',
@@ -295,6 +317,7 @@ def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_sett
         'build_command': build_command,
         'maven_settings_id': settings_id or None,
         'services': srv_map,
+        'artifact_only': artifact_only,
         'dockerfile_content': dockerfile_content,
         'image_name': item.repo_name,
         'image_tag': image_tag,
@@ -381,6 +404,12 @@ def trigger_items_build(template_id, item_ids, environment_id, branch, triggered
         if len(ordered) != len(set(ids)):
             return None, '包含不存在、已禁用或不属于该模板的仓库'
 
+    # 仅制品仓库（如 ruoyi-common）是其他仓库的编译依赖，未勾选也自动并入批次，并排在最前，
+    # 调度侧再让普通仓库等它发布完成（见 dispatch_service 的 batch_prereq_pending 门禁）
+    prereq = CicdMultiItem.query.filter_by(template_id=tpl.id, enabled=True, artifact_only=True) \
+        .order_by(CicdMultiItem.sort_no.asc(), CicdMultiItem.id.asc()).all()
+    ordered = list(prereq) + [item for item in ordered if not item.artifact_only]
+
     # 先做统一校验，避免批量创建到一半才失败
     for item in ordered:
         if not (item.git_url or '').strip():
@@ -410,6 +439,8 @@ def trigger_items_build(template_id, item_ids, environment_id, branch, triggered
 
     selected_service_count = 0
     for item in ordered:
+        if item.artifact_only:
+            continue  # 仅制品仓库不产出可部署服务
         svcs = item.services()
         if wanted_services:
             svcs = [s for s in svcs if s.service_name in wanted_services]
@@ -458,6 +489,35 @@ def trigger_items_build(template_id, item_ids, environment_id, branch, triggered
         from modules.cicd.services.dispatch_service import dispatch_pending
         dispatch_pending()
     return (batch, builds), None
+
+
+def is_artifact_only_build(build):
+    """该构建是否来自「仅制品仓库」（快照标记，不再回查模板，避免模板改动影响在跑任务）"""
+    try:
+        snap = build.get_steps_snapshot() or {}
+    except Exception:
+        return False
+    return bool(snap.get('artifact_only'))
+
+
+def batch_prereq_pending(build):
+    """批次内仍未完成的「仅制品仓库」构建，返回 [(build_no, repo_name), ...]。
+
+    仅制品仓库（如 ruoyi-common）是其他仓库的编译依赖，必须先把 jar 发到私仓，
+    消费方才可能解析成功，因此调度时让非前置仓库排队等它到终态。
+    自身即前置仓库、无批次、批次丢失时返回空列表（不阻塞，避免死锁）。"""
+    if not build.batch_id or is_artifact_only_build(build):
+        return []
+    from modules.cicd.models import Build
+    pending = []
+    for sib in Build.query.filter_by(batch_id=build.batch_id).all():
+        if sib.id == build.id or sib.status not in ('pending', 'running'):
+            continue
+        if not is_artifact_only_build(sib):
+            continue
+        snap = sib.get_steps_snapshot() or {}
+        pending.append((sib.build_no, snap.get('repo_name') or sib.image_name or ''))
+    return pending
 
 
 def batch_lock_active(project_id, environment_id):
@@ -510,6 +570,7 @@ def batch_detail(batch):
             'build_id': b.id,
             'build_no': b.build_no,
             'repo_name': repo_name,
+            'artifact_only': bool(snap.get('artifact_only')),
             'services': svc_names,
             'service_count': len(svc_names),
             'branch': b.branch,

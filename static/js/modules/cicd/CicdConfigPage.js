@@ -464,14 +464,21 @@ const CicdConfigPage = {
       </el-table-column>
       <el-table-column label="Dockerfile" width="150">
         <template #default="{ row }">
-          <el-select v-model="row.dockerfile_template_id" size="small" clearable placeholder="选择" style="width:100%">
+          <el-select v-model="row.dockerfile_template_id" size="small" clearable :disabled="!!row.artifact_only" placeholder="选择" style="width:100%">
             <el-option v-for="d in dockerfiles" :key="d.id" :label="d.name" :value="d.id" />
           </el-select>
         </template>
       </el-table-column>
+      <el-table-column label="仅制品" width="130" align="center">
+        <template #default="{ row }">
+          <el-checkbox v-model="row.artifact_only" />
+          <el-input v-if="row.artifact_only" v-model="row.git_branch" size="small" placeholder="分支 如 main" style="margin-top:2px" />
+        </template>
+      </el-table-column>
       <el-table-column label="服务" width="80" align="center">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openMultiServices(row)">
+          <span v-if="row.artifact_only" style="color:#909399;font-size:12px">不产服务</span>
+          <el-button v-else link type="primary" size="small" @click="openMultiServices(row)">
             [[ (row.services || []).length ]] 个
           </el-button>
         </template>
@@ -485,7 +492,8 @@ const CicdConfigPage = {
     </el-table>
 
     <div style="font-size:12px;color:#909399;line-height:1.7;margin-top:8px">
-      仓库名自动取 Git 地址最后一段（去掉 .git）。仓库默认在根目录编译；服务产物目录相对仓库根目录，精确包名由「服务」里的 jar 名决定，Agent 只收集该文件。服务可先不配：不配时按仓库名出一个镜像。服务名即镜像名与 YAML 文件名。
+      仓库名自动取 Git 地址最后一段（去掉 .git）。仓库默认在根目录编译；服务产物目录相对仓库根目录，精确包名由「服务」里的 jar 名决定，Agent 只收集该文件。服务可先不配：不配时按仓库名出一个镜像。服务名即镜像名与 YAML 文件名。<br>
+      勾选「仅制品」表示该仓库只编译并把 jar 发布到私仓（如 ruoyi-common），不打镜像、不部署：批次会自动带上它并排在最前，其他仓库等它发布完成后再开始构建；分支留空则跟随批次统一分支。
     </div>
 
     <template #footer>
@@ -606,6 +614,7 @@ const CicdConfigPage = {
     <div v-else style="font-size:12px;color:#909399;line-height:1.7">
       单个仓库构建，选择该仓库自己的分支；构建目录、镜像命名空间与单仓项目一致（{项目}-{环境}），部署仍在环境侧统一处理。
     </div>
+    <div v-if="multiBuildPrereqHint" style="font-size:12px;color:#e6a23c;line-height:1.7">[[ multiBuildPrereqHint ]]</div>
     <template #footer>
       <el-button @click="multiBuildVisible=false">取消</el-button>
       <el-button type="primary" :loading="multiBuilding" @click="submitMultiBuild">开始构建</el-button>
@@ -637,7 +646,7 @@ const CicdConfigPage = {
       multiSvcVisible: false, multiSvcIndex: -1, multiSvcRepo: '', multiSvcText: '',
       multiBuildVisible: false, multiBuildItem: null, multiBuildItems: [], multiBuildRepo: '', multiBuildFirstRepo: '', multiBuildEnvs: [],
       multiBuildEnv: '', multiBuildBranches: [], multiBuildBranch: 'master', multiBuilding: false,
-      multiBuildSettings: null, multiSelection: [],
+      multiBuildSettings: null, multiSelection: [], multiBuildPrereqHint: '',
       multiImportVisible: false, multiImportMode: 'json', multiImportText: '', multiImportCredential: null,
       multiImportDockerfile8: null, multiImportDockerfile17: null,
       multiDfBulkVisible: false, multiDfBulk8: null, multiDfBulk17: null,
@@ -957,6 +966,7 @@ const CicdConfigPage = {
         git_docker_image: 'hub.hzbxhd.com/library/git-clone:1.0', build_docker_image: 'hub.hzbxhd.com/library/java17-maven:1.0',
         build_command: 'mvn -B -DskipTests clean package',
         dockerfile_template_id: null, description: '', enabled: true, services: [],
+        artifact_only: false, git_branch: '',
       };
     },
     openMultiForm(t) {
@@ -981,6 +991,8 @@ const CicdConfigPage = {
           git_docker_image: it.git_docker_image || 'hub.hzbxhd.com/library/git-clone:1.0',
           build_docker_image: it.build_docker_image || '',
           services: it.services || [],
+          artifact_only: !!it.artifact_only,
+          git_branch: it.git_branch || '',
         }));
         this.multiForm = d;
         this.multiFormVisible = true;
@@ -1114,6 +1126,8 @@ const CicdConfigPage = {
         build_command: (r.build_command || '').trim(),
         dockerfile_template_id: this._resolveId(this.dockerfiles, r.dockerfile_template_id || r.dockerfile_template_name),
         enabled: r.enabled !== false,
+        artifact_only: !!r.artifact_only,
+        git_branch: (r.git_branch || '').trim(),
         services: (r.services || []).map(s => ({
           service_name: (s.service_name || s.name || '').trim(),
           artifact_dir: (s.artifact_dir || s.dir || '.').trim() || '.',
@@ -1215,6 +1229,8 @@ const CicdConfigPage = {
           git_docker_image: it.git_docker_image || 'hub.hzbxhd.com/library/git-clone:1.0',
           build_docker_image: it.build_docker_image || '',
           build_command: it.build_command,
+          artifact_only: !!it.artifact_only,
+          git_branch: it.git_branch || '',
           services: (it.services || []).map(s => ({
             service_name: s.service_name, artifact_dir: s.artifact_dir, jar_name: s.jar_name, jvm: s.jvm,
           })),
@@ -1246,6 +1262,10 @@ const CicdConfigPage = {
       this.multiBuildItem = list[0];
       this.multiBuildFirstRepo = list[0].repo_name || '';
       this.multiBuildRepo = list.length > 1 ? (list.length + ' 个仓库') : this.multiBuildFirstRepo;
+      const prereq = (this.multiForm.items || []).filter(it => it.artifact_only && it.id && !list.some(r => r.id === it.id));
+      this.multiBuildPrereqHint = prereq.length
+        ? '仅制品仓库会自动并入本批次并优先发布（其他仓库等它完成）：' + prereq.map(it => it.repo_name).join('、')
+        : '';
       this.multiBuildEnv = '';
       this.multiBuildBranch = 'master';
       this.multiBuildSettings = this.multiForm.maven_settings_id || null;

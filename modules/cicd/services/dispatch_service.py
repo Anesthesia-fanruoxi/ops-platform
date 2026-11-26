@@ -145,6 +145,8 @@ def assemble_task(build, agent):
             'artifact_dir': steps.get('artifact_dir', ''),
             # 服务名映射（多仓库构建才下发；单仓为空，Agent 沿用目录 basename）
             'services': srv_map,
+            # 仅制品仓库：只编译并发布 jar 到私仓，不产镜像（Agent 据此说明跳过原因）
+            'artifact_only': bool(steps.get('artifact_only')),
             'dockerfile_content': steps.get('dockerfile_content', ''),
             'image_name': steps.get('image_name', ''),
             'image_tag': steps.get('image_tag', ''),
@@ -364,6 +366,15 @@ def _dispatch_one(build):
                 return
         build._env_lock = env_lock
     # 批次 child：不占同环境单仓锁，允许同批多个仓库并行；批次环境锁由 trigger_items_build 持有
+    if build.batch_id:
+        # 「仅制品仓库」发布到私仓前，其他仓库编译必然解析不到依赖，排队等它到终态
+        from modules.cicd.services.multi_repo_service import batch_prereq_pending
+        waiting = batch_prereq_pending(build)
+        if waiting:
+            _wait_dispatch(build, logs,
+                           '等待批次前置制品仓库发布完成: ' + '、'.join(name or no for no, name in waiting),
+                           status='batch_prereq')
+            return
     if build.agent_id:
         # 重跑：必须回到原构建节点（构建目录在其磁盘上）
         logs.append(f'[触发] 构建 {build.build_no} 重跑进入调度队列（钉住原节点）')
@@ -447,7 +458,7 @@ def _release_env_lock(build):
 
 def _wait_dispatch(build, logs, reason, status='no_agent'):
     """任务保持 pending 挂起，复用同一条等待态调度日志（防刷屏）。
-    status 排队原因分类：same_env=同环境等待 / agent_full=等待Agent释放 / node_down=等待原节点恢复 / no_agent=无节点"""
+    status 排队原因分类：same_env=同环境等待 / agent_full=等待Agent释放 / node_down=等待原节点恢复 / batch_prereq=等待批次前置制品仓库 / no_agent=无节点"""
     # 若已获取同环境锁但本次未能成功派发（node_down/agent_full/推送失败等提前返回路径），必须释放锁，
     # 否则同环境锁残留会阻塞该环境后续所有构建（最长 TTL 6h）
     _release_env_lock(build)
@@ -463,7 +474,7 @@ def _active_log(build):
     """获取/创建该构建当前等待态的调度日志：复用 dispatching/no_agent 记录，避免每次心跳新建"""
     slog = ScheduleLog.query.filter(
         ScheduleLog.build_id == build.id,
-        ScheduleLog.status.in_(['dispatching', 'no_agent', 'same_env', 'agent_full', 'node_down']),
+        ScheduleLog.status.in_(['dispatching', 'no_agent', 'same_env', 'agent_full', 'node_down', 'batch_prereq']),
     ).order_by(ScheduleLog.created_at.desc()).first()
     if not slog:
         slog = ScheduleLog(

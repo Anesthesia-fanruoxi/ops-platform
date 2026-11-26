@@ -50,6 +50,8 @@ type StepConfig struct {
 	ArtifactDir       string         `json:"artifact_dir"` // 产物目录：各服务内统一的产物相对路径，如 target/pkg
 	// 多仓库构建的服务映射（单仓不传）：服务名与产物目录解耦，避免 bootstrap 等目录同名互相覆盖
 	Services          []ServiceSpec  `json:"services"`
+	// 仅制品仓库：只编译并发布 jar 到私仓，本就没有可部署服务，跳过收集/镜像步骤属正常流程
+	ArtifactOnly      bool           `json:"artifact_only"`
 	DockerfileContent string         `json:"dockerfile_content"`
 	ImageName         string         `json:"image_name"`
 	ImageTag          string         `json:"image_tag"`
@@ -265,7 +267,11 @@ func executeBuild(task *BuildTask) {
 		// 后端未配置服务目录：跳过产物收集/打镜像/推送，构建报 success，
 		// 由 Master 在部署步骤置 waiting，等平台勾选回填模板后重新构建
 		if task.ProjectType == "backend" && len(task.Steps.ArtifactDirs) == 0 {
-			stepLog.log("\n=== 产物收集 ===\n未配置服务目录：跳过产物收集 / Docker Build / Docker Push，请到平台部署步骤配置服务目录后重新构建")
+			reason := "未配置服务目录：跳过产物收集 / Docker Build / Docker Push，请到平台部署步骤配置服务目录后重新构建"
+			if task.Steps.ArtifactOnly {
+				reason = "仅制品仓库：产物已发布到私仓，跳过产物收集 / Docker Build / Docker Push"
+			}
+			stepLog.log("\n=== 产物收集 ===\n" + reason)
 			sendStep(task.BuildID, 3, "collect", "skipped", "")
 			sendStep(task.BuildID, 4, "docker_build", "skipped", "")
 			sendStep(task.BuildID, 5, "docker_push", "skipped", "")

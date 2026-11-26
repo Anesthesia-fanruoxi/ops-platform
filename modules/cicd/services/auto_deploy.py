@@ -155,6 +155,13 @@ def auto_deploy_build(build):
 
     log('INFO', f'开始自动部署：环境={env_full} tag={new_tag} 范围={"全部" if is_full else "部分"} 服务={target}')
 
+    if snapshot.get('artifact_only'):
+        # 仅制品仓库：产物已发布到私仓供其他仓库编译，本身没有可部署服务，属正常跳过
+        log('INFO', '仅制品仓库：jar 已发布到私仓，未执行部署')
+        update_deploy_step(build.build_no, 'skipped', '仅发布制品，未执行部署')
+        notify('skipped', '仅发布制品，未执行部署')
+        return
+
     if build.project_type == 'backend' and not all_names:
         # No artifact directory means there is no artifact to deploy; keep every later step skipped.
         # The action marker preserves the directory-selection entry point in the UI.
