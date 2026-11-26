@@ -217,6 +217,11 @@ const SvcMixinNacos = {
       this.diffVisible = true;
     },
     doPublish() {
+      // Apollo 模式：按 key/value 文本增删改并发布 release
+      if (this.configRow && this.configRow.apollo) {
+        this.doPublishApollo();
+        return;
+      }
       this.publishing = true;
       // ConfigMap 模式：保存回写 K8s（复用 diff 确认流程，仅提交目标不同）
       if (this.configRow && this.configRow.configmap) {

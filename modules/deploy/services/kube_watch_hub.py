@@ -114,16 +114,21 @@ class _NsHub:
                 if changed and not empty:
                     try:
                         with self.app.app_context():
-                            # update 帧同样合并环境级 Nacos 判定，否则滚动更新后入口会重新出现；
+                            # update 帧同样合并环境级中间件判定，否则滚动更新后入口会重新出现；
                             # namespace = {project}-{env}-service，项目名可含 "-"，从右取最后一段为环境名
                             env_nacos = None
+                            env_apollo = None
                             try:
                                 from modules.deploy.services.nacos_http_client import env_has_nacos as _env_nacos
+                                from modules.deploy.services.apollo_http_client import env_has_apollo as _env_apollo
                                 proj, envname = namespace[:-len('-service')].rsplit('-', 1)
                                 env_nacos = _env_nacos(proj, envname)
+                                env_apollo = _env_apollo(proj, envname)
                             except Exception:
                                 env_nacos = None
-                            services = kube_client.build_service_snapshot(namespace, env_nacos=env_nacos)
+                                env_apollo = None
+                            services = kube_client.build_service_snapshot(
+                                namespace, env_nacos=env_nacos, env_apollo=env_apollo)
                         if services != last_pushed:
                             last_pushed = services
                             self._fanout({'type': 'update', 'services': services})

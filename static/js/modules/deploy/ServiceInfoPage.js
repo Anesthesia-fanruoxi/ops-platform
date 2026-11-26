@@ -9,8 +9,9 @@
 //   mixin-log.js            运行日志弹窗（SSE 追踪/搜索定位/全屏）
 //   mixin-logfile.js        日志目录（NFS 直连）+ 文件内容搜索定位
 //   mixin-nacos.js          Nacos 配置业务（加载/编辑/发布）
-//   mixin-nacosrender.js    Nacos 渲染（高亮/搜索定位/YAML 参考线）
-//   mixin-nacosminimap.js   Nacos 渲染（右侧 Minimap 缩略图/视口框/点击跳转）
+//   mixin-apollo.js         Apollo 配置业务（namespace 切换/加载/编辑/发布）
+//   mixin-nacosrender.js    配置渲染（高亮/搜索定位/YAML 参考线）
+//   mixin-nacosminimap.js   配置渲染（右侧 Minimap 缩略图/视口框/点击跳转）
 //   mixin-diff.js           发布前行级 diff 对比
 //   mixin-misc.js           环境变量/部署 YAML/选择服务目录/复制
 //   svc-template.js         页面模板字符串（window.SvcTemplate）
@@ -21,6 +22,6 @@ const ServiceInfoPage = {
   name: 'ServiceInfoPage',
   compilerOptions: { delimiters: ['[[', ']]'] },
   components: { SvcLogLines },
-  mixins: [SvcMixinServiceList, SvcMixinQuickBuild, SvcMixinBuildProgress, SvcMixinLog, SvcMixinLogfile, SvcMixinNacos, SvcMixinNacosRender, SvcMixinNacosMinimap, SvcMixinDiff, SvcMixinMisc],
+  mixins: [SvcMixinServiceList, SvcMixinQuickBuild, SvcMixinBuildProgress, SvcMixinLog, SvcMixinLogfile, SvcMixinNacos, SvcMixinApollo, SvcMixinNacosRender, SvcMixinNacosMinimap, SvcMixinDiff, SvcMixinMisc],
   template: window.SvcTemplate,
 };

@@ -19,6 +19,7 @@ const SvcMixinServiceList = {
       loading: false,
       k8sError: '',
       envHasNacos: true,     // 环境是否部署 Nacos（middleware 判定，snapshot 帧携带；false 时隐藏全部 Nacos 入口）
+      envHasApollo: true,    // 环境是否部署 Apollo（middleware 判定，snapshot 帧携带；false 时隐藏全部 Apollo 入口）
       svcStreamUnsub: null,  // 服务卡片 SSE 退订函数（SseHub 多路复用）
 
       svcStreamRetry: null,  // SSE 断连重连定时器
@@ -273,7 +274,10 @@ const SvcMixinServiceList = {
           try {
             if (d.type === 'snapshot' || d.type === 'update') {
               this.services = d.services || [];
-              if (d.type === 'snapshot') this.envHasNacos = d.env_has_nacos !== false;   // 仅快照帧携带
+              if (d.type === 'snapshot') {
+                this.envHasNacos = d.env_has_nacos !== false;
+                this.envHasApollo = d.env_has_apollo !== false;
+              }
               this.k8sError = '';
               this.loading = false;
             } else if (d.type === 'error') {
@@ -310,6 +314,7 @@ const SvcMixinServiceList = {
         const d = r.data || {};
         this.services = d.list || [];
         this.envHasNacos = d.env_has_nacos !== false;
+        this.envHasApollo = d.env_has_apollo !== false;
         if (d.k8s_error) this.k8sError = d.k8s_error;
         this.loading = false;
       });

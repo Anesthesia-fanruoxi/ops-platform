@@ -29,7 +29,7 @@ MENU_ITEMS = [
     ('部署平台', '新增服务', '/create/service', 'page:create', [('op:deploy_service', '新增服务部署')]),
     ('项目管理', '项目信息', '/projects', 'page:projects', []),
     ('项目管理', '环境信息', '/manage', 'page:manage', [('op:recycle', '回收'), ('op:recycle_admin', '回收站操作'), ('op:cicd_build', '触发构建')]),
-    ('项目管理', '服务信息', '/services', 'page:service_info', [('op:nacos_config_update', '更新Nacos配置')]),
+    ('项目管理', '服务信息', '/services', 'page:service_info', [('op:nacos_config_update', '更新Nacos配置'), ('op:apollo_config_update', '更新Apollo配置')]),
     ('Nginx', 'Nginx配置', '/nginx', 'page:nginx', [('op:nginx_push', '推送配置')]),
     ('MySQL', '数据源', '/datasources', 'page:datasources', [('op:datasource', '数据源管理')]),
     ('MySQL', '字符集排序修正', '/database', 'page:database', [('op:database_fix', '修复排序')]),

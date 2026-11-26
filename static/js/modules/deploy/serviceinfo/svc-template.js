@@ -251,10 +251,13 @@ window.SvcTemplate = `
       </div>
       <el-table :data="(batchData && batchData.repos) || []" size="small" border stripe max-height="68vh"
                 style="width:100%;margin-top:10px" highlight-current-row @row-click="openBatchRepo">
-        <el-table-column prop="repo_name" label="仓库" min-width="170" show-overflow-tooltip />
+        <el-table-column label="仓库" min-width="170" show-overflow-tooltip>
+          <template #default="s">[[ s.row.repo_name ]]<el-tag v-if="s.row.artifact_only" type="info" size="small" effect="plain" style="margin-left:4px">仅制品</el-tag></template>
+        </el-table-column>
         <el-table-column label="服务" width="70" align="center">
           <template #default="s">
-            <el-tooltip :content="(s.row.services || []).join('、')" placement="top" :disabled="(s.row.service_count || 0) <= 1">
+            <span v-if="s.row.artifact_only">-</span>
+            <el-tooltip v-else :content="(s.row.services || []).join('、')" placement="top" :disabled="(s.row.service_count || 0) <= 1">
               <span>[[ s.row.service_count ]]</span>
             </el-tooltip>
           </template>
@@ -339,7 +342,8 @@ window.SvcTemplate = `
         <el-button link type="primary" size="small" @click="openLog(svc)">日志</el-button>
         <el-button link type="primary" size="small" @click="openLogFiles(svc)">日志目录</el-button>
                 <el-button v-if="svc.show_nacos" link type="primary" size="small" @click="openNacos(svc)">Nacos配置</el-button>
-                <el-button v-else-if="svc.has_configmap" link type="primary" size="small" @click="openConfigMapFile(svc)">配置文件</el-button>
+                <el-button v-if="svc.show_apollo" link type="primary" size="small" @click="openApollo(svc)">Apollo配置</el-button>
+                <el-button v-if="!svc.show_nacos && !svc.show_apollo && svc.has_configmap" link type="primary" size="small" @click="openConfigMapFile(svc)">配置文件</el-button>
         <el-button link type="primary" size="small" @click="openEnv(svc)">环境变量</el-button>
         <el-button link type="warning" size="small" :loading="restarting[svc.name]" @click="restartService(svc)">重启</el-button>
       </div>
@@ -469,7 +473,12 @@ window.SvcTemplate = `
              :fullscreen="configFullscreen">
     <template #header>
       <div class="svc-config-header">
-        <span class="svc-config-title">[[ configRow ? (configRow.configmap ? '配置文件 - ' : 'Nacos 配置 - ') + configRow.dataId : '' ]]</span>
+        <span class="svc-config-title">[[ configRow ? (configRow.configmap ? '配置文件 - ' : (configRow.apollo ? 'Apollo 配置 - ' : 'Nacos 配置 - ')) + (configRow.apollo ? (configRow.appId + (configRow.namespace ? ' / ' + configRow.namespace : '')) : configRow.dataId) : '' ]]</span>
+        <el-select v-if="configRow && configRow.apollo && apolloNamespaces.length" v-model="configRow.namespace" size="small"
+                   style="width:220px" :disabled="configEditMode" @change="onApolloNsChange">
+          <el-option v-for="ns in apolloNamespaces" :key="ns.name" :label="ns.name + (ns.isPublic ? '（公共）' : '')" :value="ns.name"></el-option>
+        </el-select>
+        <el-tag v-if="configRow && configRow.apollo && configRow.isPublic" size="small" type="warning" title="公共 namespace 被多个应用引用，修改会影响所有引用方">公共</el-tag>
         <span class="svc-config-count" v-if="!configNotFound">共 [[ cfgLineCount ]] 行</span>
         <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
           <el-input v-if="!configEditMode && !configNotFound" ref="configSearchInput" v-model="configSearchInput" size="small" clearable
@@ -483,9 +492,9 @@ window.SvcTemplate = `
           </span>
           <el-button v-if="!configEditMode && !configNotFound && configSearch" size="small" :disabled="!matchCount" @click="cfgSearchJump(-1)">↑</el-button>
           <el-button v-if="!configEditMode && !configNotFound && configSearch" size="small" :disabled="!matchCount" @click="cfgSearchJump(1)">↓</el-button>
-          <el-button v-if="!configEditMode && !configNotFound && canUpdateNacos" size="small" @click="configEditMode = true">编辑</el-button>
+          <el-button v-if="!configEditMode && !configNotFound && canUpdateCurrentConfig" size="small" @click="configEditMode = true">编辑</el-button>
           <el-button v-if="configEditMode" size="small" @click="cancelConfigEdit">取消编辑</el-button>
-          <el-button v-if="configEditMode && canUpdateNacos" size="small" type="primary" :loading="publishing" @click="publishConfig">发布更新</el-button>
+          <el-button v-if="configEditMode && canUpdateCurrentConfig" size="small" type="primary" :loading="publishing" @click="publishConfig">发布更新</el-button>
           <el-button size="small" @click="toggleConfigFullscreen">[[ configFullscreen ? '退出全屏' : '⛶ 全屏' ]]</el-button>
           <el-button size="small" @click="configEditorVisible = false">关闭</el-button>
         </span>
@@ -495,12 +504,15 @@ window.SvcTemplate = `
       <!-- 配置不存在：Nacos 模式引导新增；ConfigMap 只读模式仅提示不存在 -->
       <div v-if="configNotFound && !configEditMode" class="svc-cfg-empty">
         <div style="font-size:14px;color:#909399;margin-bottom:8px">
-          [[ configRow && configRow.configmap ? '未找到服务对应的配置文件（' + configRow.dataId + '）' : '配置 ' + (configRow ? configRow.dataId : '') + ' 在当前 namespace 中不存在' ]]
+          <template v-if="configRow && configRow.apollo">[[ apolloError || 'Apollo 配置不可用' ]]</template>
+          <template v-else-if="configRow && configRow.configmap">未找到服务对应的配置文件（[[ configRow.dataId ]]）</template>
+          <template v-else>配置 [[ configRow ? configRow.dataId : '' ]] 在当前 namespace 中不存在</template>
         </div>
-        <div style="font-size:12px;color:#c0c4cc;margin-bottom:18px" v-if="!(configRow && configRow.configmap)">
-          是否新增该配置？dataId 已按「服务名.yaml」自动生成，内容为 yaml 格式
+        <div style="font-size:12px;color:#c0c4cc;margin-bottom:18px" v-if="!configRow || !configRow.configmap">
+          <template v-if="configRow && configRow.apollo">请先在 Apollo Portal 中创建应用（appId 与服务名一致）并添加 namespace</template>
+          <template v-else>是否新增该配置？dataId 已按「服务名.yaml」自动生成，内容为 yaml 格式</template>
         </div>
-        <el-button v-if="canUpdateNacos && !(configRow && configRow.configmap)" type="primary" size="small" @click="createNewConfig">新增配置</el-button>
+        <el-button v-if="canUpdateNacos && !(configRow && (configRow.configmap || configRow.apollo))" type="primary" size="small" @click="createNewConfig">新增配置</el-button>
       </div>
       <!-- 内容区：右上角复制按钮 + 查看/编辑层 -->
       <div class="svc-cfg-content">
@@ -537,10 +549,11 @@ window.SvcTemplate = `
 
   <!-- 发布对比弹框（参考 Nginx 配置保存对比） -->
   <el-dialog v-model="diffVisible" width="85%" top="3vh" :close-on-click-modal="false" :close-on-press-escape="false"
-             :title="configRow && configRow.configmap ? '⚠️ 确认保存配置文件（ConfigMap）' : '⚠️ 确认发布 Nacos 配置'" append-to-body>
+             :title="configRow && configRow.configmap ? '⚠️ 确认保存配置文件（ConfigMap）' : (configRow && configRow.apollo ? '⚠️ 确认发布 Apollo 配置' : '⚠️ 确认发布 Nacos 配置')" append-to-body>
     <div style="margin-bottom:10px;padding:10px 14px;background:#fff7e6;border:1px solid #ffe58f;border-radius:4px;font-size:13px;color:#ad6800">
       <template v-if="configIsNew">此操作将在 Nacos 当前 namespace 中 <b>新增</b> 配置 <b>[[ configRow ? configRow.dataId : '' ]]</b>，发布后对该 namespace 下服务立即生效。请确认以下内容无误。</template>
       <template v-else-if="configRow && configRow.configmap">此操作将覆盖集群中 ConfigMap <b>[[ configRow.dataId ]]</b> 的配置内容。保存后挂载卷引用约 1 分钟自动同步，环境变量引用需重启服务生效。请确认以下修改无误。</template>
+      <template v-else-if="configRow && configRow.apollo">此操作将覆盖 Apollo 应用 <b>[[ configRow.appId ]]</b> 的 namespace <b>[[ configRow.namespace ]]</b> 配置，发布后客户端实时生效。<template v-if="configRow.isPublic"><b>该 namespace 为公共 namespace，修改会影响所有引用它的应用。</b></template>请确认以下修改无误。</template>
       <template v-else>此操作将覆盖 Nacos 中 <b>[[ configRow ? configRow.dataId : '' ]]</b> 的配置内容，发布后对该 namespace 下服务立即生效。请确认以下修改无误。</template>
     </div>
     <div style="margin-bottom:8px;display:flex;gap:16px;font-size:12px;color:#909399">

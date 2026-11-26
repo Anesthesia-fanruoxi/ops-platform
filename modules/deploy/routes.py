@@ -135,6 +135,7 @@ admin_bp.add_url_rule('/environments/<int:env_id>', 'delete_environment', delete
 from modules.deploy.api.service_info_api import (
     list_services, pod_log_stream, service_yaml,
     nacos_config_detail, nacos_config_publish,
+    apollo_config_detail, apollo_config_publish,
     restart_service, restart_all_services, service_configmap, update_service_configmap
 )
 from modules.deploy.api.service_info_stream_api import service_info_stream, service_envs
@@ -149,6 +150,8 @@ deploy_bp.add_url_rule('/service-info/configmap', 'service_info_configmap', serv
 deploy_bp.add_url_rule('/service-info/configmap', 'service_info_configmap_update', update_service_configmap, methods=['PUT'])
 deploy_bp.add_url_rule('/service-info/nacos/config', 'service_info_nacos_config', nacos_config_detail, methods=['GET'])
 deploy_bp.add_url_rule('/service-info/nacos/config', 'service_info_nacos_publish', nacos_config_publish, methods=['POST'])
+deploy_bp.add_url_rule('/service-info/apollo/config', 'service_info_apollo_config', apollo_config_detail, methods=['GET'])
+deploy_bp.add_url_rule('/service-info/apollo/config', 'service_info_apollo_publish', apollo_config_publish, methods=['POST'])
 deploy_bp.add_url_rule('/service-info/logfiles', 'service_info_logfiles', logfile_list, methods=['GET'])
 deploy_bp.add_url_rule('/service-info/logfile/content', 'service_info_logfile_content', logfile_content, methods=['GET'])
 deploy_bp.add_url_rule('/service-info/logfile/download', 'service_info_logfile_download', logfile_download, methods=['GET'])

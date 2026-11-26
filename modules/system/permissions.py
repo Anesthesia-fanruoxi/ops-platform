@@ -11,7 +11,7 @@ PERMISSION_ROWS = [
     {'label': '部署平台',     'pageCode': 'page:create',    'opCodes': [{'code': 'op:deploy_project', 'label': '新增项目部署'}, {'code': 'op:deploy_env', 'label': '新增环境部署'}, {'code': 'op:deploy_service', 'label': '新增服务部署'}]},
     {'label': '项目信息',     'pageCode': 'page:projects',  'opCodes': []},
     {'label': '环境信息',     'pageCode': 'page:manage',    'opCodes': [{'code': 'op:recycle', 'label': '回收'}, {'code': 'op:recycle_admin', 'label': '回收站操作'}, {'code': 'op:cicd_build', 'label': '触发构建'}]},
-    {'label': '服务信息',     'pageCode': 'page:service_info', 'opCodes': [{'code': 'op:nacos_config_update', 'label': '更新Nacos配置'}]},
+    {'label': '服务信息',     'pageCode': 'page:service_info', 'opCodes': [{'code': 'op:nacos_config_update', 'label': '更新Nacos配置'}, {'code': 'op:apollo_config_update', 'label': '更新Apollo配置'}]},
     {'label': 'Nginx配置',    'pageCode': 'page:nginx',     'opCodes': [{'code': 'op:nginx_push', 'label': '推送配置'}]},
     {'label': '数据源',       'pageCode': 'page:datasources', 'opCodes': [{'code': 'op:datasource', 'label': '数据源管理'}]},
     {'label': '数据库工具', 'pageCode': 'page:database', 'opCodes': [{'code': 'op:database_fix', 'label': '修复排序'}, {'code': 'op:structure_sync', 'label': '结构同步'}]},

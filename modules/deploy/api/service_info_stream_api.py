@@ -45,12 +45,15 @@ def svc_stream_frames(app_obj, project, env):
         with app_obj.app_context():
             # 全量快照先行（前端首屏直接可用）
             try:
-                # 环境级 Nacos 判定：middleware 目录无 nacos 则该环境未部署 Nacos，全部服务隐藏入口
+                # 环境级中间件判定：middleware 目录无对应组件则全部服务隐藏入口
                 from modules.deploy.services.nacos_http_client import env_has_nacos
+                from modules.deploy.services.apollo_http_client import env_has_apollo
                 env_nacos = env_has_nacos(project, env)
-                services = kube_client.build_service_snapshot(namespace, env_nacos=env_nacos)
+                env_apollo = env_has_apollo(project, env)
+                services = kube_client.build_service_snapshot(
+                    namespace, env_nacos=env_nacos, env_apollo=env_apollo)
                 snapshot = {'type': 'snapshot', 'services': services,
-                            'env_has_nacos': env_nacos}
+                            'env_has_nacos': env_nacos, 'env_has_apollo': env_apollo}
             except Exception as e:
                 snapshot = {'type': 'error', 'error': str(e)}
             if snapshot.get('type') != 'error':

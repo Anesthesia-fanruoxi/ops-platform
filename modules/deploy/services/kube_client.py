@@ -298,13 +298,13 @@ def update_configmap(namespace, name, data):
         raise KubeNotConfigured(f'保存 ConfigMap「{name}」失败: {e}')
 
 
-def build_service_snapshot(namespace, env_nacos=None):
+def build_service_snapshot(namespace, env_nacos=None, env_apollo=None):
     """构建服务卡片快照（Deployment × Service 端口 × Pod 状态/实际镜像）
 
     镜像取 Pod 实际运行镜像（container_statuses[].image，按出现顺序去重；
     无 Pod 时回退 Deployment spec 镜像）；Pod 按 app 标签归属服务。
     K8s 异常统一抛 KubeNotConfigured，由调用方回退。
-    env_nacos：环境级 Nacos 判定（middleware 目录），True/False 时与环境级合并；
+    env_nacos / env_apollo：环境级中间件判定（middleware 目录），True/False 时与环境级合并；
     None 时仅保留服务级结果（兼容未感知环境的调用方）。
     """
     deps = list_deployments(namespace)
@@ -342,9 +342,10 @@ def build_service_snapshot(namespace, env_nacos=None):
         if pods:
             version_created_at = max((p.get('createdAt') or '') for p in pods) or ''
         svc_has_cm = f'{name}-config' in cm_names
-        # Nacos 入口由环境级判定决定（middleware 有 nacos 则全环境可见）；
-        # has_configmap 仅用于无 Nacos 环境的「配置文件」入口，不参与 Nacos 按钮判断
+        # Nacos / Apollo 入口由环境级判定决定（middleware 有对应组件则全环境可见）；
+        # has_configmap 仅用于无中间件环境的「配置文件」入口，不参与按钮判断
         show_nacos = (env_nacos is not False)
+        show_apollo = (env_apollo is not False)
         services.append({
             'name': name,
             'image': pod_images[0] if pod_images else d['image'],
@@ -355,8 +356,9 @@ def build_service_snapshot(namespace, env_nacos=None):
             'namespace': namespace,
             'pods': pods,
             'version_created_at': version_created_at,
-            # Nacos 配置入口可见性：环境级（middleware）× 服务级（{服务名}-config ConfigMap）
+            # Nacos / Apollo 配置入口可见性：环境级（middleware）× 服务级（{服务名}-config ConfigMap）
             'show_nacos': show_nacos,
+            'show_apollo': show_apollo,
             'has_configmap': svc_has_cm,
             # 设计决策：envs 不随列表/SSE 携带，弹窗时走 /service-info/envs 实时读 K8s
         })

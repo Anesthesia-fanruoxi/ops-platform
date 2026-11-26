@@ -6,12 +6,14 @@
 - Pod 运行日志（SSE 实时流：先回放历史，再 follow 跟随）
 - 服务部署 YAML 原文
 - Nacos 配置查看/修改（Nacos Open API）
+- Apollo 配置查看/修改（Apollo Portal 会话 API）
 """
+import datetime
 import json
 import os
 
 import yaml
-from flask import request, Response
+from flask import g, request, Response
 
 from core.response import success_response, error_response
 from core.security import require_permission
@@ -140,12 +142,14 @@ def list_services():
     ns = f'{project}-{env}-service'
     k8s_error = ''
     services = []
-    # 环境级 Nacos 判定：middleware 生成目录无 nacos NodePort Service 则该环境未部署 Nacos
+    # 环境级中间件判定：middleware 生成目录无 nacos / apollo-portal NodePort 则对应入口隐藏
     from modules.deploy.services.nacos_http_client import env_has_nacos as _env_has_nacos
+    from modules.deploy.services.apollo_http_client import env_has_apollo as _env_has_apollo
     env_nacos = _env_has_nacos(project, env)
+    env_apollo = _env_has_apollo(project, env)
     try:
         from modules.deploy.services.kube_client import build_service_snapshot
-        services = build_service_snapshot(ns, env_nacos=env_nacos)
+        services = build_service_snapshot(ns, env_nacos=env_nacos, env_apollo=env_apollo)
     except Exception as e:
         k8s_error = str(e)
         # 回退：deployment YAML 文件（镜像/端口/envs）+ Pod 状态留空
@@ -156,8 +160,12 @@ def list_services():
                 svc['pods'] = []
                 # 回退路径无 K8s 无法做服务级判断，仅按环境级 middleware 判定
                 svc['show_nacos'] = env_nacos
+                svc['show_apollo'] = env_apollo
 
-    return success_response({'list': services, 'k8s_error': k8s_error, 'env_has_nacos': env_nacos})
+    return success_response({
+        'list': services, 'k8s_error': k8s_error,
+        'env_has_nacos': env_nacos, 'env_has_apollo': env_apollo,
+    })
 
 
 # ─── 服务配置文件（K8s ConfigMap 只读）───────
@@ -440,6 +448,139 @@ def nacos_config_publish():
     except Exception as e:
         return error_response(str(e), 500)
     return success_response({'dataId': data_id, 'group': group})
+
+
+# ─── Apollo 配置 ──────────────────────────────────────────
+
+def _build_apollo_client(project, env):
+    """解析环境 Apollo Portal 地址并构建客户端，返回 (client, portal_env, 错误响应)"""
+    from modules.deploy.services.apollo_http_client import resolve_apollo_endpoint, ApolloHttpClient
+    try:
+        base_url = resolve_apollo_endpoint(project, env)
+    except ValueError as e:
+        return None, None, error_response(str(e), 400)
+    client = ApolloHttpClient(base_url)
+    try:
+        portal_env = client.resolve_env(env)
+    except ValueError as e:
+        return None, None, error_response(str(e), 502)
+    return client, portal_env, None
+
+
+@require_permission('page:service_info')
+def apollo_config_detail():
+    """读取服务（appId 由服务名解析，兼容项目前缀）在 Apollo 指定 namespace 的全部 key/value"""
+    project = request.args.get('project', '')
+    env = request.args.get('env', '')
+    service = request.args.get('service', '')
+    namespace = request.args.get('namespace', '')
+    if not project or not env or not service:
+        return error_response('缺少参数 project / env / service', 400)
+
+    client, portal_env, err = _build_apollo_client(project, env)
+    if err:
+        return err
+    try:
+        app_id = client.resolve_app_id(project, service)
+        if not app_id:
+            return error_response(f'Apollo 环境 {portal_env} 中不存在应用 {service}', 404)
+        namespaces = client.list_namespaces(app_id, portal_env)
+        if not namespaces:
+            return error_response(f'Apollo 应用 {app_id} 在环境 {portal_env} 下没有 namespace', 404)
+        names = [n['name'] for n in namespaces]
+        if not namespace:
+            namespace = 'application' if 'application' in names else names[0]
+        elif namespace not in names:
+            return error_response(f'Apollo 应用 {app_id} 不存在 namespace {namespace}', 404)
+        items = client.get_items(app_id, portal_env, namespace)
+        from modules.deploy.services.apollo_http_client import items_to_text
+        content = items_to_text(items)
+        current_ns = next((n for n in namespaces if n['name'] == namespace), {})
+        return success_response({
+            'appId': app_id,
+            'env': portal_env,
+            'namespace': namespace,
+            'isPublic': bool(current_ns.get('isPublic')),
+            'namespaces': namespaces,
+            'itemCount': len(items),
+            'content': content,
+        })
+    except ValueError as e:
+        return error_response(str(e), 502)
+    except Exception as e:
+        return error_response(str(e), 500)
+
+
+@require_permission('op:apollo_config_update')
+def apollo_config_publish():
+    """按 key/value 文本增删改 Apollo 配置项，并发布 release 使其生效"""
+    data = request.json or {}
+    project = data.get('project', '')
+    env = data.get('env', '')
+    service = data.get('service', '')
+    namespace = data.get('namespace', '')
+    content = data.get('content', '')
+    if not project or not env or not service or not namespace:
+        return error_response('缺少参数 project / env / service / namespace', 400)
+
+    from modules.deploy.services.apollo_http_client import text_to_items
+    new_items, errors = text_to_items(content)
+    if errors:
+        return error_response('；'.join(errors[:5]), 400)
+
+    client, portal_env, err = _build_apollo_client(project, env)
+    if err:
+        return err
+    try:
+        app_id = client.resolve_app_id(project, service)
+        if not app_id:
+            return error_response(f'Apollo 环境 {portal_env} 中不存在应用 {service}', 404)
+        namespaces = client.list_namespaces(app_id, portal_env)
+        ns = next((n for n in namespaces if n['name'] == namespace), None)
+        if not ns:
+            return error_response(f'Apollo 应用 {app_id} 不存在 namespace {namespace}', 404)
+
+        existing = client.get_items(app_id, portal_env, namespace)
+        old_by_key = {it['key']: it for it in existing}
+        new_by_key = {it['key']: it['value'] for it in new_items}
+
+        created = updated = deleted = 0
+        for key, value in new_by_key.items():
+            old = old_by_key.get(key)
+            if old is None:
+                client.create_item(app_id, portal_env, namespace, key, value)
+                created += 1
+            elif (old.get('value') or '') != value:
+                client.update_item(app_id, portal_env, namespace, old, value)
+                updated += 1
+        for key, old in old_by_key.items():
+            if key not in new_by_key:
+                client.delete_item(app_id, portal_env, namespace, old)
+                deleted += 1
+
+        changed = created + updated + deleted
+        released = False
+        if changed:
+            operator = getattr(getattr(g, 'current_user', None), 'nickname', '') or 'ops-platform'
+            client.publish(
+                app_id, portal_env, namespace,
+                title=f'运维平台修改 {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
+                comment=f'由 {operator} 通过运维平台发布',
+            )
+            released = True
+        return success_response({
+            'appId': app_id,
+            'env': portal_env,
+            'namespace': namespace,
+            'created': created,
+            'updated': updated,
+            'deleted': deleted,
+            'released': released,
+        }, '配置已发布' if released else '配置没有变化')
+    except ValueError as e:
+        return error_response(str(e), 502)
+    except Exception as e:
+        return error_response(str(e), 500)
 
 
 # ─── Pod 重启（复用部署权限 op:cicd_build，与「快捷部署」同源）────────
