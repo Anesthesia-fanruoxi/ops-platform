@@ -515,6 +515,7 @@ def summarize_build(b):
         'status': b.status,
         'branch': b.branch,
         'triggered_by': b.triggered_by,
+        'batch_id': b.batch_id,
         'created_at': b.created_at.strftime('%Y-%m-%d %H:%M:%S') if b.created_at else None,
     }
 

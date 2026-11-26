@@ -262,10 +262,14 @@ def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_sett
             return None, '已开启制品发布，请先选择 Maven Settings'
         if not settings.release_url or not settings.snapshot_url:
             return None, '所选 Maven Settings 未配置 release / snapshot 发布地址'
+        # 制品发布：package 与 deploy:deploy 必须在同一次 Maven 会话里执行，
+        # 否则 jar 模块没有产物文件，报 "The packaging for this project did not assign a file
+        # to the build artifact"；显式指定 3.1.1 是因为 altRelease/SnapshotDeploymentRepository
+        # 参数 3.x 才支持（老 Maven 默认绑定的 2.8.2 会忽略）。maven.test.skip：主构建已跑过测试
         build_command += (
-            " && mvn -B org.apache.maven.plugins:maven-deploy-plugin:3.1.1:deploy"
-            f" -DaltReleaseDeploymentRepository=nexus-releases::default::{settings.release_url}"
-            f" -DaltSnapshotDeploymentRepository=nexus-snapshots::default::{settings.snapshot_url}"
+            " && mvn -B package org.apache.maven.plugins:maven-deploy-plugin:3.1.1:deploy -Dmaven.test.skip=true"
+            f" -DaltReleaseDeploymentRepository=nexus-releases::{settings.release_url}"
+            f" -DaltSnapshotDeploymentRepository=nexus-snapshots::{settings.snapshot_url}"
         )
 
     dockerfile_content = ''
@@ -483,7 +487,9 @@ def batch_detail(batch):
             step_data = get_build_steps(b.build_no) or {}
             step_list = step_data.get('steps') or []
             if step_list:
-                done = sum(1 for st in step_list if st.get('status') in ('success', 'skipped'))
+                # 只把 success 计入进度：失败后未执行/跳过（skipped）的步骤不能算完成，
+                # 否则失败构建也会显示 80%+
+                done = sum(1 for st in step_list if st.get('status') == 'success')
                 progress = int(done * 100 / len(step_list))
                 current = next((st for st in step_list if st.get('status') == 'running'), None)
                 current_step = (current or {}).get('name', '')

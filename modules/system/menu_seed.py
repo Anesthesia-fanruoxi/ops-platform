@@ -36,7 +36,6 @@ MENU_ITEMS = [
     ('MySQL', '表结构对比同步', '/schema', 'page:schema', [('op:structure_sync', '结构同步')]),
     ('MySQL', 'DDL自动同步', '/ddl-sync', 'page:ddl_sync', [('op:ddl_sync', '任务管理')]),
     ('CI/CD', 'CI/CD管理', '/cicd', 'page:cicd', [('op:cicd_admin', '配置管理')]),
-    ('CI/CD', '多仓发版', '/multi-build', 'page:cicd', [('op:cicd_build', '触发构建')]),
     ('CI/CD', '调度中心', '/schedule', 'page:cicd_schedule', [('op:agent', 'Agent管理')]),
     ('系统管理', '用户管理', '/users', 'page:users', [('op:users', '管理用户')]),
     ('系统管理', '角色管理', '/roles', 'page:roles', [('op:roles', '管理角色')]),

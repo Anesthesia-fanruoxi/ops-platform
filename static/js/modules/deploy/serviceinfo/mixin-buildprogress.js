@@ -20,10 +20,17 @@ const SvcMixinBuildProgress = {
       selectedEnvData: {},  // 当前环境详情（含最近构建记录 builds）
       activeBuild: null,   // 当前环境进行中的构建（SSE 推送，点击打开进度抽屉）
       envBuildUnsub: null,   // 环境构建状态 SSE 退订函数（SseHub 多路复用）
-      // 构建记录弹窗
+      // 构建记录弹窗（多仓项目展示批次列表，单仓项目展示构建列表）
       buildRecordsVisible: false,
       buildRecords: [],
+      batchRecords: [],
+      recordsMode: 'builds',
       buildRecordsLoading: false,
+      // 多仓批次进度抽屉（一次发版按服务展示各自构建进度）
+      batchDrawerVisible: false,
+      batchData: null,
+      batchLoading: false,
+      batchTimer: null,
     };
   },
   computed: {
@@ -58,39 +65,96 @@ const SvcMixinBuildProgress = {
   },
   beforeUnmount() {
     this.closeEnvBuildStream();
+    this.stopBatchTimer();
   },
   methods: {
     // ═══════════ 构建记录弹窗 ═══════════
     openBuildRecordsDialog() {
-      const env = this.selectedEnvData || {};
-      const openLegacy = () => {
-        this.buildRecordsVisible = true;
-        this.loadBuildRecords();
-      };
-      if (!env.project_id) { openLegacy(); return; }
-      ajax('GET', '/api/cicd/multi-templates/by-project/' + env.project_id, null, (r) => {
-        if (r.code === 200 && r.data && (r.data.items || []).length) {
-          this.$router.push({
-            path: '/multi-build',
-            query: { project_id: env.project_id, environment_id: env.id },
-          });
-          return;
-        }
-        openLegacy();
-      }, openLegacy);
+      this.buildRecordsVisible = true;
+      this.loadBuildRecords();
     },
     loadBuildRecords() {
       const env = this.selectedEnvData;
       if (!env || !env.id) return;
       this.buildRecordsLoading = true;
-      ajax('GET', '/api/cicd/builds?environment_id=' + env.id, null, (r) => {
-        this.buildRecordsLoading = false;
-        if (r.code === 200) this.buildRecords = r.data || [];
-      }, () => { this.buildRecordsLoading = false; });
+      const loadLegacy = () => {
+        this.recordsMode = 'builds';
+        ajax('GET', '/api/cicd/builds?environment_id=' + env.id, null, (r) => {
+          this.buildRecordsLoading = false;
+          if (r.code === 200) this.buildRecords = r.data || [];
+        });
+      };
+      if (!env.project_id) { loadLegacy(); return; }
+      // 多仓项目：这里按批次展示，点批次看该批次每个服务的进度
+      ajax('GET', '/api/cicd/multi-templates/by-project/' + env.project_id, null, (r) => {
+        if (r.code !== 200 || !r.data || !(r.data.items || []).length) { loadLegacy(); return; }
+        this.recordsMode = 'batches';
+        ajax('GET', '/api/cicd/multi-templates/batches?environment_id=' + env.id, null, (br) => {
+          this.buildRecordsLoading = false;
+          if (br.code === 200) this.batchRecords = br.data || [];
+          else loadLegacy();
+        });
+      });
     },
     onBuildRecordClick(row) {
       this.buildRecordsVisible = false;
       this.openProgressDrawer({ id: row.id, build_no: row.build_no, status: row.status, project_type: row.project_type, branch: row.branch });
+    },
+    onBatchRecordClick(row) {
+      this.buildRecordsVisible = false;
+      this.openBatchDrawer(row.id);
+    },
+    // 顶部「构建中」与「最近构建」：属于多仓批次的直接打开批次进度
+    openActiveBuild() {
+      if (!this.activeBuild) return;
+      if (this.activeBuild.batch_id) this.openBatchDrawer(this.activeBuild.batch_id);
+      else this.openProgressDrawer(this.activeBuild);
+    },
+    openLastBuild() {
+      const b = this.lastBuild;
+      if (!b) return;
+      if (b.batch_id) this.openBatchDrawer(b.batch_id);
+      else this.openProgressDrawer({ id: b.id, build_no: b.build_no, status: b.status, project_type: b.project_type, branch: b.branch });
+    },
+    // ═══════════ 多仓批次进度抽屉 ═══════════
+    // 多仓一次发版 = 一个批次，抽屉内按服务逐行展示各自构建状态；
+    // 点击服务行打开该构建的步骤/日志抽屉，不再跳转独立页面。
+    openBatchDrawer(batchId) {
+      if (!batchId) return;
+      this.batchDrawerVisible = true;
+      this.batchData = null;
+      this.loadBatchDetail(batchId);
+      this.stopBatchTimer();
+      this.batchTimer = setInterval(() => this.loadBatchDetail(batchId), 3000);
+    },
+    loadBatchDetail(batchId) {
+      if (!this.batchDrawerVisible) return;
+      this.batchLoading = this.batchData === null;
+      ajax('GET', '/api/cicd/multi-templates/batches/' + batchId, null, (r) => {
+        this.batchLoading = false;
+        if (r.code !== 200 || !r.data) return;
+        this.batchData = r.data;
+        // 批次终态：停止轮询并刷新环境最近构建摘要
+        if (['success', 'failed', 'cancelled'].includes(r.data.status)) {
+          this.stopBatchTimer();
+          this.loadEnvs();
+        }
+      }, () => { this.batchLoading = false; });
+    },
+    stopBatchTimer() {
+      if (this.batchTimer) { clearInterval(this.batchTimer); this.batchTimer = null; }
+    },
+    closeBatchDrawer() {
+      this.batchDrawerVisible = false;
+      this.batchData = null;
+      this.stopBatchTimer();
+    },
+    openBatchService(row) {
+      if (!row || !row.build_id) return;
+      this.openProgressDrawer({
+        id: row.build_id, build_no: row.build_no, status: row.status,
+        project_type: 'backend', branch: row.branch,
+      });
     },
     // ═══════════ 构建进度抽屉（与环境信息页一致） ═══════════
     openProgressDrawer(build) {
@@ -302,7 +366,7 @@ const SvcMixinBuildProgress = {
             const builds = d.builds || [];
             const run = builds.find(b => b.status === 'running') || builds.find(b => b.status === 'pending') || null;
             const wasRunning = !!this.activeBuild;
-            this.activeBuild = run ? { id: run.id, build_no: run.build_no, status: run.status, project_type: run.project_type, branch: run.branch, current_step: run.current_step || '' } : null;
+            this.activeBuild = run ? { id: run.id, build_no: run.build_no, status: run.status, project_type: run.project_type, branch: run.branch, batch_id: run.batch_id, current_step: run.current_step || '' } : null;
             // 进行中构建结束：刷新普通 list 接口，让「最近构建」状态及时更新
             if (wasRunning && !run) this.loadEnvs();
           } catch (e) { /* 忽略解析错误 */ }

@@ -1430,9 +1430,6 @@ const ManagePage = {
             ElementPlus.ElMessage.success(res.msg || ('已触发 ' + ((res.data && res.data.count) || itemIds.length) + ' 个仓库构建'));
             this.buildDialogVisible = false;
             this.loadEnvs();
-            if (res.data && res.data.batch_id) {
-              this.$router.push({ path: '/multi-build', query: { batch: res.data.batch_id } });
-            }
           } else {
             ElementPlus.ElMessage.error(res.msg || '触发失败');
           }

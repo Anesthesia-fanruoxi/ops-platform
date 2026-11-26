@@ -1282,9 +1282,6 @@ const CicdConfigPage = {
           if (res.code === 200) {
             ElementPlus.ElMessage.success(res.msg || ('已触发 ' + ((res.data && res.data.count) || items.length) + ' 个仓库构建'));
             this.multiBuildVisible = false;
-            if (res.data && res.data.batch_id) {
-              this.$router.push({ path: '/multi-build', query: { batch: res.data.batch_id } });
-            }
           } else ElementPlus.ElMessage.error(res.msg || '触发失败');
         }, () => { this.multiBuilding = false; });
         return;

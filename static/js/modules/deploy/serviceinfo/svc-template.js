@@ -60,8 +60,8 @@ window.SvcTemplate = `
                :loading="restartingAll" @click="restartAllServices">⟳ 重启全部服务</el-button>
     <!-- 运行状态：监听环境构建 SSE（5s 一帧）；SSE 无任务 → 暂无构建任务，有任务 → 构建中 + 当前步骤 -->
     <span v-if="selectedEnv" class="svc-run-status" :class="{ 'svc-run-active': !!activeBuild }"
-          :title="activeBuild ? ('点击查看构建步骤 ' + activeBuild.build_no) : ''"
-          @click="activeBuild && openProgressDrawer(activeBuild)">
+          :title="activeBuild ? (activeBuild.batch_id ? '点击查看批次进度' : '点击查看构建步骤') : ''"
+          @click="openActiveBuild">
       <template v-if="activeBuild">
         <span class="svc-active-dot"></span>
         <span class="svc-run-text">构建中<span v-if="activeBuild.current_step">，当前步骤：[[ activeBuild.current_step ]]</span></span>
@@ -76,7 +76,7 @@ window.SvcTemplate = `
     </el-button>
     <!-- 最近构建摘要：昵称 / 分支 / 时间（点击打开构建步骤） -->
     <span v-if="lastBuild" class="svc-toolbar-lastbuild" :class="lastBuildBgClass" :title="'最近构建 ' + lastBuild.build_no"
-          @click="openProgressDrawer({ id: lastBuild.id, build_no: lastBuild.build_no, status: lastBuild.status, project_type: lastBuild.project_type, branch: lastBuild.branch })">
+          @click="openLastBuild">
       <span class="svc-lb-user">[[ lastBuild.triggered_by || '-' ]]</span>
       <span class="svc-lb-branch">[[ lastBuild.branch || '-' ]]</span>
       <span class="svc-lb-time">[[ lastBuild.created_at || '' ]]</span>
@@ -220,6 +220,53 @@ window.SvcTemplate = `
     <el-alert v-if="bpBuild && bpBuild.status === 'failed' && bpBuild.error_msg"
               :title="bpBuild.error_msg" type="error" :closable="false" show-icon style="margin-bottom:12px" />
     <div ref="bpLogContainer" class="bp-log-box">[[ bpLogView() || '等待日志输出...' ]]</div>
+  </el-drawer>
+
+  <!-- 多仓批次进度抽屉：一次发版按服务逐行展示各自构建进度，点击行查看该构建步骤/日志 -->
+  <el-drawer v-model="batchDrawerVisible" :title="'批次进度 - ' + ((batchData && batchData.batch_no) || '')" size="70%" @close="closeBatchDrawer">
+    <template #header>
+      <div style="display:flex;align-items:center;gap:12px;width:100%">
+        <span style="font-weight:600;font-size:15px">[[ batchData ? batchData.batch_no : '' ]]</span>
+        <el-tag v-if="batchData" :type="bpStatusType(batchData.status)" size="small">[[ bpStatusText(batchData.status) ]]</el-tag>
+        <span style="flex:1"></span>
+        <el-button size="small" @click="batchData && loadBatchDetail(batchData.id)">刷新</el-button>
+      </div>
+    </template>
+    <div v-loading="batchLoading">
+      <div v-if="batchData" style="display:flex;flex-wrap:wrap;gap:8px 22px;font-size:12px;color:#909399">
+        <span>项目/环境 <b style="color:#303133;font-weight:500">[[ batchData.project_name ]] / [[ batchData.environment_name ]]</b></span>
+        <span>分支 <b style="color:#303133;font-weight:500">[[ batchData.branch ]]</b></span>
+        <span>仓库 <b style="color:#303133;font-weight:500">[[ batchData.total_builds ]]</b></span>
+        <span>服务 <b style="color:#303133;font-weight:500">[[ batchData.total_services ]]</b></span>
+        <span>执行人 <b style="color:#303133;font-weight:500">[[ batchData.triggered_by || '-' ]]</b></span>
+        <span>成功 <b style="color:#67c23a;font-weight:500">[[ batchData.build_status_counts.success ]]</b>
+          / 失败 <b style="color:#f56c6c;font-weight:500">[[ batchData.build_status_counts.failed ]]</b>
+          / 运行 <b style="color:#409eff;font-weight:500">[[ batchData.build_status_counts.running + batchData.build_status_counts.pending ]]</b></span>
+      </div>
+      <el-table :data="(batchData && batchData.services) || []" size="small" border stripe max-height="68vh"
+                style="width:100%;margin-top:10px" highlight-current-row @row-click="openBatchService">
+        <el-table-column prop="service_name" label="服务" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="repo_name" label="仓库" min-width="150" show-overflow-tooltip />
+        <el-table-column label="状态" width="90" align="center">
+          <template #default="s"><el-tag :type="bpStatusType(s.row.status)" size="small">[[ bpStatusText(s.row.status) ]]</el-tag></template>
+        </el-table-column>
+        <el-table-column prop="current_step" label="当前步骤" width="110" align="center" />
+        <el-table-column label="进度" width="160">
+          <template #default="s">
+            <el-progress :percentage="s.row.progress || 0" :stroke-width="8"
+                         :status="s.row.status === 'failed' ? 'exception' : (s.row.status === 'success' ? 'success' : '')" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="agent_name" label="节点" width="90" align="center" />
+        <el-table-column label="耗时" width="80" align="center">
+          <template #default="s">[[ s.row.duration ? Math.round(s.row.duration) + 's' : '-' ]]</template>
+        </el-table-column>
+        <el-table-column label="操作" width="90" align="center">
+          <template #default="s"><el-button link type="primary" size="small" @click.stop="openBatchService(s.row)">查看步骤</el-button></template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!batchLoading && batchData && !(batchData.services || []).length" description="批次暂无服务进度" :image-size="60" />
+    </div>
   </el-drawer>
 
   <el-alert v-if="k8sError" type="warning" :closable="false" style="margin-bottom:12px;"
@@ -511,9 +558,29 @@ window.SvcTemplate = `
     </template>
   </el-dialog>
 
-  <!-- 构建记录弹窗：一行一行展示构建记录，点击查看构建步骤 -->
-  <el-dialog v-model="buildRecordsVisible" :title="'构建记录 - ' + (selectedProject || '') + '/' + (selectedEnv || '')" width="900px" top="8vh" class="build-records-dialog">
-    <el-table :data="buildRecords" size="small" border stripe max-height="65vh" style="width:100%"
+  <!-- 构建记录弹窗：单仓项目一行一条构建；多仓项目按批次展示，点批次看每个服务的进度 -->
+  <el-dialog v-model="buildRecordsVisible" :title="(recordsMode === 'batches' ? '批次记录' : '构建记录') + ' - ' + (selectedProject || '') + '/' + (selectedEnv || '')" width="900px" top="8vh" class="build-records-dialog">
+    <el-table v-if="recordsMode === 'batches'" :data="batchRecords" size="small" border stripe max-height="65vh" style="width:100%"
+              v-loading="buildRecordsLoading" highlight-current-row @row-click="onBatchRecordClick">
+      <el-table-column prop="batch_no" label="批次编号" width="190" />
+      <el-table-column prop="branch" label="分支" min-width="120" show-overflow-tooltip />
+      <el-table-column label="服务" width="60" align="center"><template #default="s">[[ s.row.total_services ]]</template></el-table-column>
+      <el-table-column label="状态" width="80" align="center">
+        <template #default="s">
+          <el-tag :type="bpStatusType(s.row.status)" size="small">[[ bpStatusText(s.row.status) ]]</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="成功 / 失败 / 运行" width="140" align="center">
+        <template #default="s">
+          <span style="color:#67c23a">[[ s.row.build_status_counts.success ]]</span> /
+          <span style="color:#f56c6c">[[ s.row.build_status_counts.failed ]]</span> /
+          <span style="color:#409eff">[[ s.row.build_status_counts.running + s.row.build_status_counts.pending ]]</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="triggered_by" label="执行人" width="80" align="center" />
+      <el-table-column prop="created_at" label="创建时间" width="160" />
+    </el-table>
+    <el-table v-else :data="buildRecords" size="small" border stripe max-height="65vh" style="width:100%"
               v-loading="buildRecordsLoading" highlight-current-row @row-click="onBuildRecordClick">
       <el-table-column prop="build_no" label="编号" width="170" />
       <el-table-column prop="branch" label="分支" min-width="130" show-overflow-tooltip />

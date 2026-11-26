@@ -628,6 +628,7 @@ def builds_env_frames(app_obj, environment_id):
                 'status': b.status,
                 'project_type': b.project_type or 'backend',
                 'branch': b.branch or '',
+                'batch_id': b.batch_id,
                 'current_step': _build_current_step(b.build_no),
             } for b in builds]
         yield {'environment_id': environment_id, 'builds': items}
