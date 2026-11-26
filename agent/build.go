@@ -613,6 +613,15 @@ func execCollectArtifacts(logger *stepLogger, task *BuildTask, codeDir, productD
 				return err
 			}
 		}
+		// Dockerfile 用 ADD/COPY pkg .（平台 jre/java17 模板）时，产物需放进 pkg/ 子目录，
+		// 否则 docker build 报 "/pkg": not found；java8 模板 ADD {{jar_name}} 则保持平铺
+		if dockerfileUsesPkg(task.Steps.DockerfileContent) {
+			for _, svc := range task.Steps.Services {
+				if err := stageIntoPkgDir(logger, productDir, svc.Name); err != nil {
+					return err
+				}
+			}
+		}
 		logger.log(fmt.Sprintf("  产物收集完成，共 %d 个服务（多仓库）", len(task.Steps.Services)))
 		return nil
 	}
@@ -629,6 +638,46 @@ func execCollectArtifacts(logger *stepLogger, task *BuildTask, codeDir, productD
 		}
 	}
 	logger.log(fmt.Sprintf("  产物收集完成，共 %d 个服务", len(svcDirs)))
+	return nil
+}
+
+// dockerfileUsesPkg 判断 Dockerfile 是否要求产物位于 pkg/ 子目录（平台 jre/java17 模板为 ADD pkg .）
+func dockerfileUsesPkg(content string) bool {
+	lower := strings.ToLower(content)
+	for _, kw := range []string{"add pkg", "copy pkg", "add ./pkg", "copy ./pkg"} {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// stageIntoPkgDir 把服务产物目录下的平铺文件移入 pkg/ 子目录，供 ADD pkg . 类 Dockerfile 使用
+func stageIntoPkgDir(logger *stepLogger, productDir, svcName string) error {
+	stageDir := filepath.Join(productDir, svcName)
+	entries, err := os.ReadDir(stageDir)
+	if err != nil {
+		return nil
+	}
+	pending := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.Name() != "pkg" {
+			pending = append(pending, e.Name())
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	pkgDir := filepath.Join(stageDir, "pkg")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		return fmt.Errorf("创建 pkg 目录失败: %v", err)
+	}
+	for _, name := range pending {
+		if err := os.Rename(filepath.Join(stageDir, name), filepath.Join(pkgDir, name)); err != nil {
+			return fmt.Errorf("产物移入 pkg 目录失败: %v", err)
+		}
+	}
+	logger.log(fmt.Sprintf("  %s: 产物按 Dockerfile 约定放入 pkg/", svcName))
 	return nil
 }
 
