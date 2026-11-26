@@ -362,6 +362,9 @@ const SvcMixinQuickBuild = {
             this.buildDialogVisible = false;
             this.loadEnvs();
             this.loadServices();
+            if (res.data && res.data.batch_id) {
+              this.$router.push({ path: '/multi-build', query: { batch: res.data.batch_id } });
+            }
           } else {
             ElementPlus.ElMessage.error(res.msg || '触发失败');
           }

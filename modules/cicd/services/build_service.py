@@ -192,6 +192,12 @@ def cancel_build(build_id):
         publish(build.build_no)
         from core.redis_client import cache_delete
         cache_delete(f'build:claim:{build.id}')
+        if getattr(build, 'batch_id', None):
+            try:
+                from modules.cicd.services.multi_repo_service import finish_batch_if_done
+                finish_batch_if_done(build.batch_id)
+            except Exception:
+                logger.exception('[build] 更新批次状态失败')
         # pending 可能处于「已派发持锁、尚未收到首步回调」窗口，比对 owner 释放同环境锁防残留
         if build.project_id:
             from core.redis_client import cache_get, cache_delete as _cd2
@@ -368,6 +374,14 @@ def complete_build(build_id, status, image_digest='', error=''):
         build.duration = (build.finished_at - build.started_at).total_seconds()
 
     db.session.commit()
+
+    # 批次 child 完成后尝试收口批次并释放批次环境锁
+    if getattr(build, 'batch_id', None):
+        try:
+            from modules.cicd.services.multi_repo_service import finish_batch_if_done
+            finish_batch_if_done(build.batch_id)
+        except Exception:
+            logger.exception('[build] 更新批次状态失败')
 
     # 补齐未回调步骤为 skipped（Agent 跳过产物收集等无回调，避免 UI 永久 pending）
     fill_skipped_steps(build.build_no)

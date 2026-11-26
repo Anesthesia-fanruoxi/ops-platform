@@ -20,7 +20,7 @@ from modules.cicd.models import (  # noqa: F401
 )
 # 多仓库模板（独立表，单仓流程模板不受影响）
 from modules.cicd.multi_models import (  # noqa: F401
-    CicdMultiTemplate, CicdMultiItem, CicdMultiService
+    CicdMultiTemplate, CicdMultiItem, CicdMultiService, CicdBuildBatch
 )
 from modules.database.models import CustomDatasource  # noqa: F401
 
@@ -169,6 +169,9 @@ def init_db(app):
             columns = _get_columns(cursor, 'cicd_builds')
             if columns and 'cancel_requested' not in columns:
                 cursor.execute("ALTER TABLE cicd_builds ADD COLUMN cancel_requested BOOLEAN DEFAULT 0")
+                conn.commit()
+            if 'batch_id' not in columns:
+                cursor.execute(_add_col_sql('cicd_builds', 'batch_id', 'INT NULL'))
                 conn.commit()
             conn.close()
         except Exception:

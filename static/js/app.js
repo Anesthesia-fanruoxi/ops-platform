@@ -43,6 +43,11 @@ function findFirstAllowed() {
 // ============================================================
 // 路由配置
 // ============================================================
+// 新页面脚本可能晚于 app.js 生效（旧模板缓存/滚动发布）：缺失时用占位页，避免整个 SPA 启动失败
+const MultiBuildPageSafe = typeof MultiBuildPage !== 'undefined' ? MultiBuildPage : {
+  name: 'MultiBuildPageMissing',
+  template: '<div class="card" style="padding:24px;color:#909399">多仓发版页面脚本未加载，请重启后端服务后刷新页面。</div>',
+};
 const routes = [
   { path: '/login',    component: LoginPage,    meta: { title: '登录', noAuth: true } },
   { path: '/',         redirect: '/dashboard' },
@@ -62,6 +67,7 @@ const routes = [
   { path: '/schema',    component: SchemaComparePage, meta: { title: '表结构对比同步', permission: 'page:schema' } },
   { path: '/ddl-sync',  component: DdlSyncPage, meta: { title: 'DDL自动同步', permission: 'page:ddl_sync' } },
   { path: '/cicd',     component: CicdConfigPage, meta: { title: 'CI/CD管理', permission: 'page:cicd' } },
+  { path: '/multi-build', component: MultiBuildPageSafe, meta: { title: '多仓发版', permission: 'page:cicd' } },
   { path: '/schedule', component: SchedulePage, meta: { title: '调度中心', permission: 'page:cicd_schedule' } },
   { path: '/settings', component: SettingsPage, meta: { title: '系统设置', permission: 'page:settings' } },
   { path: '/users',    component: UsersPage,    meta: { title: '用户管理', permission: 'page:users' } },
@@ -463,7 +469,7 @@ const app = Vue.createApp({
  ['CreateService', CreateService], ['ProjectsPage', ProjectsPage], ['ManagePage', ManagePage],
  ['NginxPage', NginxPage], ['DatasourcesPage', DatasourcesPage], ['CollationPage', CollationPage],
  ['SchemaComparePage', SchemaComparePage], ['DdlSyncPage', DdlSyncPage],
- ['CicdConfigPage', CicdConfigPage], ['SchedulePage', SchedulePage],
+ ['CicdConfigPage', CicdConfigPage], ['MultiBuildPage', MultiBuildPageSafe], ['SchedulePage', SchedulePage],
  ['SettingsPage', SettingsPage], ['AuditPage', AuditPage], ['DashboardPage', DashboardPage], ['LoginPage', LoginPage],
  ['UsersPage', UsersPage], ['RolesPage', RolesPage]
 ].forEach(function(pair) {

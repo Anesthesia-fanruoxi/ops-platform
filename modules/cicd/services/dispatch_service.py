@@ -339,7 +339,12 @@ def _dispatch_one(build):
     logs = []
     # 同环境串行（第 3 条）：同 project_id + environment_id 同时只允许一个构建（Redis 原子锁，
     # 防跨 worker 竞态）；即使存在空闲 Agent 也不派发；前一个完成（成功/失败/取消）后释放锁自动放行
-    if build.project_id:
+    if build.project_id and not build.batch_id:
+        # 普通单仓构建：批次进行中时等待，避免与批次并发
+        from modules.cicd.services.multi_repo_service import batch_lock_active
+        if batch_lock_active(build.project_id, build.environment_id):
+            _wait_dispatch(build, logs, '同环境批次构建进行中，普通构建排队等待', status='same_env')
+            return
         env_lock = f'lock:env:{build.project_id}:{build.environment_id}'
         # 锁值 = 本构建 build_no（owner），释放时比对防误删他人锁
         if not set_if_absent(env_lock, value=build.build_no, ttl=21600000):
@@ -349,6 +354,7 @@ def _dispatch_one(build):
                 _wait_dispatch(build, logs, '同环境构建进行中，排队等待其完成（同环境串行）', status='same_env')
                 return
         build._env_lock = env_lock
+    # 批次 child：不占同环境单仓锁，允许同批多个仓库并行；批次环境锁由 trigger_items_build 持有
     if build.agent_id:
         # 重跑：必须回到原构建节点（构建目录在其磁盘上）
         logs.append(f'[触发] 构建 {build.build_no} 重跑进入调度队列（钉住原节点）')

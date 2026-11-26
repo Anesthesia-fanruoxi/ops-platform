@@ -125,10 +125,11 @@ func loadConfig() {
 	workdir := flag.String("workdir", "/data/cicd", "工作目录")
 	advertise := flag.String("advertise", "", "Master 回推地址（默认取主机名）")
 	heartbeat := flag.Int("heartbeat", 5, "心跳间隔（秒）")
+	maxConcurrent := flag.Int("max-concurrent", 4, "本节点最大并发构建数")
 	flag.Parse()
 
 	if *name == "" || *secret == "" || *master == "" {
-		fmt.Println("用法: cicd-agent --name <节点名> --secret <密钥> --master <Master地址> [--workdir /data/cicd] [--advertise <IP>]")
+		fmt.Println("用法: cicd-agent --name <节点名> --secret <密钥> --master <Master地址> [--workdir /data/cicd] [--advertise <IP>] [--max-concurrent 4]")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -137,6 +138,9 @@ func loadConfig() {
 	if adv == "" {
 		adv, _ = os.Hostname()
 	}
+	if *maxConcurrent < 1 {
+		*maxConcurrent = 1
+	}
 
 	cfg = Config{
 		MasterURL:     strings.TrimRight(*master, "/"),
@@ -144,7 +148,7 @@ func loadConfig() {
 		Name:          *name,
 		AdvertiseAddr: adv,
 		HeartbeatSec:  *heartbeat,
-		MaxConcurrent: 1,    // 固定 1 并发
+		MaxConcurrent: *maxConcurrent,
 		WorkDir:       *workdir,
 		LogPort:       9090, // 固定端口
 	}

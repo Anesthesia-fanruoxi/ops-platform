@@ -62,8 +62,22 @@ const SvcMixinBuildProgress = {
   methods: {
     // ═══════════ 构建记录弹窗 ═══════════
     openBuildRecordsDialog() {
-      this.buildRecordsVisible = true;
-      this.loadBuildRecords();
+      const env = this.selectedEnvData || {};
+      const openLegacy = () => {
+        this.buildRecordsVisible = true;
+        this.loadBuildRecords();
+      };
+      if (!env.project_id) { openLegacy(); return; }
+      ajax('GET', '/api/cicd/multi-templates/by-project/' + env.project_id, null, (r) => {
+        if (r.code === 200 && r.data && (r.data.items || []).length) {
+          this.$router.push({
+            path: '/multi-build',
+            query: { project_id: env.project_id, environment_id: env.id },
+          });
+          return;
+        }
+        openLegacy();
+      }, openLegacy);
     },
     loadBuildRecords() {
       const env = this.selectedEnvData;

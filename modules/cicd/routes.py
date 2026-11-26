@@ -131,7 +131,7 @@ schedule_bp.add_url_rule('/scores', 'scores', schedule_scores, methods=['GET'])
 from modules.cicd.api.multi_repo_api import (
     list_multi_templates, get_multi_template, create_multi_template,
     update_multi_template, delete_multi_template, item_branches, build_item, build_items,
-    get_multi_template_by_project,
+    get_multi_template_by_project, list_multi_batches, get_multi_batch,
 )
 
 multi_bp.add_url_rule('', 'list_multi_templates', list_multi_templates, methods=['GET'])
@@ -143,6 +143,8 @@ multi_bp.add_url_rule('/<int:tpl_id>', 'delete_multi_template', delete_multi_tem
 multi_bp.add_url_rule('/items/<int:item_id>/branches', 'item_branches', item_branches, methods=['GET'])
 multi_bp.add_url_rule('/items/<int:item_id>/build', 'build_item', build_item, methods=['POST'])
 multi_bp.add_url_rule('/<int:tpl_id>/build-batch', 'build_items', build_items, methods=['POST'])
+multi_bp.add_url_rule('/batches', 'list_multi_batches', list_multi_batches, methods=['GET'])
+multi_bp.add_url_rule('/batches/<int:batch_id>', 'get_multi_batch', get_multi_batch, methods=['GET'])
 
 # ─── Maven Settings 管理 ─────────────────────────────────────
 from modules.cicd.api.maven_settings_api import (

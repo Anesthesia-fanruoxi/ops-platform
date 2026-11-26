@@ -259,6 +259,7 @@ class Build(db.Model):
     project_id = db.Column(db.Integer, nullable=False)
     environment_id = db.Column(db.Integer, nullable=True)
     agent_id = db.Column(db.Integer, nullable=True)
+    batch_id = db.Column(db.Integer, nullable=True, index=True)
     branch = db.Column(db.String(200), default='master')
     project_type = db.Column(db.String(20), default='backend')  # frontend | backend
     language = db.Column(db.String(30), default='')  # 快照
@@ -299,6 +300,7 @@ class Build(db.Model):
             'project_name': self.project.name if self.project else '',
             'environment_id': self.environment_id,
             'environment_name': self.environment.name if self.environment else '',
+            'batch_id': self.batch_id,
             'agent_id': self.agent_id,
             'agent_name': self.agent.name if self.agent else '',
             'branch': self.branch,

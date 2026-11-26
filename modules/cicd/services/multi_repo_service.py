@@ -13,7 +13,7 @@ from datetime import datetime
 from core.db import db
 from modules.cicd.models import Build
 from modules.cicd.multi_models import (
-    CicdMultiTemplate, CicdMultiItem, CicdMultiService,
+    CicdMultiTemplate, CicdMultiItem, CicdMultiService, CicdBuildBatch,
 )
 from modules.cicd.services.dockerfile_service import render_for_build
 
@@ -221,7 +221,7 @@ def list_item_branches(item_id):
     return list_git_branches(item.git_url, item.git_credential_id)
 
 
-def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_settings_id=None, dispatch=True, service_names=None):
+def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_settings_id=None, dispatch=True, service_names=None, batch_id=None):
     """多仓库构建入口：单仓流程模板不经过这里。返回 (build, error)"""
     item = CicdMultiItem.query.get(item_id)
     if not item:
@@ -294,6 +294,7 @@ def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_sett
         'dockerfile_content': dockerfile_content,
         'image_name': item.repo_name,
         'image_tag': image_tag,
+        'batch_id': batch_id,
         'project_type': 'backend',
         'language': item.language or '',
     }
@@ -313,6 +314,7 @@ def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_sett
         steps_snapshot=json.dumps(steps_config, ensure_ascii=False),
         image_name=item.repo_name,
         image_tag=image_tag,
+        batch_id=batch_id,
         status='pending',
         log_file=os.path.join(BUILD_LOG_DIR, f'{build_no}.log'),
         triggered_by=triggered_by,
@@ -379,6 +381,47 @@ def trigger_items_build(template_id, item_ids, environment_id, branch, triggered
             return None, f'仓库「{item.repo_name}」未配置编译命令'
 
     branch = (branch or 'master').strip() or 'master'
+    # 批次锁：同一环境同一时间只允许一个多仓批次；普通单仓构建仍走自己的旧锁
+    from core.redis_client import set_if_absent, cache_get, cache_delete
+    env_lock = f'lock:env:{env.project_id}:{env.id}'
+    env_owner = cache_get(env_lock)
+    if env_owner:
+        active = Build.query.filter(
+            Build.build_no == env_owner,
+            Build.status.in_(('pending', 'running')),
+        ).first()
+        if active:
+            return None, '该环境有单仓构建正在进行，请等待完成后再发版'
+        # 残留锁自愈：owner 已终态/记录不存在时清理后继续
+        if cache_get(env_lock) == env_owner:
+            cache_delete(env_lock)
+    batch_no = 'MB' + datetime.now().strftime('%Y%m%d%H%M%S') + str(random.randint(1000, 9999))
+    batch_key = f'lock:batch_env:{env.project_id}:{env.id}'
+    if not set_if_absent(batch_key, value=batch_no, ttl=21600000):
+        return None, '该环境已有批次构建进行中，请等待完成后再发版'
+
+    selected_service_count = 0
+    for item in ordered:
+        svcs = item.services()
+        if wanted_services:
+            svcs = [s for s in svcs if s.service_name in wanted_services]
+        selected_service_count += len(svcs)
+
+    batch = CicdBuildBatch(
+        batch_no=batch_no,
+        project_id=env.project_id,
+        environment_id=env.id,
+        template_id=tpl.id,
+        branch=branch,
+        status='pending',
+        total_services=selected_service_count,
+        total_builds=len(ordered),
+        triggered_by=triggered_by,
+        started_at=datetime.now(),
+    )
+    db.session.add(batch)
+    db.session.commit()
+
     builds = []
     for item in ordered:
         item_services_filter = [s.service_name for s in item.services() if s.service_name in wanted_services] if wanted_services else None
@@ -387,13 +430,112 @@ def trigger_items_build(template_id, item_ids, environment_id, branch, triggered
             maven_settings_id=maven_settings_id,
             dispatch=False,
             service_names=item_services_filter,
+            batch_id=batch.id,
         )
         if err:
+            # 已创建的兄弟任务不能留在 pending 里继续执行
+            for created in builds:
+                created.status = 'cancelled'
+                created.finished_at = datetime.now()
+            batch.status = 'failed'
+            batch.finished_at = datetime.now()
+            db.session.commit()
+            cache_delete(batch_key)
             return None, f'仓库「{item.repo_name}」: {err}'
         builds.append(build)
 
+    batch.status = 'running'
+    db.session.commit()
     if builds:
         from modules.cicd.services.dispatch_service import dispatch_pending
         dispatch_pending()
-    return builds, None
+    return (batch, builds), None
 
+
+def batch_lock_active(project_id, environment_id):
+    """判断该环境是否有进行中的多仓批次；批次已终态/记录丢失时顺带清理残留锁。"""
+    from core.redis_client import cache_get, cache_delete
+    key = f'lock:batch_env:{project_id}:{environment_id}'
+    owner = cache_get(key)
+    if not owner:
+        return False
+    batch = CicdBuildBatch.query.filter_by(batch_no=owner).first()
+    if not batch or batch.status in ('success', 'failed', 'cancelled'):
+        if cache_get(key) == owner:
+            cache_delete(key)
+        return False
+    return True
+
+
+def batch_detail(batch):
+    """批次详情：展开为服务行，供多仓发版页展示。"""
+    from modules.cicd.models import Build
+    builds = Build.query.filter_by(batch_id=batch.id).order_by(Build.id.asc()).all()
+    rows = []
+    for b in builds:
+        snap = b.get_steps_snapshot()
+        services = snap.get('services') or []
+        service_rows = services if services else [{'name': b.image_name or snap.get('repo_name') or '', 'jar_name': ''}]
+        progress = 0
+        current_step = ''
+        try:
+            from modules.cicd.services.build_service import get_build_steps
+            step_data = get_build_steps(b.build_no) or {}
+            step_list = step_data.get('steps') or []
+            if step_list:
+                done = sum(1 for st in step_list if st.get('status') in ('success', 'skipped'))
+                progress = int(done * 100 / len(step_list))
+                current = next((st for st in step_list if st.get('status') == 'running'), None)
+                current_step = (current or {}).get('name', '')
+        except Exception:
+            pass
+        if b.status == 'success':
+            progress = 100
+        elif b.status in ('pending',):
+            progress = 0
+        for svc in service_rows:
+            rows.append({
+                'build_id': b.id,
+                'build_no': b.build_no,
+                'repo_name': snap.get('repo_name') or b.image_name,
+                'service_name': svc.get('name') or '',
+                'jar_name': svc.get('jar_name') or '',
+                'branch': b.branch,
+                'status': b.status,
+                'progress': progress,
+                'current_step': current_step,
+                'agent_name': b.agent.name if b.agent else '',
+                'started_at': b.started_at.strftime('%Y-%m-%d %H:%M:%S') if b.started_at else None,
+                'finished_at': b.finished_at.strftime('%Y-%m-%d %H:%M:%S') if b.finished_at else None,
+                'duration': round(b.duration, 1) if b.duration else None,
+                'error': b.error_msg or '',
+            })
+    data = batch.to_dict(include_builds=True)
+    data['services'] = rows
+    return data
+
+
+def finish_batch_if_done(batch_id):
+    """child 终态后更新批次终态并释放批次环境锁。"""
+    if not batch_id:
+        return
+    from modules.cicd.models import Build
+    from core.redis_client import cache_delete
+    batch = CicdBuildBatch.query.get(batch_id)
+    if not batch:
+        return
+    children = Build.query.filter_by(batch_id=batch_id).all()
+    if any(b.status in ('pending', 'running') for b in children):
+        batch.status = 'running'
+    else:
+        if children and all(b.status == 'success' for b in children):
+            batch.status = 'success'
+        elif any(b.status == 'failed' for b in children):
+            batch.status = 'failed'
+        elif any(b.status == 'cancelled' for b in children):
+            batch.status = 'cancelled'
+        else:
+            batch.status = 'success'
+        batch.finished_at = datetime.now()
+        cache_delete(f'lock:batch_env:{batch.project_id}:{batch.environment_id}')
+    db.session.commit()

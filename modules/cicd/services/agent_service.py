@@ -354,14 +354,19 @@ def poll_build_by_name(name):
             active_env_ids.add((rb.project_id, rb.environment_id))
     pending = Build.query.filter_by(status='pending').order_by(Build.created_at.asc()).all()
     build = None
+    from modules.cicd.services.multi_repo_service import batch_lock_active
     for b in pending:
-        if b.project_id and (b.project_id, b.environment_id) in active_env_ids:
-            continue  # 同环境构建进行中，排队等待
+        # 批次 child 允许同环境并行；普通构建在批次运行期间排队
+        if not b.batch_id:
+            if b.project_id and (b.project_id, b.environment_id) in active_env_ids:
+                continue  # 同环境普通构建进行中，排队等待
+            if b.project_id and batch_lock_active(b.project_id, b.environment_id):
+                continue  # 同环境批次进行中，普通构建等待
         # 重跑钉住其他节点的任务不可被本 Agent 领取（构建目录在原节点）
         if b.agent_id and b.agent_id != agent.id:
             continue
-        # 同环境串行原子锁：与 _dispatch_one 一致，防跨 worker 竞态双派
-        env_lock = f'lock:env:{b.project_id}:{b.environment_id}' if b.project_id else None
+        # 普通单仓构建的串行锁；批次 child 不占该锁
+        env_lock = f'lock:env:{b.project_id}:{b.environment_id}' if b.project_id and not b.batch_id else None
         if env_lock and not set_if_absent(env_lock, value=b.build_no, ttl=21600000):
             continue  # 同环境已有构建持锁（进行中），排队等待
         if set_if_absent(f'build:claim:{b.id}', value=f'agent-{agent.id}', ttl=60000):

@@ -138,3 +138,59 @@ class CicdMultiService(db.Model):
             'sort_no': self.sort_no or 0,
             'enabled': bool(self.enabled),
         }
+
+
+class CicdBuildBatch(db.Model):
+    """多仓一次发版的批次记录；child Build 通过 batch_id 归属。
+
+    用户视角一个批次就是一次构建；内部仍保留每个仓库一个 Build，
+    便于 Agent 独立执行、重跑和日志 SSE。
+    """
+    __tablename__ = 'cicd_build_batches'
+
+    id = db.Column(db.Integer, primary_key=True)
+    batch_no = db.Column(db.String(50), unique=True, nullable=False, index=True)
+    project_id = db.Column(db.Integer, nullable=False, index=True)
+    environment_id = db.Column(db.Integer, nullable=True, index=True)
+    template_id = db.Column(db.Integer, nullable=True, index=True)
+    branch = db.Column(db.String(200), default='master')
+    status = db.Column(db.String(20), default='pending')  # pending|running|success|failed|cancelled
+    total_services = db.Column(db.Integer, default=0)
+    total_builds = db.Column(db.Integer, default=0)
+    triggered_by = db.Column(db.String(80), default='')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    started_at = db.Column(db.DateTime, nullable=True)
+    finished_at = db.Column(db.DateTime, nullable=True)
+
+    project = db.relationship('Project', lazy=True,
+                              primaryjoin='foreign(CicdBuildBatch.project_id) == Project.id')
+    environment = db.relationship('Environment', lazy=True,
+                                  primaryjoin='foreign(CicdBuildBatch.environment_id) == Environment.id')
+
+    def to_dict(self, include_builds=False):
+        from modules.cicd.models import Build
+        builds = Build.query.filter_by(batch_id=self.id).order_by(Build.id.asc()).all()
+        counts = {'success': 0, 'failed': 0, 'running': 0, 'pending': 0, 'cancelled': 0}
+        for b in builds:
+            counts[b.status] = counts.get(b.status, 0) + 1
+        data = {
+            'id': self.id,
+            'batch_no': self.batch_no,
+            'project_id': self.project_id,
+            'project_name': self.project.name if self.project else '',
+            'environment_id': self.environment_id,
+            'environment_name': self.environment.name if self.environment else '',
+            'template_id': self.template_id,
+            'branch': self.branch or '',
+            'status': self.status,
+            'total_services': self.total_services or 0,
+            'total_builds': self.total_builds or len(builds),
+            'triggered_by': self.triggered_by or '',
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
+            'started_at': self.started_at.strftime('%Y-%m-%d %H:%M:%S') if self.started_at else None,
+            'finished_at': self.finished_at.strftime('%Y-%m-%d %H:%M:%S') if self.finished_at else None,
+            'build_status_counts': counts,
+        }
+        if include_builds:
+            data['builds'] = [b.to_dict() for b in builds]
+        return data

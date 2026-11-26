@@ -4,7 +4,7 @@ from flask import request
 
 from core.response import success_response, error_response
 from core.security import require_permission, require_any_permission
-from modules.cicd.multi_models import CicdMultiTemplate
+from modules.cicd.multi_models import CicdMultiTemplate, CicdBuildBatch
 from modules.cicd.services import multi_repo_service
 
 
@@ -81,14 +81,17 @@ def build_items(tpl_id):
     from flask import g
     user = getattr(g, 'current_user', None)
     triggered_by = (getattr(user, 'username', '') or 'system') if user else 'system'
-    builds, err = multi_repo_service.trigger_items_build(
+    result, err = multi_repo_service.trigger_items_build(
         tpl_id, data.get('item_ids') or [], env_id,
         data.get('branch') or 'master', triggered_by,
         maven_settings_id=data.get('maven_settings_id'),
         service_names=data.get('services') or None)
     if err:
         return error_response(err, 400)
+    batch, builds = result
     return success_response({
+        'batch_id': batch.id,
+        'batch_no': batch.batch_no,
         'count': len(builds),
         'builds': [{'build_id': b.id, 'build_no': b.build_no, 'project_type': b.project_type} for b in builds],
     }, f'已触发 {len(builds)} 个仓库构建')
@@ -100,3 +103,23 @@ def get_multi_template_by_project(project_id):
         return error_response('该项目未配置多仓库模板', 404)
     return success_response(tpl.to_dict(include_items=True))
 
+
+
+@require_any_permission('page:cicd', 'op:cicd_build')
+def list_multi_batches():
+    project_id = request.args.get('project_id', type=int)
+    environment_id = request.args.get('environment_id', type=int)
+    q = CicdBuildBatch.query
+    if project_id:
+        q = q.filter_by(project_id=project_id)
+    if environment_id:
+        q = q.filter_by(environment_id=environment_id)
+    return success_response([b.to_dict(include_builds=False) for b in q.order_by(CicdBuildBatch.id.desc()).limit(100).all()])
+
+
+@require_any_permission('page:cicd', 'op:cicd_build')
+def get_multi_batch(batch_id):
+    batch = CicdBuildBatch.query.get(batch_id)
+    if not batch:
+        return error_response('批次不存在', 404)
+    return success_response(multi_repo_service.batch_detail(batch))

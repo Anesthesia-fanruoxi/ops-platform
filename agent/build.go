@@ -528,20 +528,28 @@ func execBuild(runner *buildRunner, logger *stepLogger, task *BuildTask, codeDir
 		return runner.runCmd(logger, codeDir, parts[0], parts[1:]...)
 	}
 
-	// m2 仓库缓存持久化：{WorkDir}/.m2 挂载到容器 /root/.m2，
-	// 避免每次编译重新下载依赖（跨项目/环境共享，构建目录清理不影响缓存）
-	m2CacheDir := filepath.Join(cfg.WorkDir, ".m2")
-	if err := os.MkdirAll(m2CacheDir, 0755); err != nil {
+	// m2 仓库缓存持久化：{WorkDir}/.m2/repository 挂载到容器 /root/.m2/repository，
+	// 避免每次编译重新下载依赖（跨项目/环境共享，构建目录清理不影响缓存）。
+	// 不能把整个 {WorkDir}/.m2 挂到 /root/.m2：settings.xml 的挂载目标位于 /root/.m2 内，
+	// Docker 会在被绑定的宿主目录里创建 0 字节占位文件，导致之后未选 Maven Settings 的构建
+	// 读到空 /root/.m2/settings.xml 直接失败；改为按需单独挂 settings 文件
+	m2HomeDir := filepath.Join(cfg.WorkDir, ".m2")
+	m2RepoDir := filepath.Join(m2HomeDir, "repository")
+	if err := os.MkdirAll(m2RepoDir, 0755); err != nil {
 		logger.log(fmt.Sprintf("  [WARN] 创建m2缓存目录失败(不影响构建): %v", err))
 	}
+	agentSettings := filepath.Join(m2HomeDir, "settings.xml")
 
 	args := []string{
 		"run", "--rm",
 		"-v", codeDir + ":/workspace",
-		"-v", m2CacheDir + ":/root/.m2",
+		"-v", m2RepoDir + ":/root/.m2/repository",
 	}
+	// settings 挂载：任务下发的优先；未指定时回退 Agent 默认 settings（{WorkDir}/.m2/settings.xml）
+	settingsPath := ""
+	settingsLabel := ""
 	if content := strings.TrimSpace(task.Steps.MavenSettings); content != "" {
-		// 每次构建写独立 settings.xml（工作目录下 0700 临时目录），只挂到本容器的 /root/.m2/settings.xml，构建结束即删
+		// 每次构建写独立 settings.xml（工作目录下 0700 临时目录），构建结束即删
 		settingsRoot := filepath.Join(cfg.WorkDir, ".maven-settings")
 		if err := os.MkdirAll(settingsRoot, 0700); err != nil {
 			return fmt.Errorf("创建 Maven settings 目录失败: %v", err)
@@ -550,14 +558,21 @@ func execBuild(runner *buildRunner, logger *stepLogger, task *BuildTask, codeDir
 		if err != nil {
 			return fmt.Errorf("创建 Maven settings 临时目录失败: %v", err)
 		}
-		settingsPath := filepath.Join(settingsDir, "settings.xml")
-		if err := os.WriteFile(settingsPath, []byte(content), 0600); err != nil {
+		path := filepath.Join(settingsDir, "settings.xml")
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 			os.RemoveAll(settingsDir)
 			return fmt.Errorf("写入 Maven settings 失败: %v", err)
 		}
 		defer os.RemoveAll(settingsDir)
+		settingsPath = path
+		settingsLabel = "任务下发"
+	} else if fi, err := os.Stat(agentSettings); err == nil && fi.Mode().IsRegular() && fi.Size() > 0 {
+		settingsPath = agentSettings
+		settingsLabel = "Agent 默认"
+	}
+	if settingsPath != "" {
 		args = append(args, "-v", settingsPath+":/root/.m2/settings.xml:ro")
-		logger.log("  使用 Maven Settings: /root/.m2/settings.xml")
+		logger.log(fmt.Sprintf("  使用 Maven Settings（%s）: /root/.m2/settings.xml", settingsLabel))
 	}
 	args = append(args,
 		"-w", "/workspace",
