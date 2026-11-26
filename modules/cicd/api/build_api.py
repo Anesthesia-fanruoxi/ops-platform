@@ -42,11 +42,13 @@ def trigger_build():
     branch = data.get('branch', '')
     services = data.get('services') or []  # 选中的服务 basename 列表，空=构建全部
     project_type = data.get('project_type', 'backend')  # backend / frontend
-    if not project_id:
+    multi_item_id = data.get('multi_item_id')  # 多仓库模板的仓库行 id（有值走多仓分支）
+    if not project_id and not multi_item_id:
         return error_response('请选择项目', 400)
 
     triggered_by = g.current_user.display_name() if g.current_user else 'system'
-    build, err = build_service.trigger_build(project_id, environment_id, branch, triggered_by, services, project_type)
+    build, err = build_service.trigger_build(project_id, environment_id, branch, triggered_by, services,
+                                             project_type, multi_item_id=multi_item_id)
     if err:
         return error_response(err, 400)
     return success_response(build.to_dict(), '构建已提交')

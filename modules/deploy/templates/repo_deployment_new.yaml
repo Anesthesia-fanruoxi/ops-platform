@@ -1,0 +1,71 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${app_name}
+  namespace: ${namespace}
+  labels:
+    app: ${app_name}
+spec:
+  replicas: ${replicas}
+  selector:
+    matchLabels:
+      app: ${app_name}
+  template:
+    metadata:
+      labels:
+        app: ${app_name}
+    spec:
+      imagePullSecrets:
+        - name: ${image_pull_secret}
+      containers:
+        - name: main
+          image: ${image}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: ${service_port}
+              protocol: TCP
+          env:
+            - name: PROFILE
+              value: "${profile}"
+            - name: APOLLO_META
+              value: "${apollo_meta}"
+            - name: JAVA_OPTS
+              valueFrom:
+                configMapKeyRef:
+                  name: ${java_opts_configmap}
+                  key: ${java_opts_key}
+            - name: datetime
+              value: "${tag}"
+            - name: env
+              value: "${env_label}"
+          resources:
+            limits:
+              cpu: ${cpu_limit}
+              memory: ${mem_limit}
+            requests:
+              cpu: ${cpu_request}
+              memory: ${mem_request}
+          startupProbe:
+            httpGet:
+              path: ${startup_path}
+              port: ${service_port}
+            periodSeconds: ${startup_period}
+            timeoutSeconds: 3
+            failureThreshold: ${startup_failure}
+          readinessProbe:
+            httpGet:
+              path: ${readiness_path}
+              port: ${service_port}
+            periodSeconds: ${readiness_period}
+            timeoutSeconds: 3
+            failureThreshold: ${readiness_failure}
+          livenessProbe:
+            httpGet:
+              path: ${liveness_path}
+              port: ${service_port}
+            periodSeconds: ${liveness_period}
+            timeoutSeconds: 3
+            failureThreshold: ${liveness_failure}
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30

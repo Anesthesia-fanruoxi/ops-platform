@@ -18,6 +18,10 @@ from modules.nginx.models import NginxConfig  # noqa: F401
 from modules.cicd.models import (  # noqa: F401
     GitCredential, DockerfileTemplate, CicdFlowTemplate, BuildAgent, Build
 )
+# 多仓库模板（独立表，单仓流程模板不受影响）
+from modules.cicd.multi_models import (  # noqa: F401
+    CicdMultiTemplate, CicdMultiItem, CicdMultiService
+)
 from modules.database.models import CustomDatasource  # noqa: F401
 
 
@@ -41,6 +45,30 @@ def init_db(app):
     db.init_app(app)
     with app.app_context():
         db.create_all()
+
+        # 自动迁移：多仓模板绑定 Maven Settings（老表补列；新表 create_all 已带）
+        try:
+            conn = db.engine.raw_connection()
+            cursor = conn.cursor()
+            cols = _get_columns(cursor, 'cicd_multi_templates')
+            if 'maven_settings_id' not in cols:
+                cursor.execute(_add_col_sql('cicd_multi_templates', 'maven_settings_id', 'INT NULL'))
+                conn.commit()
+            if 'publish_artifacts' not in cols:
+                cursor.execute(_add_col_sql('cicd_multi_templates', 'publish_artifacts', 'BOOLEAN DEFAULT 0'))
+                conn.commit()
+            mcols = _get_columns(cursor, 'cicd_maven_settings')
+            if 'release_url' not in mcols:
+                cursor.execute(_add_col_sql('cicd_maven_settings', 'release_url', "VARCHAR(300) DEFAULT ''"))
+                conn.commit()
+            if 'snapshot_url' not in mcols:
+                cursor.execute(_add_col_sql('cicd_maven_settings', 'snapshot_url', "VARCHAR(300) DEFAULT ''"))
+                conn.commit()
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            import logging
+            logging.getLogger('bootstrap').warning('多仓模板 maven_settings_id 迁移失败: %s', e)
 
         # 菜单种子（对齐式 upsert：菜单是前端侧边栏与角色管理权限行的单一来源）
         try:
@@ -530,6 +558,12 @@ def init_db(app):
             {'key': 'rabbitmq_pass', 'value': '', 'description': 'RabbitMQ密码'},
             {'key': 'nacos_user', 'value': 'nacos', 'description': 'Nacos用户名'},
             {'key': 'nacos_pass', 'value': '', 'description': 'Nacos密码'},
+            {'key': 'apollo_user', 'value': 'apollo', 'description': 'Apollo Portal 用户名'},
+            {'key': 'apollo_pass', 'value': 'admin', 'description': 'Apollo Portal 密码'},
+            {'key': 'es_user', 'value': 'elastic', 'description': 'Elasticsearch 用户名'},
+            {'key': 'es_pass', 'value': '', 'description': 'Elasticsearch 密码（留空沿用 default_es_pass）'},
+            {'key': 'xxl_user', 'value': 'admin', 'description': 'XXL-Job 控制台用户名'},
+            {'key': 'xxl_pass', 'value': '123456', 'description': 'XXL-Job 控制台密码'},
             {'key': 'token_expire_hours', 'value': '8', 'description': 'Token过期时间（小时），请求时滑动续期'},
             {'key': 'password_min_length', 'value': '6', 'description': '密码最小长度'},
             {'key': 'password_require_upper', 'value': '0', 'description': '密码是否必须包含大写字母（0/1）'},

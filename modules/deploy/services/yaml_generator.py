@@ -4,13 +4,37 @@ YAML生成服务
 """
 import os
 import shutil
+from datetime import datetime
 
 
 class YAMLGenerator:
     """YAML配置文件生成器"""
 
+    # 一键部署时中间件的固定端口槽位，避免端口散落；mysql-init 不占端口
+    MIDDLEWARE_PORT_OFFSETS = {
+        'mysql': 0,
+        'rabbitmq': 1,
+        'redis': 2,
+        'apollo': 3,
+        'elasticsearch': 4,
+        'eureka': 5,
+        'seata': 6,
+        'xxl-job': 7,
+        'zookeeper': 8,
+        'nacos': 9,
+        'kafka': 10,
+        'mysql-nfs': 11,
+    }
+
     def __init__(self):
         self.template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates')
+
+    def _middleware_port(self, middleware, base_port, index=0):
+        name = str(middleware).replace('.yaml', '').strip()
+        offset = self.MIDDLEWARE_PORT_OFFSETS.get(name)
+        if offset is None:
+            return int(base_port) + 20 + int(index)
+        return int(base_port) + int(offset)
 
     @staticmethod
     def _get_db_setting(key, default=''):
@@ -77,7 +101,7 @@ class YAMLGenerator:
             'hub_server': self._hub_server(),
             'redis_pass': self._get_db_setting('redis_pass'),
             'mq_pass': self._get_db_setting('rabbitmq_pass'),
-            'mysql_pass': self._get_db_setting('mysql_default_pass'),
+            'mysql_pass': self._get_db_setting('mysql_default_pass') or 'SgQHvsy9M7LWKBCz',
             'publicurl': project_config.get('publicurl', ''),
             'privateurl': project_config.get('privateurl', ''),
             'ossak': project_config.get('ossak', ''),
@@ -174,9 +198,39 @@ class YAMLGenerator:
             'data_mount': self._get_db_setting('nfs_data_mount'),
             'redis_pass': self._get_db_setting('redis_pass'),
             'mq_pass': self._get_db_setting('rabbitmq_pass'),
+            'mysql_user': self._get_db_setting('mysql_default_user', 'root'),
+            # 未配置时沿用历史默认值，保证 MySQL Secret 与依赖它的 Apollo/Seata/XXL 一致
+            'mysql_pass': self._get_db_setting('mysql_default_pass') or 'SgQHvsy9M7LWKBCz',
+            'rabbitmq_user': self._get_db_setting('rabbitmq_user', 'admin'),
+            'rabbitmq_pass': self._get_db_setting('rabbitmq_pass'),
+            'es_pass': self._get_db_setting('es_pass') or self._get_db_setting('default_es_pass'),
+            'apollo_env': env_name,
+            'apollo_env_upper': env_name.upper().replace('-', '_'),
+            'storage_class': 'statefu-nfs',
+            'image_pull_secret': 'harbor',
+            # Job 名不能重复 apply：每次生成带时间戳，重复执行由 SQL 自身幂等兜住
+            'init_job_tag': datetime.now().strftime('%Y%m%d%H%M%S'),
         }
 
         return self._replace_vars(template, variables)
+
+    @staticmethod
+    def _effective_middleware(middleware_list):
+        """Apollo/Seata/XXL 依赖 MySQL 库表；选中任一者时自动补 MySQL 与初始化 Job"""
+        def mw_name(m):
+            if isinstance(m, dict):
+                return str(m.get('name') or m.get('type') or '').strip()
+            return str(m or '').strip()
+        names = [mw_name(m).replace('.yaml', '') for m in (middleware_list or []) if mw_name(m)]
+        names = list(dict.fromkeys(names))
+        if any(x in ('apollo', 'seata', 'xxl-job') for x in names):
+            if 'mysql' not in names:
+                names.insert(0, 'mysql')
+            if 'mysql-init' not in names:
+                names.insert(names.index('mysql') + 1, 'mysql-init')
+        if 'seata' in names and 'eureka' not in names:
+            names.append('eureka')
+        return names
 
     def generate_all(self, project_config, services=None):
         """
@@ -233,11 +287,11 @@ class YAMLGenerator:
         }
 
         # 生成中间件 - 使用用户传递的middleware参数
-        middleware_list = project_config.get('middleware', [])
+        middleware_list = self._effective_middleware(project_config.get('middleware', []))
         base_middleware_port = project_config.get('middleware_port', 30090)
 
         for index, middleware in enumerate(middleware_list):
-            middleware_port = base_middleware_port + index
+            middleware_port = self._middleware_port(middleware, base_middleware_port, index)
             middleware_yaml = self.generate_middleware(
                 middleware, project_name, env_name, middleware_port
             )
@@ -247,6 +301,121 @@ class YAMLGenerator:
             })
 
         return result
+
+    def _repo_service_vars(self, project_config, svc, index):
+        """仓库风格模板变量：平台命名/namespace/Harbor 镜像 + 仓库 YAML 的资源/探针/env"""
+        from modules.deploy.services import repo_k8s_map
+        project = project_config['project_name']
+        env = project_config['env_name']
+        service = svc['service']
+        tag = str(project_config.get('tag') or 'latest')
+        hub = self._hub_server() or ''
+        image = f'{hub}/{project}-{env}/{service}:{tag}' if hub else f'{project}-{env}/{service}:{tag}'
+        env_cfg = (svc.get('env') or {}).get(env) or {
+            'profile': env, 'label': env.upper()
+        }
+        probes = svc.get('probes') or {}
+        style = probes.get('style') or 'legacy'
+
+        def probe(key, path, period, fail):
+            p = probes.get(key) or {}
+            return (p.get('path') or path, str(p.get('period') or period), str(p.get('fail') or fail))
+
+        startup_path, startup_period, startup_failure = probe('startup', '/actuator/health', 10, 30)
+        readiness_path, readiness_period, readiness_failure = probe('readiness', '/actuator/health/readiness', 5, 3)
+        liveness_path, liveness_period, liveness_failure = probe('liveness', '/actuator/health', 10, 3)
+        resources = svc.get('resources') or {}
+        limits = resources.get('limits') or {}
+        requests = resources.get('requests') or {}
+        java_opts = svc.get('java_opts') or {}
+        conv = repo_k8s_map.conventions()
+        return {
+            'app_name': f'{project}-{service}',
+            'namespace': f'{project}-{env}-service',
+            # 应用内置的 META-INF/app.properties 指向旧 Apollo，部署时统一覆盖到本环境 ConfigService
+            'apollo_meta': f'http://apollo-configservice.{project}-{env}-middleware.svc.cluster.local:8080',
+            'image': image,
+            'image_pull_secret': project_config.get('image_pull_secret') or svc.get('pull_secret') or conv.get('pull_secret', 'harbor'),
+            'service_port': str(conv.get('service_port') or 8080),
+            'service_expose_port': str(conv.get('service_expose_port') or 80),
+            'tag': tag,
+            'replicas': str(svc.get('replicas') or 1),
+            'profile': env_cfg.get('profile') or env,
+            'env_label': env_cfg.get('label') or env.upper(),
+            'java_opts_configmap': java_opts.get('config_map') or 'java-option',
+            'java_opts_key': java_opts.get('key') or 'jdk8-agent',
+            'cpu_limit': str(limits.get('cpu') or '4'),
+            'mem_limit': str(limits.get('memory') or '2Gi'),
+            'cpu_request': str(requests.get('cpu') or '100m'),
+            'mem_request': str(requests.get('memory') or '512Mi'),
+            'startup_path': startup_path,
+            'startup_period': startup_period,
+            'startup_failure': startup_failure,
+            'readiness_path': readiness_path,
+            'readiness_period': readiness_period,
+            'readiness_failure': readiness_failure,
+            'liveness_path': liveness_path,
+            'liveness_period': liveness_period,
+            'liveness_failure': liveness_failure,
+        }, style
+
+    def _render_repo_service(self, project_config, svc, index):
+        variables, style = self._repo_service_vars(project_config, svc, index)
+        dep_tpl = 'repo_deployment_new.yaml' if style == 'new' else 'repo_deployment_legacy.yaml'
+        deployment = self._replace_vars(self._read_template(dep_tpl), variables)
+        service = self._replace_vars(self._read_template('repo_service.yaml'), variables)
+        name = variables['app_name']
+        return {'name': name, 'yaml': deployment}, {'name': name, 'yaml': service}
+
+    def generate_all_repo(self, project_config, services=None):
+        """仓库风格生成：Deployment/Service 用仓库模板，public-config/middleware 仍用平台模板"""
+        from modules.deploy.services import repo_k8s_map
+        project_name = project_config['project_name']
+        env_name = project_config['env_name']
+
+        chosen = []
+        if services:
+            names = []
+            for s in services:
+                names.append(str(s.get('name') if isinstance(s, dict) else s).strip())
+            for name in names:
+                if not name:
+                    continue
+                svc = repo_k8s_map.get_service(name)
+                if svc:
+                    chosen.append(svc)
+        else:
+            chosen = repo_k8s_map.all_services()
+
+        result = {
+            'project_name': project_name,
+            'env_name': env_name,
+            'deployments': [],
+            'services': [],
+            'public_config': None,
+            'middleware': [],
+        }
+        for index, svc in enumerate(chosen):
+            dep, svc_yaml = self._render_repo_service(project_config, svc, index)
+            result['deployments'].append(dep)
+            result['services'].append(svc_yaml)
+        # 生成所选中间件 YAML（与现有模板同目录/同命名；仓库风格不自动 apply）
+        base_middleware_port = project_config.get('middleware_port', 30090)
+        for index, mw in enumerate(self._effective_middleware(project_config.get('middleware') or [])):
+            if not mw:
+                continue
+            middleware_port = self._middleware_port(mw, base_middleware_port, index)
+            mw_yaml = self.generate_middleware(mw, project_name, env_name, middleware_port)
+            result['middleware'].append({'name': mw, 'yaml': mw_yaml})
+        return result
+
+    def generate_repo_single(self, project_config, service_name, index=0):
+        """仓库风格单服务（新增服务用）"""
+        from modules.deploy.services import repo_k8s_map
+        svc = repo_k8s_map.get_service(service_name)
+        if not svc:
+            raise ValueError(f'服务「{service_name}」没有仓库 YAML 映射')
+        return self._render_repo_service(project_config, svc, index)
 
     def save_to_files(self, output_dir, yaml_content):
         """

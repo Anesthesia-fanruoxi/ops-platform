@@ -1,0 +1,115 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: zookeeper
+spec:
+  serviceName: zookeeper
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      imagePullSecrets:
+        - name: ${image_pull_secret}
+      containers:
+        - name: zookeeper
+          image: ${hub_server}/middleware/zookeeper:3.8.7
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: client
+              containerPort: 2181
+            - name: peer
+              containerPort: 2888
+            - name: election
+              containerPort: 3888
+          env:
+            - name: ZOO_MY_ID
+              value: "1"
+            - name: ZOO_SERVERS
+              value: "server.1=0.0.0.0:2888:3888;2181"
+            - name: ZOO_4LW_COMMANDS_WHITELIST
+              value: "srvr,ruok,mntr"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: datalog
+              mountPath: /datalog
+          readinessProbe:
+            tcpSocket:
+              port: 2181
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteMany
+        storageClassName: ${storage_class}
+        resources:
+          requests:
+            storage: 5Gi
+    - metadata:
+        name: datalog
+      spec:
+        accessModes:
+          - ReadWriteMany
+        storageClassName: ${storage_class}
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: zookeeper
+spec:
+  type: ClusterIP
+  selector:
+    app: zookeeper
+  ports:
+    - name: client
+      port: 2181
+      targetPort: 2181
+    - name: peer
+      port: 2888
+      targetPort: 2888
+    - name: election
+      port: 3888
+      targetPort: 3888
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper-nodeport
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: zookeeper
+spec:
+  type: NodePort
+  selector:
+    app: zookeeper
+  ports:
+    - name: client
+      port: 2181
+      targetPort: 2181
+      nodePort: ${middleware_port}

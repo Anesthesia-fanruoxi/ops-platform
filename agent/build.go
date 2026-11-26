@@ -41,12 +41,38 @@ type StepConfig struct {
 	GitCredential     *GitCredential `json:"git_credential"`
 	BuildDockerImage  string         `json:"build_docker_image"`
 	BuildCommand      string         `json:"build_command"`
+	MavenSettings     string         `json:"maven_settings_content"`
 	ArtifactDirs      []string       `json:"artifact_dirs"`
 	ArtifactDir       string         `json:"artifact_dir"` // 产物目录：各服务内统一的产物相对路径，如 target/pkg
+	// 多仓库构建的服务映射（单仓不传）：服务名与产物目录解耦，避免 bootstrap 等目录同名互相覆盖
+	Services          []ServiceSpec  `json:"services"`
 	DockerfileContent string         `json:"dockerfile_content"`
 	ImageName         string         `json:"image_name"`
 	ImageTag          string         `json:"image_tag"`
 	WebDir            string         `json:"web_dir"` // 前端发布目录：Agent 机 NFS web 挂载根 + 项目/环境/web（空=跳过发布）
+}
+
+// ServiceSpec 多仓库模板中的一个服务：服务名 + 仓库内产物目录
+type ServiceSpec struct {
+	Name    string `json:"name"`
+	Dir     string `json:"dir"`
+	JarName string `json:"jar_name"`
+}
+
+func normalizeServices(in []ServiceSpec) []ServiceSpec {
+	out := make([]ServiceSpec, 0, len(in))
+	for _, s := range in {
+		name := strings.TrimSpace(s.Name)
+		dir := strings.TrimSpace(s.Dir)
+		if dir == "" {
+			dir = "."
+		}
+		if name == "" {
+			continue
+		}
+		out = append(out, ServiceSpec{Name: name, Dir: dir, JarName: strings.TrimSpace(s.JarName)})
+	}
+	return out
 }
 
 type GitCredential struct {
@@ -102,6 +128,7 @@ func getStepsDef(projectType string) []StepDef {
 
 func executeBuild(task *BuildTask) {
 	task.Steps.ArtifactDirs = normalizeArtifactDirs(task.Steps.ArtifactDirs)
+	task.Steps.Services = normalizeServices(task.Steps.Services)
 	log.Printf("[Build#%d] 开始执行 type=%s branch=%s start_step=%d", task.BuildID, task.ProjectType, task.Branch, task.StartStep)
 
 	// 统一输出"完成构建任务"（正常/失败/取消都打印），status 在结尾或提前 return 分支确定
@@ -491,6 +518,9 @@ func execBuild(runner *buildRunner, logger *stepLogger, task *BuildTask, codeDir
 	buildImage := task.Steps.BuildDockerImage
 	if buildImage == "" {
 		// 无镜像则直接在宿主机执行（兼容）
+		if strings.TrimSpace(task.Steps.MavenSettings) != "" {
+			logger.log("  [WARN] 已选择 Maven Settings，但未配置编译镜像，宿主机构建不会自动加载")
+		}
 		parts := strings.Fields(task.Steps.BuildCommand)
 		if len(parts) == 0 {
 			return nil
@@ -509,10 +539,31 @@ func execBuild(runner *buildRunner, logger *stepLogger, task *BuildTask, codeDir
 		"run", "--rm",
 		"-v", codeDir + ":/workspace",
 		"-v", m2CacheDir + ":/root/.m2",
+	}
+	if content := strings.TrimSpace(task.Steps.MavenSettings); content != "" {
+		// 每次构建写独立 settings.xml（工作目录下 0700 临时目录），只挂到本容器的 /root/.m2/settings.xml，构建结束即删
+		settingsRoot := filepath.Join(cfg.WorkDir, ".maven-settings")
+		if err := os.MkdirAll(settingsRoot, 0700); err != nil {
+			return fmt.Errorf("创建 Maven settings 目录失败: %v", err)
+		}
+		settingsDir, err := os.MkdirTemp(settingsRoot, "build-")
+		if err != nil {
+			return fmt.Errorf("创建 Maven settings 临时目录失败: %v", err)
+		}
+		settingsPath := filepath.Join(settingsDir, "settings.xml")
+		if err := os.WriteFile(settingsPath, []byte(content), 0600); err != nil {
+			os.RemoveAll(settingsDir)
+			return fmt.Errorf("写入 Maven settings 失败: %v", err)
+		}
+		defer os.RemoveAll(settingsDir)
+		args = append(args, "-v", settingsPath+":/root/.m2/settings.xml:ro")
+		logger.log("  使用 Maven Settings: /root/.m2/settings.xml")
+	}
+	args = append(args,
 		"-w", "/workspace",
 		buildImage,
 		"sh", "-c", task.Steps.BuildCommand,
-	}
+	)
 
 	logger.log(fmt.Sprintf("  执行: docker %s", strings.Join(args, " ")))
 	return runner.runCmd(logger, codeDir, "docker", args...)
@@ -532,6 +583,22 @@ func execCollectArtifacts(logger *stepLogger, task *BuildTask, codeDir, productD
 			return err
 		}
 		logger.log("  产物收集完成，共 1 个目录")
+		return nil
+	}
+
+	// 多仓库：按服务名落盘（服务名 ≠ 目录名），排除仓库内目录名重复的问题。
+	// 产物包由服务级 jar_name 精确指定；未配置时按 Maven 默认 target/*.jar 兜底。
+	if len(task.Steps.Services) > 0 {
+		artifactSub := task.Steps.ArtifactDir
+		if artifactSub == "" {
+			artifactSub = "target/*.jar"
+		}
+		for _, svc := range task.Steps.Services {
+			if err := collectOneAs(logger, codeDir, productDir, svc.Dir, svc.Name, svc.JarName, artifactSub); err != nil {
+				return err
+			}
+		}
+		logger.log(fmt.Sprintf("  产物收集完成，共 %d 个服务（多仓库）", len(task.Steps.Services)))
 		return nil
 	}
 
@@ -586,19 +653,37 @@ func globStaticDir(svcAbs, cand string) string {
 //	  - 含通配符候选（* 或 ?）：glob 匹配收集，文件平铺、目录整拷，保留相对静态前缀的相对路径
 //	artifactSub 为空：兼容旧配置，整个服务目录复制 → product/{svc}
 func collectOne(logger *stepLogger, codeDir, productDir, svcDir, artifactSub string) error {
+	return collectOneAs(logger, codeDir, productDir, svcDir, "", "", artifactSub)
+}
+
+// collectOneAs 收集单个服务到 product/{name}。
+// name 为空时沿用目录 basename（单仓旧语义）；dir="." 表示产物在仓库根目录。
+// jarName 非空时只收集这个精确的产物包（多仓库模板的服务配置）。
+func collectOneAs(logger *stepLogger, codeDir, productDir, svcDir, name, jarName, artifactSub string) error {
 	cleanSvc := filepath.Clean(svcDir)
-	if filepath.IsAbs(cleanSvc) || strings.HasPrefix(cleanSvc, "..") {
+	if filepath.IsAbs(cleanSvc) || cleanSvc == ".." || strings.HasPrefix(cleanSvc, ".."+string(os.PathSeparator)) ||
+		strings.HasPrefix(cleanSvc, "../") || strings.HasPrefix(cleanSvc, `..\`) {
 		return fmt.Errorf("服务目录不合法(禁止绝对路径或..): %s", svcDir)
 	}
 
-	// 二次验证：解析后的服务路径必须在 codeDir 内
+	// 二次验证：解析后的服务路径必须在 codeDir 内（dir="." 时等于 codeDir）
 	svcAbs, _ := filepath.Abs(filepath.Join(codeDir, cleanSvc))
 	absBase, _ := filepath.Abs(codeDir)
-	if !strings.HasPrefix(svcAbs, absBase+string(os.PathSeparator)) {
+	if svcAbs != absBase && !strings.HasPrefix(svcAbs, absBase+string(os.PathSeparator)) {
 		return fmt.Errorf("产物路径逃逸代码目录: %s", cleanSvc)
 	}
-	dstBase := filepath.Join(productDir, filepath.Base(cleanSvc))
-	svcName := filepath.Base(cleanSvc)
+	svcName := strings.TrimSpace(name)
+	if svcName == "" && cleanSvc != "." {
+		svcName = filepath.Base(cleanSvc)
+	}
+	if svcName == "" || svcName == "." || svcName == ".." || strings.ContainsAny(svcName, `/\`) {
+		return fmt.Errorf("服务名不合法或为空: %q (目录: %s)", name, svcDir)
+	}
+	jarName = strings.TrimSpace(jarName)
+	if jarName != "" && (jarName == "." || jarName == ".." || strings.ContainsAny(jarName, `/\`)) {
+		return fmt.Errorf("产物包名不合法: %q (目录: %s)", jarName, svcDir)
+	}
+	dstBase := filepath.Join(productDir, svcName)
 
 	candidates := splitArtifactCandidates(artifactSub)
 	if len(candidates) == 0 {
@@ -620,7 +705,7 @@ func collectOne(logger *stepLogger, codeDir, productDir, svcDir, artifactSub str
 			return fmt.Errorf("产物目录不合法(禁止绝对路径或..): %s", cand)
 		}
 		if containsGlob(cand) {
-			n, err := collectGlob(logger, codeDir, cleanSvc, svcAbs, dstBase, cleanSub)
+			n, err := collectGlob(logger, codeDir, cleanSvc, svcAbs, dstBase, cleanSub, jarName)
 			if err != nil {
 				return err
 			}
@@ -640,6 +725,36 @@ func collectOne(logger *stepLogger, codeDir, productDir, svcDir, artifactSub str
 			tried = append(tried, cand+"(不存在)")
 			continue
 		}
+		if jarName != "" {
+			// 精确产物包：候选是目录时在目录下找指定包；候选是文件时文件名必须匹配
+			fi, err := os.Stat(src)
+			if err != nil {
+				tried = append(tried, cand+"(不存在)")
+				continue
+			}
+			if fi.IsDir() {
+				src = filepath.Join(src, jarName)
+			} else if filepath.Base(src) != jarName {
+				tried = append(tried, cand+"(非指定包)")
+				continue
+			}
+			absJar, _ := filepath.Abs(src)
+			if !strings.HasPrefix(absJar, absBase+string(os.PathSeparator)) {
+				return fmt.Errorf("产物路径逃逸代码目录: %s/%s/%s", cleanSvc, cleanSub, jarName)
+			}
+			if _, err := os.Stat(src); err != nil {
+				tried = append(tried, cand+"/"+jarName+"(不存在)")
+				continue
+			}
+			logger.log(fmt.Sprintf("  收集: %s/%s/%s → product/%s/%s", cleanSvc, cleanSub, jarName, svcName, jarName))
+			if err := os.MkdirAll(dstBase, 0755); err != nil {
+				return fmt.Errorf("创建产物目录失败: %v", err)
+			}
+			if err := copyFile(src, filepath.Join(dstBase, jarName)); err != nil {
+				return fmt.Errorf("复制产物失败 %s/%s/%s: %v", cleanSvc, cleanSub, jarName, err)
+			}
+			return nil
+		}
 		logger.log(fmt.Sprintf("  收集: %s/%s → product/%s/%s", cleanSvc, cleanSub, svcName, filepath.Base(cleanSub)))
 		if err := os.MkdirAll(dstBase, 0755); err != nil {
 			return fmt.Errorf("创建产物目录失败: %v", err)
@@ -649,13 +764,16 @@ func collectOne(logger *stepLogger, codeDir, productDir, svcDir, artifactSub str
 		}
 		return nil
 	}
+	if jarName != "" {
+		return fmt.Errorf("所有产物候选均未命中: %s（指定包: %s，已尝试: %s）", cleanSvc, jarName, strings.Join(tried, ", "))
+	}
 	return fmt.Errorf("所有产物候选均未命中: %s（已尝试: %s）", cleanSvc, strings.Join(tried, ", "))
 }
 
 // collectGlob 按 glob 候选收集产物：匹配 svcAbs/cand 下的文件/目录，落到 dstBase 下并保留
 // 相对静态前缀目录的相对路径（如 target/*.jar 匹配 target/x.jar → product/{svc}/x.jar）。
 // 返回收集条数（0 = 未命中，由调用方继续尝试下一候选）；非法模式亦视为未命中，由候选链统一报错。
-func collectGlob(logger *stepLogger, codeDir, cleanSvc, svcAbs, dstBase, cand string) (int, error) {
+func collectGlob(logger *stepLogger, codeDir, cleanSvc, svcAbs, dstBase, cand, jarName string) (int, error) {
 	// 静态前缀（通配符之前的目录）仍须位于代码目录内，防止 glob 路径逃逸
 	prefix := globStaticDir(svcAbs, cand)
 	if prefix != "" {
@@ -674,6 +792,13 @@ func collectGlob(logger *stepLogger, codeDir, cleanSvc, svcAbs, dstBase, cand st
 	svcName := filepath.Base(cleanSvc)
 	n := 0
 	for _, m := range matches {
+		fi, err := os.Stat(m)
+		if err != nil {
+			continue
+		}
+		if jarName != "" && (fi.IsDir() || filepath.Base(m) != jarName) {
+			continue
+		}
 		rel := filepath.Base(m)
 		if prefix != "" {
 			if r, err := filepath.Rel(prefix, m); err == nil {
@@ -682,7 +807,7 @@ func collectGlob(logger *stepLogger, codeDir, cleanSvc, svcAbs, dstBase, cand st
 		}
 		logger.log(fmt.Sprintf("  收集: %s/%s → product/%s/%s", cleanSvc, cand, svcName, filepath.ToSlash(rel)))
 		dst := filepath.Join(dstBase, rel)
-		if fi, err := os.Stat(m); err == nil && fi.IsDir() {
+		if fi.IsDir() {
 			if err := copyDir(m, dst); err != nil {
 				return n, fmt.Errorf("复制产物失败 %s/%s: %v", cleanSvc, cand, err)
 			}

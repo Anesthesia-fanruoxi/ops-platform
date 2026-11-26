@@ -33,6 +33,7 @@
 /* 单击复制 */
 .copy-cell { cursor: pointer; }
 .copy-cell:hover { background: #f5f5f5; border-radius: 2px; }
+.mw-pass-cell { display: inline-block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .copy-port { color: #d4a017; }
 
 /* 构建进度抽屉 - 日志区域（护眼模式：深青蓝底 + 浅灰字，VSCode 暗色风） */
@@ -197,6 +198,51 @@
   max-height: 412px;
   overflow-y: auto;
 }
-/* 环境信息详情弹窗：垂直水平居中 */
-.el-overlay:has(.manage-dialog) { display: flex; align-items: center; justify-content: center; }
-.manage-dialog .el-dialog { margin: 0 !important; }
+/* 环境信息详情弹窗：垂直水平居中，限制高度，内容区内部滚动 */
+.el-overlay.manage-dialog-overlay .el-overlay-dialog,
+.el-overlay:has(.manage-dialog) .el-overlay-dialog {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.el-dialog.manage-dialog {
+  margin: 0 !important;
+  height: min(820px, 88vh);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.el-dialog.manage-dialog .el-dialog__header { flex-shrink: 0; }
+.el-dialog.manage-dialog .el-dialog__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* body 内部容器和 tabs 继承 flex 高度，让 tabs header 固定、内容单独滚动 */
+.el-dialog.manage-dialog .el-dialog__body > div {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.el-dialog.manage-dialog .el-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.el-dialog.manage-dialog .el-tabs__header {
+  flex-shrink: 0;
+}
+.el-dialog.manage-dialog .el-tabs__content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+@media (max-width: 900px) {
+  .el-dialog.manage-dialog { width: 94vw !important; }
+}

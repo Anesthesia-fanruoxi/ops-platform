@@ -1,0 +1,113 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xxljob
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: xxljob
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: xxljob
+  template:
+    metadata:
+      labels:
+        app: xxljob
+    spec:
+      imagePullSecrets:
+        - name: ${image_pull_secret}
+      initContainers:
+        - name: waiting-mysql
+          image: ${hub_server}/middleware/busybox:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - until nslookup mysql.${project_name}-${env_name}-middleware.svc.cluster.local; do echo waiting for mysql; sleep 5; done;
+      containers:
+        - name: xxljob
+          image: ${hub_server}/middleware/risk-xxljob:2.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9080
+          env:
+            # 镜像 application.yml 使用带连字符的 MYSQL-* 变量
+            - name: MYSQL-HOST
+              value: "mysql"
+            - name: MYSQL-PORT
+              value: "3306"
+            - name: MYSQL-DB
+              value: "xxl_job"
+            - name: MYSQL-USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: username
+            - name: MYSQL-PWD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: password
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:mysql://mysql:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: password
+            - name: JAVA_OPTS
+              value: "-Xms512m -Xmx1024m"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+          readinessProbe:
+            tcpSocket:
+              port: 9080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: xxljob
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: xxljob
+spec:
+  type: ClusterIP
+  selector:
+    app: xxljob
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 9080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: xxljob-nodeport
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: xxljob
+spec:
+  type: NodePort
+  selector:
+    app: xxljob
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 9080
+      nodePort: ${middleware_port}

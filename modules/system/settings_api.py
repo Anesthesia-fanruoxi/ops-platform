@@ -10,10 +10,10 @@ from core.security import require_permission
 from modules.system.settings_groups import SETTING_GROUPS
 
 # 不返回值的敏感字段
-HIDDEN_FIELDS = ['nfs_ssh_pass', 'harbor_pass', 'k8s_ssh_pass', 'k8s_kubeconfig', 'nginx_ssh_pass', 'mysql_default_pass', 'redis_pass', 'rabbitmq_pass', 'nacos_pass', 'authplatform_secret']
+HIDDEN_FIELDS = ['nfs_ssh_pass', 'harbor_pass', 'k8s_ssh_pass', 'k8s_kubeconfig', 'nginx_ssh_pass', 'mysql_default_pass', 'redis_pass', 'rabbitmq_pass', 'nacos_pass', 'apollo_pass', 'es_pass', 'xxl_pass', 'authplatform_secret']
 
 # 回显字段（从 HIDDEN_FIELDS 中豁免，list 时返回真实值；中间件密码便于查看/复制）
-REVEAL_FIELDS = ['mysql_default_pass', 'redis_pass', 'rabbitmq_pass', 'nacos_pass']
+REVEAL_FIELDS = ['mysql_default_pass', 'redis_pass', 'rabbitmq_pass', 'nacos_pass', 'apollo_pass', 'es_pass', 'xxl_pass']
 
 # 只读设置：不允许通过设置接口修改（如平台密钥，改动会导致所有 Agent 通讯失效）
 READONLY_FIELDS = ['agent_comm_secret']

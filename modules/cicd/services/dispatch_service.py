@@ -84,13 +84,37 @@ def assemble_task(build, agent):
     if git_credential_id:
         git_credential = get_decrypted_credential(git_credential_id)
 
+    # 解密 Maven settings（仅本次任务体携带，不落构建快照）
+    maven_settings_content = ''
+    maven_settings_id = steps.get('maven_settings_id')
+    if maven_settings_id:
+        from modules.cicd.models import MavenSettings
+        ms = MavenSettings.query.get(maven_settings_id)
+        if ms:
+            maven_settings_content = decrypt_secret(ms.content or '')
+            if not maven_settings_content:
+                logger.warning('[dispatch] Maven Settings#%s 解密为空', maven_settings_id)
+        else:
+            logger.warning('[dispatch] Maven Settings#%s 不存在', maven_settings_id)
+
     # 部分构建：下发前将 artifact_dirs 筛成仅选中的服务（按 basename 匹配），
     # Agent 收到的是自包含任务，照常遍历即可，无需感知“选择”逻辑。空=全部
     artifact_dirs = _clean_artifact_dirs(steps.get('artifact_dirs'))
     services = steps.get('services', [])
-    if services:
-        selected = set(services)
-        artifact_dirs = [d for d in artifact_dirs if d.strip().rstrip('/').split('/')[-1] in selected]
+    # 多仓库：services 是 [{name, dir, jar_name}]，直接作为 Agent 的服务映射下发；
+    # 单仓：services 是 basename 列表，沿用原来的按目录名过滤逻辑。
+    if services and isinstance(services[0], dict):
+        srv_map = [{
+            'name': s.get('name') or '',
+            'dir': s.get('dir') or '.',
+            'jar_name': s.get('jar_name') or '',
+        } for s in services if isinstance(s, dict) and s.get('name')]
+        artifact_dirs = [s['dir'] for s in srv_map]
+    else:
+        srv_map = []
+        if services:
+            selected = set(services)
+            artifact_dirs = [d for d in artifact_dirs if d.strip().rstrip('/').split('/')[-1] in selected]
 
     return {
         'build_id': build.id,
@@ -107,8 +131,11 @@ def assemble_task(build, agent):
             'git_credential': git_credential,
             'build_docker_image': steps.get('build_docker_image', ''),
             'build_command': steps.get('build_command', ''),
+            'maven_settings_content': maven_settings_content,
             'artifact_dirs': artifact_dirs,
             'artifact_dir': steps.get('artifact_dir', ''),
+            # 服务名映射（多仓库构建才下发；单仓为空，Agent 沿用目录 basename）
+            'services': srv_map,
             'dockerfile_content': steps.get('dockerfile_content', ''),
             'image_name': steps.get('image_name', ''),
             'image_tag': steps.get('image_tag', ''),

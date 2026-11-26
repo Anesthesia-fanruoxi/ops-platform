@@ -24,7 +24,6 @@ spec:
       creationTimestamp: null
       labels:
         app: ${app_name}
-        jmx: 'true'
     spec:
       initContainers:
         - command:

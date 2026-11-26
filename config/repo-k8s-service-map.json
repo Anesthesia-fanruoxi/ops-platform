@@ -1,0 +1,2395 @@
+{
+  "source": "19 repos script/k8s (test/prod)",
+  "conventions": {
+    "namespace": "{project}-{env}-service",
+    "name": "{project}-{service}",
+    "image": "hub.hzbxhd.com/{project}-{env}/{service}:{tag}",
+    "service_type": "ClusterIP",
+    "service_port": 8080,
+    "logs": "stdout",
+    "pull_secret": "harbor",
+    "service_expose_port": 80
+  },
+  "services": [
+    {
+      "repo": "asset-distribution-platform",
+      "service": "asset-distribution-platform",
+      "yaml": {
+        "test": "asset-distribution-platform/script/k8s/test/deploy-test.yaml",
+        "prod": "asset-distribution-platform/script/k8s/prod/deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "bill-config",
+      "service": "bill-config",
+      "yaml": {
+        "test": "bill-config/script/k8s/test/bill-config-deploy-test.yaml",
+        "prod": "bill-config/script/k8s/prod/bill-config-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "bill-customer-channel",
+      "service": "bill-customer-channel",
+      "yaml": {
+        "test": "bill-customer-channel/script/k8s/test/bill-customer-channel-deploy-test.yaml",
+        "prod": "bill-customer-channel/script/k8s/prod/bill-customer-channel-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "bill-deduction",
+      "service": "bill-deduction",
+      "yaml": {
+        "test": "bill-deduction/script/k8s/test/bill-deduction-deploy-test.yaml",
+        "prod": "bill-deduction/script/k8s/prod/bill-deduction-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "bill-repayment",
+      "service": "bill-repayment",
+      "yaml": {
+        "test": "bill-repayment/script/k8s/bill-repayment/test/bill-repayment-deploy-test.yaml",
+        "prod": "bill-repayment/script/k8s/bill-repayment/prod/bill-repayment-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "bill-rights",
+      "service": "bill-rights",
+      "yaml": {
+        "test": "bill-rights/script/k8s/test/deploy-test.yaml",
+        "prod": "bill-rights/script/k8s/prod/deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "bill-service",
+      "service": "bill-service",
+      "yaml": {
+        "test": "bill-service/script/k8s/test/bill-service-deploy-test.yaml",
+        "prod": "bill-service/script/k8s/prod/bill-service-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "callcenter-service",
+      "service": "callcenter-service",
+      "yaml": {
+        "test": "callcenter-service/script/k8s/test/callcenter-service-deploy-test.yaml",
+        "prod": "callcenter-service/script/k8s/prod/callcenter-service-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "cash-gio",
+      "service": "cash-gio",
+      "yaml": {
+        "test": "cash-gio/script/k8s/test/deploy-test.yaml",
+        "prod": "cash-gio/script/k8s/prod/deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "channel-manage",
+      "service": "channel-manage",
+      "yaml": {
+        "test": "channel-manage/script/k8s/test/deploy-test.yaml",
+        "prod": "channel-manage/script/k8s/prod/deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "data-enrich",
+      "service": "data-enrich",
+      "yaml": {
+        "test": "data-enrich/script/k8s/test/deploy-test.yaml",
+        "prod": "data-enrich/script/k8s/prod/deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "fin-service",
+      "service": "fin-batch",
+      "yaml": {
+        "test": "fin-service/script/k8s/test/fin-batch/fin-batch-deploy.yaml",
+        "prod": "fin-service/script/k8s/prod/fin-batch/fin-batch-deploy.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "fin-service",
+      "service": "fin-core-service",
+      "yaml": {
+        "test": "fin-service/script/k8s/test/fin-core-service/fin-core-service-deploy.yaml",
+        "prod": "fin-service/script/k8s/prod/fin-core-service/fin-core-service-deploy.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "1500Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "invoice-service",
+      "service": "invoice-service",
+      "yaml": {
+        "test": "invoice-service/script/k8s/test/invoice-service/invoice-service-deploy.yaml",
+        "prod": "invoice-service/script/k8s/prod/invoice-service/invoice-service-deploy.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "1500Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "lite-rule-service",
+      "service": "lite-rule-service",
+      "yaml": {
+        "test": "lite-rule-service/script/k8s/test/lite-rule-service-deploy-test.yaml",
+        "prod": "lite-rule-service/script/k8s/prod/lite-rule-service-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "ocr-verify-service",
+      "service": "ocr-verify-service",
+      "yaml": {
+        "test": "ocr-verify-service/script/k8s/test/ocr-verify-service-deploy-test.yaml",
+        "prod": "ocr-verify-service/script/k8s/prod/ocr-verify-service-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "post-loan-app",
+      "service": "post-loan-app",
+      "yaml": {
+        "test": "post-loan-app/script/k8s/test/post-loan-app-deploy-test.yaml",
+        "prod": "post-loan-app/script/k8s/prod/post-loan-app-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "2524Mi"
+        },
+        "requests": {
+          "cpu": 0.1,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "new",
+        "startup": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 30
+        },
+        "readiness": {
+          "path": "/actuator/health/readiness",
+          "port": 8080,
+          "period": 5,
+          "fail": 3
+        },
+        "liveness": {
+          "path": "/actuator/health/liveness",
+          "port": 8080,
+          "period": 10,
+          "fail": 3
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8-agent"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_new.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-config",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-config/test/lq-config-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-config/prod/lq-config-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-consumer",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-consumer/test/lq-consumer-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-consumer/prod/lq-consumer-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-enterprise",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-enterprise/test/lq-enterprise-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-enterprise/prod/lq-enterprise-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-items",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-items/test/lq-items-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-items/prod/lq-items-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-log",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-log/test/lq-log-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-log/prod/lq-log-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-logistics",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-logistics/test/lq-logistics-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-logistics/prod/lq-logistics-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-member-benefit",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-member-benefit/test/lq-member-benefit-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-member-benefit/prod/lq-member-benefit-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-openplatform",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-openplatform/test/lq-openplatform-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-openplatform/prod/lq-openplatform-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-operation",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-operation/test/lq-operation-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-operation/prod/lq-operation-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-promotion",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-promotion/test/lq-promotion-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-promotion/prod/lq-promotion-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-push",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-push/test/lq-push-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-push/prod/lq-push-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-settlement",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-settlement/test/lq-settlement-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-settlement/prod/lq-settlement-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-statistics",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-statistics/test/lq-statistics-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-statistics/prod/lq-statistics-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-store",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-store/test/lq-store-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-store/prod/lq-store-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-supplier",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-supplier/test/lq-supplier-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-supplier/prod/lq-supplier-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-thirdpart",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-thirdpart/test/lq-thirdpart-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-thirdpart/prod/lq-thirdpart-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-trade",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-trade/test/lq-trade-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-trade/prod/lq-trade-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-user",
+      "yaml": {
+        "test": "backend-api/script/k8s/lq-user/test/lq-user-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/lq-user/prod/lq-user-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "ruoyi-auth",
+      "yaml": {
+        "test": "backend-api/script/k8s/ruoyi-auth/test/ruoyi-auth-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/ruoyi-auth/prod/ruoyi-auth-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "ruoyi-file",
+      "yaml": {
+        "test": "backend-api/script/k8s/ruoyi-file/test/ruoyi-file-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/ruoyi-file/prod/ruoyi-file-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "ruoyi-gateway",
+      "yaml": {
+        "test": "backend-api/script/k8s/ruoyi-gateway/test/ruoyi-gateway-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/ruoyi-gateway/prod/ruoyi-gateway-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "ruoyi-gen",
+      "yaml": {
+        "test": "backend-api/script/k8s/ruoyi-gen/test/ruoyi-gen-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/ruoyi-gen/prod/ruoyi-gen-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "ruoyi-system",
+      "yaml": {
+        "test": "backend-api/script/k8s/ruoyi-system/test/ruoyi-system-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/ruoyi-system/prod/ruoyi-system-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "xxl-job-executor",
+      "yaml": {
+        "test": "backend-api/script/k8s/xxl-job-executor/test/xxl-job-executor-deploy-test.yaml",
+        "prod": "backend-api/script/k8s/xxl-job-executor/prod/xxl-job-executor-deploy-prod.yaml"
+      },
+      "env": {
+        "test": {
+          "profile": "test",
+          "label": "DEV"
+        },
+        "prod": {
+          "profile": "prod",
+          "label": "PROD"
+        }
+      },
+      "resources": {
+        "limits": {
+          "cpu": 4,
+          "memory": "1524Mi"
+        },
+        "requests": {
+          "cpu": 0.2,
+          "memory": "512Mi"
+        }
+      },
+      "probes": {
+        "style": "legacy",
+        "startup": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 10,
+          "fail": 120
+        },
+        "readiness": {
+          "path": null,
+          "port": null,
+          "period": null,
+          "fail": null
+        },
+        "liveness": {
+          "path": "/actuator/health",
+          "port": 8080,
+          "period": 600,
+          "fail": 1
+        }
+      },
+      "replicas": 1,
+      "java_opts": {
+        "config_map": "java-option",
+        "key": "jdk8"
+      },
+      "source_pull_secret": "acr",
+      "pull_secret": "harbor",
+      "template": "repo_deployment_legacy.yaml"
+    }
+  ],
+  "missing": [
+    {
+      "repo": "bank-comp-conn",
+      "service": "bank-company-conn",
+      "reason": "no script/k8s yaml"
+    },
+    {
+      "repo": "sign-service",
+      "service": "sign-service",
+      "reason": "no script/k8s yaml"
+    },
+    {
+      "repo": "backend-api",
+      "service": "ruoyi-visual-monitor",
+      "reason": "no script/k8s yaml"
+    }
+  ],
+  "excluded": [
+    {
+      "repo": "backend-api",
+      "service": "lq-studio",
+      "reason": "no build artifact"
+    },
+    {
+      "repo": "backend-api",
+      "service": "lq-seller",
+      "reason": "not in build/template"
+    },
+    {
+      "repo": "backend-api",
+      "service": "ruoyi-job",
+      "reason": "not in build/template"
+    }
+  ],
+  "notes": [
+    "namespace/name use platform convention {project}-{env}-service / {project}-{service}",
+    "image uses Harbor hub.hzbxhd.com/{project}-{env}/{service}:{tag}",
+    "JAVA_OPTS reads ConfigMap java-option key jdk8-agent",
+    "imagePullSecret default harbor",
+    "Service is ClusterIP; Higress handles external access (port 80 -> 8080)",
+    "Deployment is applied after image build; Service is created at project creation",
+    "logs are stdout; no filebeat sidecar or NFS volumes"
+  ]
+}

@@ -9,6 +9,18 @@ from core.security import require_permission
 
 
 @require_permission('page:create')
+def repo_k8s_services():
+    """仓库风格服务映射（19 仓 script/k8s 抽取结果）"""
+    from modules.deploy.services import repo_k8s_map
+    return success_response({
+        'services': repo_k8s_map.all_services(),
+        'conventions': repo_k8s_map.conventions(),
+        'missing': repo_k8s_map.missing_services(),
+        'excluded': repo_k8s_map.excluded_services(),
+    })
+
+
+@require_permission('page:create')
 def generate_yaml():
     """
     生成YAML配置文件

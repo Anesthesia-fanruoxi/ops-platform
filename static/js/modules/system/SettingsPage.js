@@ -22,7 +22,10 @@ const SETTING_FORM_MAP = {
     mysql_default_user: 'root', mysql_default_pass: '',
     redis_user: '', redis_pass: '',
     rabbitmq_user: 'admin', rabbitmq_pass: '',
-    nacos_user: 'nacos', nacos_pass: ''
+    nacos_user: 'nacos', nacos_pass: '',
+    apollo_user: 'apollo', apollo_pass: '',
+    es_user: 'elastic', es_pass: '',
+    xxl_user: 'admin', xxl_pass: ''
   },
   platform: {
     token_expire_hours: '8',
@@ -45,7 +48,7 @@ const SETTING_PASSWORD_KEYS = [
   'authplatform_secret'
 ];
 // 中间件密码：回显显示（可在设置页查看/复制）
-const SETTING_REVEAL_KEYS = ['mysql_default_pass', 'redis_pass', 'rabbitmq_pass', 'nacos_pass'];
+const SETTING_REVEAL_KEYS = ['mysql_default_pass', 'redis_pass', 'rabbitmq_pass', 'nacos_pass', 'apollo_pass', 'es_pass', 'xxl_pass'];
 
 const SettingsPage = {
   compilerOptions: { delimiters: ['[[', ']]'] },
@@ -357,6 +360,42 @@ const SettingsPage = {
           <div class="form-group w-pass">
             <label class="form-label">密码</label>
             <input class="form-input" :type="showMwPass ? 'text' : 'password'" v-model="form.nacos_pass" placeholder="已保存的密码会显示，留空则不修改" @input="detectChange">
+          </div>
+        </div>
+
+        <div class="subsection-title">Apollo Portal</div>
+        <div class="form-row">
+          <div class="form-group w-user">
+            <label class="form-label">账号</label>
+            <input class="form-input" v-model="form.apollo_user" @input="detectChange">
+          </div>
+          <div class="form-group w-pass">
+            <label class="form-label">密码</label>
+            <input class="form-input" :type="showMwPass ? 'text' : 'password'" v-model="form.apollo_pass" placeholder="已保存的密码会显示，留空则不修改" @input="detectChange">
+          </div>
+        </div>
+
+        <div class="subsection-title">Elasticsearch</div>
+        <div class="form-row">
+          <div class="form-group w-user">
+            <label class="form-label">账号</label>
+            <input class="form-input" v-model="form.es_user" @input="detectChange">
+          </div>
+          <div class="form-group w-pass">
+            <label class="form-label">密码</label>
+            <input class="form-input" :type="showMwPass ? 'text' : 'password'" v-model="form.es_pass" placeholder="留空沿用部署配置中的 default_es_pass" @input="detectChange">
+          </div>
+        </div>
+
+        <div class="subsection-title">XXL-Job</div>
+        <div class="form-row">
+          <div class="form-group w-user">
+            <label class="form-label">账号</label>
+            <input class="form-input" v-model="form.xxl_user" @input="detectChange">
+          </div>
+          <div class="form-group w-pass">
+            <label class="form-label">密码</label>
+            <input class="form-input" :type="showMwPass ? 'text' : 'password'" v-model="form.xxl_pass" placeholder="已保存的密码会显示，留空则不修改" @input="detectChange">
           </div>
         </div>
       </div>

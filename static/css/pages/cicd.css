@@ -370,6 +370,9 @@
   padding-top: 12px;
   border-top: 1px solid #f0f2f5;
 }
+/* 多仓库模板：固定高度 85vh，仓库表格在 body 内滚动 */
+.el-dialog.cicd-dialog.multi-dialog { height: 85vh; max-height: 85vh; }
+.el-dialog.cicd-dialog.multi-dialog .el-dialog__body { overflow: auto; }
 
 /* ═══ Tab 页签美化 ═══ */
 .cicd-page .el-tabs__header { margin-bottom: 16px; }

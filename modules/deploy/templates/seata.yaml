@@ -1,0 +1,144 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: seata-config
+  namespace: ${project_name}-${env_name}-middleware
+type: Opaque
+stringData:
+  application.yml: |
+    server:
+      port: 7091
+    spring:
+      application:
+        name: seata-server
+    logging:
+      file:
+        path: /root/logs/seata
+    console:
+      user:
+        username: seata
+        password: seata
+    seata:
+      config:
+        type: file
+      registry:
+        type: eureka
+        eureka:
+          service-url: http://eureka:8761/eureka/
+          application: seata-server
+          weight: 1
+      security:
+        secretKey: SeataSecretKey0c382ef121d778043159209298fd40bf3850a017
+        tokenValidityInMilliseconds: 1800000
+        ignore:
+          urls: /,/**/*.css,/**/*.js,/**/*.html,/**/*.map,/**/*.svg,/**/*.png,/**/*.jpeg,/**/*.ico,/api/v1/auth/login,/version.json,/error
+      store:
+        mode: db
+        db:
+          datasource: druid
+          db-type: mysql
+          driver-class-name: com.mysql.cj.jdbc.Driver
+          url: jdbc:mysql://mysql:3306/seata?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+          user: "${mysql_user}"
+          password: "${mysql_pass}"
+      server:
+        service-port: 8091
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seata-server
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: seata-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seata-server
+  template:
+    metadata:
+      labels:
+        app: seata-server
+    spec:
+      imagePullSecrets:
+        - name: ${image_pull_secret}
+      containers:
+        - name: seata-server
+          image: ${hub_server}/middleware/seata-server:2.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: console
+              containerPort: 7091
+            - name: service
+              containerPort: 8091
+          env:
+            - name: SEATA_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: SEATA_PORT
+              value: "8091"
+            - name: STORE_MODE
+              value: db
+            - name: JAVA_OPTS
+              value: "-Xms1024m -Xmx1024m"
+          volumeMounts:
+            - name: seata-config
+              mountPath: /seata-server/resources/application.yml
+              subPath: application.yml
+              readOnly: true
+          resources:
+            requests:
+              cpu: 300m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          readinessProbe:
+            tcpSocket:
+              port: 8091
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+      volumes:
+        - name: seata-config
+          secret:
+            secretName: seata-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seata-server
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: seata-server
+spec:
+  type: ClusterIP
+  selector:
+    app: seata-server
+  ports:
+    - name: console
+      port: 7091
+      targetPort: 7091
+    - name: service
+      port: 8091
+      targetPort: 8091
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seata-console-nodeport
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: seata-server
+spec:
+  type: NodePort
+  selector:
+    app: seata-server
+  ports:
+    - name: console
+      port: 7091
+      targetPort: 7091
+      nodePort: ${middleware_port}

@@ -92,7 +92,7 @@ window.SvcTemplate = `
   <!-- 快捷部署弹窗（与环境信息页构建弹窗一致：分支/最近使用/服务范围/类型） -->
   <el-dialog v-model="buildDialogVisible" :title="'构建' + (buildType === 'frontend' ? '前端' : '后端') + ' - ' + (selectedProject || '') + '-' + (selectedEnv || '')"
              width="810px" top="10vh" class="build-dialog" :close-on-click-modal="false">
-    <div class="build-two-col">
+    <div class="build-two-col" :style="{ flexDirection: multiBuildMode ? 'row-reverse' : 'row' }">
       <!-- 左栏：分支 -->
       <div class="build-col">
         <div class="build-col-head">
@@ -102,6 +102,10 @@ window.SvcTemplate = `
             <el-radio-button value="frontend">前端</el-radio-button>
           </el-radio-group>
         </div>
+        <div v-if="multiBuildMode && !multiBranchReady" class="svc-col-empty" style="padding:60px 8px;text-align:center;line-height:1.8">
+          先在左侧选择第一个服务<br>系统会按第一个服务的仓库查询分支
+        </div>
+        <template v-else>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <el-switch v-model="branchTreeMode" size="small" active-text="按目录展示" />
           <span style="color:#c0c4cc;font-size:12px">共 [[ branchOptions.length ]] 个分支</span>
@@ -142,12 +146,13 @@ window.SvcTemplate = `
             </template>
           </el-tree>
         </div>
+        </template>
       </div>
-      <!-- 右栏：构建范围 -->
+      <!-- 右栏：构建范围（多仓模式下视觉上在左侧） -->
       <div class="build-col">
         <div class="build-col-head">
-          <span class="build-col-title">构建范围</span>
-          <span v-if="buildType === 'backend'" style="color:#909399;font-size:12px">全部勾选</span>
+          <span class="build-col-title">[[ multiBuildMode ? '服务' : '构建范围' ]]</span>
+          <span v-if="buildType === 'backend'" style="color:#909399;font-size:12px">[[ multiBuildMode ? '第一个服务决定分支' : '全部勾选' ]]</span>
         </div>
         <template v-if="buildType === 'backend'">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -158,10 +163,13 @@ window.SvcTemplate = `
             <div v-if="!serviceOptions.length" class="svc-col-loading">[[ servicesLoaded ? '暂未配置服务' : '加载服务中...' ]]</div>
             <div v-for="s in serviceOptions" :key="s" class="svc-service-item">
               <span style="font-family:monospace;font-size:13px">[[ s ]]</span>
-              <el-switch v-model="serviceToggles[s]" size="small" />
+              <el-switch v-model="serviceToggles[s]" size="small" @change="onMultiServiceToggle(s)" />
             </div>
           </div>
-          <div style="color:#c0c4cc;font-size:11.5px;margin-top:8px">仅对开启的服务执行产物收集 / Docker Build / Push，未开启的服务自动跳过</div>
+          <div v-if="multiBuildMode" style="color:#409eff;font-size:11.5px;margin-top:8px;line-height:1.7">
+            多仓：只查询第一个选中服务的仓库分支，后续选中的服务沿用该分支；全部取消后重新选择会再次查询。
+          </div>
+          <div v-else style="color:#c0c4cc;font-size:11.5px;margin-top:8px">仅对开启的服务执行产物收集 / Docker Build / Push，未开启的服务自动跳过</div>
         </template>
         <div v-else style="color:#909399;font-size:12px;padding:60px 0;text-align:center">
           前端构建固定 dist 产物，无服务范围选择

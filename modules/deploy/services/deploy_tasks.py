@@ -1312,6 +1312,7 @@ def _run_deploy_task(app, task_key, data):
         from modules.deploy.api.shared import get_k8s_yaml_remote_dir
         
         action = data.get('action', 'create_env')
+        yaml_style = data.get('yaml_style') or 'platform'
 
         # 新增服务走精简流程（只处理该服务，不重复环境级步骤）
         if action == 'create_service':
@@ -1422,11 +1423,13 @@ def _run_deploy_task(app, task_key, data):
                     return
 
                 generator = YAMLGenerator()
-
-                if action == 'create_project':
-                    yaml_content = generator.generate_all(data, data.get('services', []))
+                project_config = _build_project_config(project_name, env_name, data)
+                yaml_style = project_config.get('yaml_style') or 'platform'
+                log('INFO', f'  YAML 风格: {"仓库 script/k8s" if yaml_style == "repo" else "平台默认"}')
+                if yaml_style == 'repo':
+                    log('WARN', '仓库风格：中间件 namespace 需要 imagePullSecret harbor；服务 namespace 还需要 ConfigMap java-option，否则对应 Pod 无法启动')
+                    yaml_content = generator.generate_all_repo(project_config, data.get('services', []))
                 else:
-                    project_config = _build_project_config(project_name, env_name, data)
                     yaml_content = generator.generate_all(project_config, data.get('services', []))
 
                 output_setting = Setting.query.filter_by(key='yaml_output_dir').first()
@@ -1453,38 +1456,47 @@ def _run_deploy_task(app, task_key, data):
                 log('ERROR', f'YAML生成失败: {str(e)}')
 
             # ── 步骤3: 创建NFS目录 ──
-            log('INFO', '创建NFS目录...', step=f'步骤3/{total_steps}')
-            try:
-                nfs = NFSService()
-                services_list = data.get('services', [])
-                from modules.system.settings_service import get_setting
-                log('INFO', f'  挂载点: logs={get_setting("nfs_logs_mount")}, data={get_setting("nfs_data_mount")}, datastorg={get_setting("nfs_datastorg_mount")}')
-                nfs_result = nfs.create_project_dirs(project_name, env_name, services_list)
-                created = nfs_result.get('created', 0)
-                skipped = nfs_result.get('skipped', 0)
-                failed = nfs_result.get('failed', 0)
-
-                # 打印创建的目录
-                for item in nfs_result.get('dirs', []):
-                    log('INFO', f'  已创建: {item.get("path", "")} ({item.get("type", "")})')
-                for item in nfs_result.get('skipped_dirs', []):
-                    log('INFO', f'  已存在: {item.get("path", "")} ({item.get("type", "")})')
-                for item in nfs_result.get('errors', []):
-                    log('ERROR', f'  失败: {item.get("path", "")} - {item.get("error", "")}')
-
-                if failed > 0:
-                    log('WARN', f'NFS目录创建完成: {created}成功, {skipped}跳过, {failed}失败')
-                else:
-                    log('OK', f'NFS目录创建完成: {created}成功, {skipped}跳过')
+            if yaml_style == 'repo':
+                log('INFO', '仓库风格不使用 NFS，跳过 NFS 目录创建', step=f'步骤3/{total_steps}')
                 success_count += 1
-            except Exception as e:
-                fail_count += 1
-                log('ERROR', f'NFS目录创建失败: {str(e)}')
+            else:
+                log('INFO', '创建NFS目录...', step=f'步骤3/{total_steps}')
+                try:
+                    nfs = NFSService()
+                    services_list = data.get('services', [])
+                    from modules.system.settings_service import get_setting
+                    log('INFO', f'  挂载点: logs={get_setting("nfs_logs_mount")}, data={get_setting("nfs_data_mount")}, datastorg={get_setting("nfs_datastorg_mount")}')
+                    nfs_result = nfs.create_project_dirs(project_name, env_name, services_list)
+                    created = nfs_result.get('created', 0)
+                    skipped = nfs_result.get('skipped', 0)
+                    failed = nfs_result.get('failed', 0)
+
+                    # 打印创建的目录
+                    for item in nfs_result.get('dirs', []):
+                        log('INFO', f'  已创建: {item.get("path", "")} ({item.get("type", "")})')
+                    for item in nfs_result.get('skipped_dirs', []):
+                        log('INFO', f'  已存在: {item.get("path", "")} ({item.get("type", "")})')
+                    for item in nfs_result.get('errors', []):
+                        log('ERROR', f'  失败: {item.get("path", "")} - {item.get("error", "")}')
+
+                    if failed > 0:
+                        log('WARN', f'NFS目录创建完成: {created}成功, {skipped}跳过, {failed}失败')
+                    else:
+                        log('OK', f'NFS目录创建完成: {created}成功, {skipped}跳过')
+                    success_count += 1
+                except Exception as e:
+                    fail_count += 1
+                    log('ERROR', f'NFS目录创建失败: {str(e)}')
 
             # ── 步骤4: 复制 Nacos 数据（如有source_env） ──
             source_env = data.get('source_env', '')
-            log('INFO', f'复制Nacos数据（源环境: {source_env}）...' if source_env else '无数据复制需求，跳过',
-                step=f'步骤4/{total_steps}')
+            if yaml_style == 'repo':
+                # 仓库风格中间件走 PVC，不做 NFS Nacos/MySQL 数据复制
+                log('INFO', '仓库风格不做 NFS 数据复制', step=f'步骤4/{total_steps}')
+                source_env = ''
+            else:
+                log('INFO', f'复制Nacos数据（源环境: {source_env}）...' if source_env else '无数据复制需求，跳过',
+                    step=f'步骤4/{total_steps}')
             if source_env:
                 try:
                     nfs = NFSService()
@@ -1560,7 +1572,7 @@ def _run_deploy_task(app, task_key, data):
                 fail_count += 1
                 log('ERROR', f'Namespace创建失败: {str(e)}')
 
-            # ── 步骤7: 启动中间件 ──
+            # ── 步骤7: 启动中间件（仓库风格同样 apply 中间件 YAML） ──
             log('INFO', '启动中间件...', step=f'步骤7/{total_steps}')
             try:
                 k8s = K8sService()
@@ -1592,8 +1604,12 @@ def _run_deploy_task(app, task_key, data):
 
                 # 7.2 按依赖顺序应用中间件YAML
                 log('INFO', '应用中间件YAML...')
-                # 按顺序：mysql-nfs(Nacos依赖) → mysql → nacos → rabbitmq → redis
-                middleware_order = ['mysql-nfs.yaml', 'mysql.yaml', 'nacos.yaml', 'rabbitmq.yaml', 'redis.yaml']
+                # 按依赖顺序应用：数据库 → 注册/协调 → 配置 → 事务/调度/搜索 → 消息/缓存
+                middleware_order = [
+                    'mysql-nfs.yaml', 'mysql.yaml', 'mysql-init.yaml', 'eureka.yaml', 'zookeeper.yaml',
+                    'apollo.yaml', 'seata.yaml', 'xxl-job.yaml', 'elasticsearch.yaml',
+                    'nacos.yaml', 'rabbitmq.yaml', 'redis.yaml',
+                ]
                 applied_mw = []
                 skipped_mw = []
                 for mw_file in middleware_order:
@@ -1608,6 +1624,17 @@ def _run_deploy_task(app, task_key, data):
                     else:
                         skipped_mw.append(mw_file)
                         log('INFO', f'  跳过（文件不存在）: {mw_file}')
+                    # 建库/导表完成后，Apollo/Seata/XXL 才能正常连库
+                    if mw_file == 'mysql-init.yaml' and mw_file in applied_mw:
+                        log('INFO', '  等待 MySQL 初始化 Job 完成（最多5分钟）...')
+                        r3 = k8s.exec_command(
+                            f"kubectl wait --for=condition=complete job -l app=mysql-init -n {ns_middleware} --timeout=300s",
+                            timeout=320,
+                        )
+                        if r3['exit_code'] == 0:
+                            log('OK', '  MySQL 初始化 Job 已完成')
+                        else:
+                            log('ERROR', f'  MySQL 初始化 Job 未完成: {r3["stderr"]}')
                 if skipped_mw:
                     log('INFO', f'  已跳过 {len(skipped_mw)} 个: {skipped_mw}')
                 log('INFO', f'  中间件YAML应用完成: {len(applied_mw)}个已应用')
@@ -1644,8 +1671,8 @@ def _run_deploy_task(app, task_key, data):
                         for pod_status in r['stdout'].strip().split():
                             log('WARN', f'  {pod_status}')
 
-                # 7.4 MySQL数据复制（仅复制模式，有source_env时）
-                source_env = data.get('source_env', '')
+                # 7.4 MySQL数据复制（仅复制模式，有source_env时；仓库风格用 PVC，不做 NFS 复制）
+                source_env = '' if yaml_style == 'repo' else data.get('source_env', '')
                 if source_env:
                     log('INFO', 'MySQL数据复制...')
                     log('INFO', f'  停止MySQL: {ns_middleware}/mysql-0')
@@ -1758,8 +1785,12 @@ def _run_deploy_task(app, task_key, data):
                 fail_count += 1
                 log('ERROR', f'Service应用失败: {str(e)}')
 
-            # ── 步骤9: 生成Nginx配置 ──
-            if action != 'create_service':
+            # ── 步骤9: 生成Nginx配置（仓库风格由 Higress 接管） ──
+            if action == 'create_service':
+                log('INFO', '新增服务不生成Nginx配置，跳过', step=f'步骤9/{total_steps}')
+            elif yaml_style == 'repo':
+                log('INFO', '仓库风格跳过 Nginx 配置（由 Higress 接管入口）', step=f'步骤9/{total_steps}')
+            else:
                 log('INFO', '生成Nginx配置文件...', step=f'步骤9/{total_steps}')
                 try:
                     _generate_nginx_config(project_name, env_name, data, log)
@@ -1768,8 +1799,6 @@ def _run_deploy_task(app, task_key, data):
                 except Exception as e:
                     fail_count += 1
                     log('ERROR', f'Nginx配置生成失败: {str(e)}')
-            else:
-                log('INFO', '新增服务不生成Nginx配置，跳过', step=f'步骤9/{total_steps}')
 
             # ── 完成 ──
             elapsed = (datetime.now() - datetime.strptime(
@@ -1916,20 +1945,33 @@ def _run_create_service_task(app, task_key, data):
                 project_config = _build_service_project_config(env, project_name, env_name)
                 generator = YAMLGenerator()
                 service['index'] = svc_index  # 端口偏移（已避开环境内已占用的 nodePort）
-                yaml_content = {
-                    'project_name': project_name,
-                    'env_name': env_name,
-                    'deployments': [{
-                        'name': f"{project_name}-{svc_name}",
-                        'yaml': generator.generate_deployment(project_name, env_name, service, project_config)
-                    }],
-                    'services': [{
-                        'name': f"{project_name}-{svc_name}",
-                        'yaml': generator.generate_service(project_name, env_name, service, project_config)
-                    }],
-                    'public_config': None,
-                    'middleware': [],
-                }
+                yaml_style = project_config.get('yaml_style') or 'platform'
+                log('INFO', f'  YAML 风格: {"仓库 script/k8s" if yaml_style == "repo" else "平台默认"}')
+                if yaml_style == 'repo':
+                    dep, svc_yaml = generator.generate_repo_single(project_config, svc_name, svc_index)
+                    yaml_content = {
+                        'project_name': project_name,
+                        'env_name': env_name,
+                        'deployments': [dep],
+                        'services': [svc_yaml],
+                        'public_config': None,
+                        'middleware': [],
+                    }
+                else:
+                    yaml_content = {
+                        'project_name': project_name,
+                        'env_name': env_name,
+                        'deployments': [{
+                            'name': f"{project_name}-{svc_name}",
+                            'yaml': generator.generate_deployment(project_name, env_name, service, project_config)
+                        }],
+                        'services': [{
+                            'name': f"{project_name}-{svc_name}",
+                            'yaml': generator.generate_service(project_name, env_name, service, project_config)
+                        }],
+                        'public_config': None,
+                        'middleware': [],
+                    }
                 output_setting = Setting.query.filter_by(key='yaml_output_dir').first()
                 output_dir = output_setting.value if output_setting else './output'
                 saved_path = generator.save_to_files(output_dir, yaml_content)
@@ -1966,25 +2008,29 @@ def _run_create_service_task(app, task_key, data):
                 return
 
             # ── 步骤3: 创建NFS目录 ──
-            log('INFO', '创建NFS目录...', step=f'步骤3/{total_steps}')
-            try:
-                nfs = NFSService()
-                nfs_result = nfs.create_project_dirs(project_name, env_name, [service])
-                created = nfs_result.get('created', 0)
-                skipped = nfs_result.get('skipped', 0)
-                failed = nfs_result.get('failed', 0)
-                for item in nfs_result.get('dirs', []):
-                    log('INFO', f'  已创建: {item.get("path", "")} ({item.get("type", "")})')
-                for item in nfs_result.get('errors', []):
-                    log('ERROR', f'  失败: {item.get("path", "")} - {item.get("error", "")}')
-                if failed > 0:
-                    log('WARN', f'NFS目录创建: {created}成功, {skipped}跳过, {failed}失败')
-                else:
-                    log('OK', f'NFS目录创建: {created}成功, {skipped}跳过')
+            if yaml_style == 'repo':
+                log('INFO', '仓库风格不使用 NFS，跳过 NFS 目录创建', step=f'步骤3/{total_steps}')
                 success_count += 1
-            except Exception as e:
-                fail_count += 1
-                log('ERROR', f'NFS目录创建失败: {str(e)}')
+            else:
+                log('INFO', '创建NFS目录...', step=f'步骤3/{total_steps}')
+                try:
+                    nfs = NFSService()
+                    nfs_result = nfs.create_project_dirs(project_name, env_name, [service])
+                    created = nfs_result.get('created', 0)
+                    skipped = nfs_result.get('skipped', 0)
+                    failed = nfs_result.get('failed', 0)
+                    for item in nfs_result.get('dirs', []):
+                        log('INFO', f'  已创建: {item.get("path", "")} ({item.get("type", "")})')
+                    for item in nfs_result.get('errors', []):
+                        log('ERROR', f'  失败: {item.get("path", "")} - {item.get("error", "")}')
+                    if failed > 0:
+                        log('WARN', f'NFS目录创建: {created}成功, {skipped}跳过, {failed}失败')
+                    else:
+                        log('OK', f'NFS目录创建: {created}成功, {skipped}跳过')
+                    success_count += 1
+                except Exception as e:
+                    fail_count += 1
+                    log('ERROR', f'NFS目录创建失败: {str(e)}')
 
             # ── 步骤4: 应用 Service 到 K8s ──
             # 只应用 service：新增服务未触发 CI/CD 构建，镜像尚不存在，
@@ -2195,6 +2241,8 @@ def _build_service_project_config(env, project_name, env_name):
         'encrypted': cfg.get('encrypted') or common.get('encrypted', ''),
         'riskKey': cfg.get('riskKey') or common.get('riskKey', ''),
         'es_pass': cfg.get('es_pass') or common.get('es_pass', ''),
+        'yaml_style': cfg.get('yaml_style') or 'platform',
+        'image_pull_secret': cfg.get('image_pull_secret') or 'harbor',
     }
 
 
@@ -2284,7 +2332,9 @@ def _build_project_config(project_name, env_name, data):
         'riskKey': data.get('riskKey') or common.get('riskKey', ''),
         'es_pass': data.get('es_pass') or common.get('es_pass', ''),
         'seata_nacos_namespace': data.get('seata_nacos_namespace', ''),
-        'middleware': data.get('middleware', [])
+        'middleware': data.get('middleware', []),
+        'yaml_style': data.get('yaml_style') or 'platform',
+        'image_pull_secret': data.get('image_pull_secret') or 'harbor',
     }
 
 
@@ -2647,6 +2697,8 @@ def _build_deploy_config(data):
         'encrypted': data.get('encrypted') or common.get('encrypted', ''),
         'riskKey': data.get('riskKey') or common.get('riskKey', ''),
         'es_pass': data.get('es_pass') or common.get('es_pass', ''),
+        'yaml_style': data.get('yaml_style') or 'platform',
+        'image_pull_secret': data.get('image_pull_secret') or 'harbor',
     }
     return config
 

@@ -225,8 +225,8 @@ const ManagePage = {
     <!-- 构建弹窗：两栏对称（左分支 / 右构建范围），与服务信息页快捷部署一致 -->
     <el-dialog v-model="buildDialogVisible" :title="'构建' + (buildType === 'frontend' ? '前端' : '后端') + ' - ' + (buildEnv?.project || '') + '-' + (buildEnv?.environment || '')"
                width="810px" top="10vh" class="build-dialog" :close-on-click-modal="false">
-      <div class="build-two-col">
-        <!-- 左栏：分支 -->
+      <div class="build-two-col" :style="{ flexDirection: multiBuildMode ? 'row-reverse' : 'row' }">
+        <!-- 左栏：分支（多仓模式下视觉上在右侧） -->
         <div class="build-col">
           <div class="build-col-head">
             <span class="build-col-title">分支</span>
@@ -235,6 +235,10 @@ const ManagePage = {
               <el-radio-button value="frontend">前端</el-radio-button>
             </el-radio-group>
           </div>
+          <div v-if="multiBuildMode && !multiBranchReady" class="svc-col-empty" style="padding:60px 8px;text-align:center;line-height:1.8">
+            先在左侧选择第一个服务<br>系统会按第一个服务的仓库查询分支
+          </div>
+          <template v-else>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <el-switch v-model="branchTreeMode" size="small" active-text="按目录展示" />
             <span style="color:#c0c4cc;font-size:12px">共 [[ branchOptions.length ]] 个分支</span>
@@ -274,12 +278,13 @@ const ManagePage = {
               </template>
             </el-tree>
           </div>
+          </template>
         </div>
-        <!-- 右栏：构建范围 -->
+        <!-- 右栏：构建范围（多仓模式下视觉上在左侧） -->
         <div class="build-col">
           <div class="build-col-head">
-            <span class="build-col-title">构建范围</span>
-            <span v-if="buildType === 'backend'" style="color:#909399;font-size:12px">全部勾选</span>
+            <span class="build-col-title">[[ multiBuildMode ? '服务' : '构建范围' ]]</span>
+            <span v-if="buildType === 'backend'" style="color:#909399;font-size:12px">[[ multiBuildMode ? '第一个服务决定分支' : '全部勾选' ]]</span>
           </div>
           <template v-if="buildType === 'backend'">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -290,10 +295,13 @@ const ManagePage = {
               <div v-if="!serviceOptions.length" class="svc-col-loading">[[ servicesLoaded ? '暂未配置服务' : '加载服务中...' ]]</div>
               <div v-for="s in serviceOptions" :key="s" class="svc-service-item">
                 <span style="font-family:monospace;font-size:13px">[[ s ]]</span>
-                <el-switch v-model="serviceToggles[s]" size="small" />
+                <el-switch v-model="serviceToggles[s]" size="small" @change="onMultiServiceToggle(s)" />
               </div>
             </div>
-            <div style="color:#c0c4cc;font-size:11.5px;margin-top:8px">仅对开启的服务执行产物收集 / Docker Build / Push，未开启的服务自动跳过</div>
+            <div v-if="multiBuildMode" style="color:#409eff;font-size:11.5px;margin-top:8px;line-height:1.7">
+              多仓：只查询第一个选中服务的仓库分支，后续选中的服务沿用该分支；全部取消后重新选择会再次查询。
+            </div>
+            <div v-else style="color:#c0c4cc;font-size:11.5px;margin-top:8px">仅对开启的服务执行产物收集 / Docker Build / Push，未开启的服务自动跳过</div>
           </template>
           <div v-else style="color:#909399;font-size:12px;padding:60px 0;text-align:center">
             前端构建固定 dist 产物，无服务范围选择
@@ -350,7 +358,7 @@ const ManagePage = {
     </el-drawer>
 
     <!-- 详情对话框 -->
-    <el-dialog v-model="detailVisible" :title="detailEnv + ' 详细信息'" width="800px" class="manage-dialog">
+    <el-dialog v-model="detailVisible" :title="detailEnv + ' 详细信息'" width="55%" class="manage-dialog" modal-class="manage-dialog-overlay" align-center>
       <div v-if="detailData">
         <el-tabs v-model="activeTab" @tab-change="onDetailTabChange">
           <el-tab-pane :label="'服务 (' + (detailData.deployments?.length || 0) + ')'" name="service">
@@ -391,9 +399,9 @@ const ManagePage = {
                   <span v-else>-</span>
                 </template>
               </el-table-column>
-              <el-table-column label="密码" width="180">
+              <el-table-column label="密码" width="300">
                 <template #default="scope">
-                  <span v-if="scope.row.pass && scope.row.pass !== '-'" class="copy-cell" @dblclick="copyText(scope.row.pass)">[[ scope.row.pass ]]</span>
+                  <span v-if="scope.row.pass && scope.row.pass !== '-'" class="copy-cell mw-pass-cell" @dblclick="copyText(scope.row.pass)">[[ scope.row.pass ]]</span>
                   <span v-else>-</span>
                 </template>
               </el-table-column>
@@ -590,6 +598,12 @@ const ManagePage = {
       serviceOptions: [],
       servicesLoaded: false,
       buildTriggering: false,
+      multiBuildMode: false,
+      multiTemplateId: null,
+      multiServiceItemMap: {},
+      multiBranchReady: false,
+      multiBranchItemId: null,
+      multiBranchRepo: '',
       // 构建进度抽屉
       bpDrawerVisible: false,
       bpBuild: null,
@@ -709,7 +723,7 @@ const ManagePage = {
         return {
           ...dep,
           debugPort: svc ? this.getPort(svc.ports, 'debug') : '',
-          servicePort: svc ? this.getPort(svc.ports, 'service') : ''
+          servicePort: svc ? this.getPort(svc.ports, 'service', true) : ''
         };
       });
     },
@@ -730,6 +744,9 @@ const ManagePage = {
         { name: 'Redis', user: c.redis?.user || '-', pass: c.redis?.pass || '-' },
         { name: 'RabbitMQ', user: c.rabbitmq?.user || '-', pass: c.rabbitmq?.pass || '-' },
         { name: 'Nacos', user: c.nacos?.user || '-', pass: c.nacos?.pass || '-' },
+        { name: 'Apollo', user: c.apollo?.user || '-', pass: c.apollo?.pass || '-' },
+        { name: 'Elasticsearch', user: c.elasticsearch?.user || '-', pass: c.elasticsearch?.pass || '-' },
+        { name: 'XXL-Job', user: c['xxl-job']?.user || '-', pass: c['xxl-job']?.pass || '-' },
       ];
     },
     mergedMiddleware() {
@@ -742,6 +759,9 @@ const ManagePage = {
         if (n === 'redis') return c.redis;
         if (n === 'rabbitmq') return c.rabbitmq;
         if (n === 'nacos') return c.nacos;
+        if (n === 'apollo') return c.apollo;
+        if (n === 'elasticsearch') return c.elasticsearch;
+        if (n === 'xxl-job') return c['xxl-job'];
         return null;
       };
       return list.map(mw => {
@@ -892,10 +912,13 @@ const ManagePage = {
       }
       return i >= keyword.length;
     },
-    getPort(ports, name) {
+    getPort(ports, name, fallbackToServicePort = false) {
       if (!ports || !Array.isArray(ports)) return '';
       const port = ports.find(p => p.name === name);
-      return port && port.nodePort ? String(port.nodePort) : '';
+      if (!port) return '';
+      if (port.nodePort) return String(port.nodePort);
+      // 仓库风格是 ClusterIP：没有 NodePort 时显示 Service 端口（80），不能显示空
+      return fallbackToServicePort && port.port ? String(port.port) : '';
     },
     showDetail(env) {
       this.detailEnv = env.project + '-' + env.environment;
@@ -1165,26 +1188,11 @@ const ManagePage = {
       // 立即弹窗（git ls-remote 可能 1s+，分支异步加载不阻塞）
       this._initBuildDialog(row);
       this.buildDialogVisible = true;
-      if (this.buildType === 'backend') this._loadBuildServices(row);
-      // 分支异步加载：期间弹窗已可操作，显示 loading
-      this.branchLoading = true;
-      ajax('GET', '/api/cicd/builds/branches?project_id=' + row.project_id + '&project_type=' + this.buildType, null, (r) => {
-        this.branchLoading = false;
-        if (r.code === 200) {
-          let branches = r.data || [];
-          const lastBranch = (row.last_build && row.last_build.branch) || '';
-          if (lastBranch && !branches.includes(lastBranch)) branches.unshift(lastBranch);
-          this.branchOptions = branches;
-          this.branchFiltered = branches;
-        } else if (r.code === 400) {
-          // 该类型未配置模板/无 Git 地址：收起弹窗并提示
-          this.buildDialogVisible = false;
-          ElementPlus.ElMessage.error(r.message || r.msg || '该项目未配置模板');
-        } else {
-          // 网络/服务异常：保留弹窗，分支可手动输入
-          ElementPlus.ElMessage.error((r.message || r.msg || '获取分支失败') + '，可手动输入分支');
-        }
-      }, () => { this.branchLoading = false; });
+      if (this.buildType === 'backend') {
+        this._loadBuildContext(row);
+      } else {
+        this._loadSingleBuildContext(row);
+      }
     },
 
     // 初始化构建弹窗状态（恢复上次偏好 + 最近使用分支）
@@ -1197,6 +1205,12 @@ const ManagePage = {
       this.serviceToggles = {};
       this.serviceOptions = [];
       this.servicesLoaded = false;
+      this.multiBuildMode = false;
+      this.multiTemplateId = null;
+      this.multiServiceItemMap = {};
+      this.multiBranchReady = false;
+      this.multiBranchItemId = null;
+      this.multiBranchRepo = '';
       // 加载最近构建分支（下拉“最近使用”分组，按时间降序取5个）
       if (row.id) {
         ajax('GET', '/api/cicd/builds?environment_id=' + row.id, null, (r) => {
@@ -1213,6 +1227,103 @@ const ManagePage = {
       }
     },
 
+    // 多仓：先查项目的多仓模板；有则服务优先，没有则退回单仓逻辑
+    _loadBuildContext(row) {
+      ajax('GET', '/api/cicd/multi-templates/by-project/' + row.project_id, null, (r) => {
+        if (r.code !== 200 || !r.data || !(r.data.items || []).length) {
+          this._loadSingleBuildContext(row);
+          return;
+        }
+        const tpl = r.data;
+        const options = [];
+        const map = {};
+        (tpl.items || []).forEach(it => {
+          (it.services || []).forEach(svc => {
+            if (svc.enabled === false || !svc.service_name) return;
+            options.push(svc.service_name);
+            map[svc.service_name] = { item_id: it.id, repo_name: it.repo_name };
+          });
+        });
+        if (!options.length) { this._loadSingleBuildContext(row); return; }
+        this.multiBuildMode = true;
+        this.multiTemplateId = tpl.id;
+        this.multiServiceItemMap = map;
+        this.serviceOptions = Array.from(new Set(options));
+        this.servicesLoaded = true;
+        const toggles = {};
+        this.serviceOptions.forEach(s => { toggles[s] = false; });
+        this.serviceToggles = toggles;
+        this._resetMultiBranch();
+        this.branchLoading = false;
+        this.branchOptions = [];
+        this.branchFiltered = [];
+        this.recentBranches = [];
+        this.recentBranchesFiltered = [];
+      }, () => this._loadSingleBuildContext(row));
+    },
+    // 单仓：原有分支 + 服务加载
+    _loadSingleBuildContext(row) {
+      if (this.buildType === 'backend') this._loadBuildServices(row);
+      this.branchLoading = true;
+      ajax('GET', '/api/cicd/builds/branches?project_id=' + row.project_id + '&project_type=' + this.buildType, null, (r) => {
+        this.branchLoading = false;
+        if (r.code === 200) {
+          let branches = r.data || [];
+          const lastBranch = (row.last_build && row.last_build.branch) || '';
+          if (lastBranch && !branches.includes(lastBranch)) branches.unshift(lastBranch);
+          this.branchOptions = branches;
+          this.branchFiltered = branches;
+        } else if (r.code === 400) {
+          this.buildDialogVisible = false;
+          ElementPlus.ElMessage.error(r.message || r.msg || '该项目未配置模板');
+        } else {
+          ElementPlus.ElMessage.error((r.message || r.msg || '获取分支失败') + '，可手动输入分支');
+        }
+      }, () => { this.branchLoading = false; });
+    },
+    _resetMultiBranch() {
+      this.multiBranchReady = false;
+      this.multiBranchItemId = null;
+      this.multiBranchRepo = '';
+      this.buildBranch = '';
+      this.branchOptions = [];
+      this.branchFiltered = [];
+      this.recentBranches = [];
+      this.recentBranchesFiltered = [];
+      this.branchSearch = '';
+      this.branchLoading = false;
+    },
+    // 只有从“未选服务”到选中第一个服务时查询一次分支；多选沿用第一次结果
+    _ensureMultiBranch() {
+      if (!this.multiBuildMode) return;
+      const selected = this.serviceOptions.filter(s => this.serviceToggles[s]);
+      if (!selected.length) { this._resetMultiBranch(); return; }
+      if (this.multiBranchReady) return;
+      const first = selected[0];
+      const info = this.multiServiceItemMap[first];
+      if (!info) { ElementPlus.ElMessage.error('服务「' + first + '」没有关联仓库映射'); return; }
+      this.multiBranchReady = true;
+      this.multiBranchItemId = info.item_id;
+      this.multiBranchRepo = info.repo_name;
+      this.branchLoading = true;
+      this.branchOptions = [];
+      this.branchFiltered = [];
+      ajax('GET', '/api/cicd/multi-templates/items/' + info.item_id + '/branches', null, (r) => {
+        if (!this.multiBranchReady || this.multiBranchItemId !== info.item_id) return;
+        this.branchLoading = false;
+        if (r.code === 200) {
+          const branches = r.data || [];
+          this.branchOptions = branches;
+          this.branchFiltered = branches;
+          this.buildBranch = branches.includes('master') ? 'master' : (branches[0] || '');
+        } else {
+          ElementPlus.ElMessage.error((r.msg || r.message || '获取分支失败') + '，可手动输入分支');
+        }
+      }, () => { this.branchLoading = false; });
+    },
+    onMultiServiceToggle() {
+      this._ensureMultiBranch();
+    },
     // 加载服务列表（后端部分构建选择；默认全部开启；上次为部分构建时恢复勾选）
     _loadBuildServices(row) {
       const pref = this._buildPrefLoad(row.id);
@@ -1254,6 +1365,10 @@ const ManagePage = {
     // 全部勾选/取消全部：一键开关所有服务
     toggleAllServices(val) {
       this.serviceOptions.forEach(s => { this.serviceToggles[s] = !!val; });
+      if (this.multiBuildMode) {
+        if (val) this._ensureMultiBranch();
+        else this._resetMultiBranch();
+      }
     },
     // 弹窗内类型切换：重开构建弹窗（重拉分支/服务）
     onDeployTypeChange() {
@@ -1285,6 +1400,42 @@ const ManagePage = {
       if (data && data.isBranch) this.buildBranch = data.branch;
     },
     executeBuild() {
+      // 多仓：服务 → 仓库去重后走 batch；分支来自第一个选中服务
+      if (this.multiBuildMode) {
+        const selected = this.serviceOptions.filter(s => this.serviceToggles[s]);
+        if (!selected.length) {
+          ElementPlus.ElMessage.warning('请至少选择一个要构建的服务');
+          return;
+        }
+        if (!this.buildBranch || !this.buildBranch.trim()) {
+          ElementPlus.ElMessage.warning('请等待第一个服务的分支加载完成并选择分支');
+          return;
+        }
+        const itemIds = Array.from(new Set(selected.map(s => (this.multiServiceItemMap[s] || {}).item_id).filter(Boolean)));
+        if (!itemIds.length) {
+          ElementPlus.ElMessage.warning('选中服务没有关联到仓库');
+          return;
+        }
+        this.buildTriggering = true;
+        const env = this.buildEnv;
+        ajax('POST', '/api/cicd/multi-templates/' + this.multiTemplateId + '/build-batch', {
+          environment_id: env.id,
+          item_ids: itemIds,
+          services: selected,
+          branch: this.buildBranch.trim(),
+          maven_settings_id: null,
+        }, (res) => {
+          this.buildTriggering = false;
+          if (res.code === 200) {
+            ElementPlus.ElMessage.success(res.msg || ('已触发 ' + ((res.data && res.data.count) || itemIds.length) + ' 个仓库构建'));
+            this.buildDialogVisible = false;
+            this.loadEnvs();
+          } else {
+            ElementPlus.ElMessage.error(res.msg || '触发失败');
+          }
+        }, () => { this.buildTriggering = false; });
+        return;
+      }
       if (!this.buildBranch.trim()) {
         ElementPlus.ElMessage.warning('请选择或输入分支');
         return;

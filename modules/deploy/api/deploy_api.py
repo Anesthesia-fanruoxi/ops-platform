@@ -84,6 +84,19 @@ def execute_deploy_env():
     project = Project.query.get(project_id) if project_id else None
     data['project_name'] = project.name if project else 'unknown'
     data['env_name'] = (data.get('env_name') or '').strip()
+    # 从源环境继承 YAML 风格 / pull secret，避免复制环境后混用模板
+    if project_id:
+        source = Environment.query.filter_by(
+            project_id=project_id, name=(data.get('source_env') or '').strip()
+        ).first()
+        if source:
+            try:
+                cfg = json.loads(source.deploy_config or '{}')
+            except Exception:
+                cfg = {}
+            if isinstance(cfg, dict):
+                data.setdefault('yaml_style', cfg.get('yaml_style') or 'platform')
+                data.setdefault('image_pull_secret', cfg.get('image_pull_secret') or 'harbor')
     return _start_deploy('create_env', data)
 
 

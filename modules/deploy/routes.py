@@ -32,6 +32,10 @@ deploy_bp.add_url_rule('/batch-permanent-delete', 'batch_permanent_delete_async'
 deploy_bp.add_url_rule('/batch-recycle', 'batch_recycle_async', batch_recycle_async, methods=['POST'])
 deploy_bp.add_url_rule('/batch-restore', 'batch_restore_async', batch_restore_async, methods=['POST'])
 
+from modules.deploy.api.yaml_api import repo_k8s_services
+
+deploy_bp.add_url_rule('/repo-k8s-services', 'repo_k8s_services', repo_k8s_services, methods=['GET'])
+
 # ─── 环境收藏（按用户隔离：列表/新增/删除/拖拽排序） ───────────
 from modules.deploy.api.favorite_api import (
     list_favorites, add_favorite, delete_favorite, sort_favorites

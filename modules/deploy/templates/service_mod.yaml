@@ -19,11 +19,6 @@ spec:
       port: ${service_port}
       protocol: TCP
       targetPort: ${service_port}
-    - name: jmx
-      nodePort: ${jmx_port}
-      port: ${jmx_port_internal}
-      protocol: TCP
-      targetPort: ${jmx_port_internal}
   selector:
     app: ${app_name}
   sessionAffinity: None

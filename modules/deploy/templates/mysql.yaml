@@ -4,9 +4,10 @@ kind: Secret
 metadata:
   name: mysql-secret
   namespace: ${project_name}-${env_name}-middleware
-data:
-  username: cm9vdA==
-  password: U2dRSHZzeTlNN0xXS0JDeg==
+type: Opaque
+stringData:
+  username: "${mysql_user}"
+  password: "${mysql_pass}"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -63,6 +64,9 @@ spec:
                 secretKeyRef:
                   key: password
                   name: mysql-secret
+            # 初始化 Job 与 Apollo/Seata/XXL 都从其他 Pod 连接，root 必须允许非 localhost
+            - name: MYSQL_ROOT_HOST
+              value: "%"
           image: ${hub_server}/middleware/mysql:8.0.27
           imagePullPolicy: IfNotPresent
           name: mysql

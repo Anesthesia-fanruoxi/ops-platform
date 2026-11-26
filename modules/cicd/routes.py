@@ -11,6 +11,8 @@ dockerfile_bp = Blueprint('cicd_dockerfiles', __name__)
 agent_bp = Blueprint('cicd_agents', __name__)
 build_bp = Blueprint('cicd_builds', __name__)
 schedule_bp = Blueprint('cicd_schedule', __name__)
+multi_bp = Blueprint('cicd_multi', __name__)
+maven_settings_bp = Blueprint('cicd_maven_settings', __name__)
 
 # Agent 通信蓝图（双向 AES-GCM 加密，白名单放行）
 agent_comm_bp = Blueprint('cicd_agent_comm', __name__)
@@ -125,6 +127,34 @@ schedule_bp.add_url_rule('/stream', 'stream', schedule_stream, methods=['GET'])
 schedule_bp.add_url_rule('/logs/<int:log_id>', 'log_detail', schedule_log_detail, methods=['GET'])
 schedule_bp.add_url_rule('/scores', 'scores', schedule_scores, methods=['GET'])
 
+# ─── 多仓库模板（独立于单仓流程模板）──────────────────────────
+from modules.cicd.api.multi_repo_api import (
+    list_multi_templates, get_multi_template, create_multi_template,
+    update_multi_template, delete_multi_template, item_branches, build_item, build_items,
+    get_multi_template_by_project,
+)
+
+multi_bp.add_url_rule('', 'list_multi_templates', list_multi_templates, methods=['GET'])
+multi_bp.add_url_rule('', 'create_multi_template', create_multi_template, methods=['POST'])
+multi_bp.add_url_rule('/by-project/<int:project_id>', 'get_multi_template_by_project', get_multi_template_by_project, methods=['GET'])
+multi_bp.add_url_rule('/<int:tpl_id>', 'get_multi_template', get_multi_template, methods=['GET'])
+multi_bp.add_url_rule('/<int:tpl_id>', 'update_multi_template', update_multi_template, methods=['PUT'])
+multi_bp.add_url_rule('/<int:tpl_id>', 'delete_multi_template', delete_multi_template, methods=['DELETE'])
+multi_bp.add_url_rule('/items/<int:item_id>/branches', 'item_branches', item_branches, methods=['GET'])
+multi_bp.add_url_rule('/items/<int:item_id>/build', 'build_item', build_item, methods=['POST'])
+multi_bp.add_url_rule('/<int:tpl_id>/build-batch', 'build_items', build_items, methods=['POST'])
+
+# ─── Maven Settings 管理 ─────────────────────────────────────
+from modules.cicd.api.maven_settings_api import (
+    list_settings, get_setting, create_setting, update_setting, delete_setting,
+)
+
+maven_settings_bp.add_url_rule('', 'list_settings', list_settings, methods=['GET'])
+maven_settings_bp.add_url_rule('', 'create_setting', create_setting, methods=['POST'])
+maven_settings_bp.add_url_rule('/<int:setting_id>', 'get_setting', get_setting, methods=['GET'])
+maven_settings_bp.add_url_rule('/<int:setting_id>', 'update_setting', update_setting, methods=['PUT'])
+maven_settings_bp.add_url_rule('/<int:setting_id>', 'delete_setting', delete_setting, methods=['DELETE'])
+
 
 def register(app):
     """注册 CI/CD 域蓝图"""
@@ -135,3 +165,5 @@ def register(app):
     app.register_blueprint(build_bp, url_prefix='/api/cicd/builds')
     app.register_blueprint(agent_comm_bp, url_prefix='/api/cicd/agent')
     app.register_blueprint(schedule_bp, url_prefix='/api/cicd/schedule')
+    app.register_blueprint(multi_bp, url_prefix='/api/cicd/multi-templates')
+    app.register_blueprint(maven_settings_bp, url_prefix='/api/cicd/maven-settings')

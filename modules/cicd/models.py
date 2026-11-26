@@ -63,6 +63,31 @@ class DockerfileTemplate(db.Model):
         }
 
 
+class MavenSettings(db.Model):
+    """Maven settings.xml（content 落库 AES 加密；构建时按模板选择下发）"""
+    __tablename__ = 'cicd_maven_settings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    description = db.Column(db.String(200), default='')
+    content = db.Column(db.Text, default='')  # AES 加密后的 settings.xml
+    release_url = db.Column(db.String(300), default='')   # maven-releases 上传地址
+    snapshot_url = db.Column(db.String(300), default='')  # maven-snapshots 上传地址
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description or '',
+            'release_url': self.release_url or '',
+            'snapshot_url': self.snapshot_url or '',
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
+            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None,
+        }
+
+
 class ScheduleLog(db.Model):
     """调度日志：记录每次构建触发的调度决策过程"""
     __tablename__ = 'cicd_schedule_logs'
@@ -153,7 +178,7 @@ class CicdFlowTemplate(db.Model):
         if not isinstance(cfg, dict):
             cfg = {}
         # Git Docker 镜像默认（新增字段，旧数据缺省补默认，避免表单/详情读取为空）
-        defaults = {'git_docker_image': 'alpine/git:latest'}
+        defaults = {'git_docker_image': 'hub.hzbxhd.com/library/git-clone:1.0'}
         return {
             'backend': {**defaults, **(cfg.get('backend') or {})},
             'frontend': {**defaults, **(cfg.get('frontend') or {})},

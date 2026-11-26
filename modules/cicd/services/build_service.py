@@ -73,13 +73,21 @@ def _generate_build_no():
     ts = datetime.now().strftime('%Y%m%d%H%M%S')
     return f'B{ts}{random.randint(1000, 9999)}'
 
-def trigger_build(project_id, environment_id, branch, triggered_by, services=None, project_type='backend'):
+def trigger_build(project_id, environment_id, branch, triggered_by, services=None, project_type='backend',
+                  multi_item_id=None, maven_settings_id=None):
     """
     触发构建：从项目大模板快照配置，创建 pending Build 记录。
     services: 选中的服务 basename 列表，空/None = 构建全部服务。
     project_type: backend / frontend —— 从模板 configs 取对应类型的配置（语言/Git/编译/产物）。
+    multi_item_id: 非空时走多仓库模板分支（独立逻辑，不经过下面的单仓代码）。
     返回 (build, error_msg)
     """
+    # ── 多仓库分支：与单仓完全隔离，单仓逻辑保持原样 ──
+    if multi_item_id:
+        from modules.cicd.services.multi_repo_service import trigger_item_build
+        return trigger_item_build(multi_item_id, environment_id, branch, triggered_by,
+                                  maven_settings_id=maven_settings_id)
+
     # 查项目大模板
     template = CicdFlowTemplate.query.filter_by(project_id=project_id).first()
     if not template:

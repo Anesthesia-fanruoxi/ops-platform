@@ -28,30 +28,43 @@ const CreateProject = {
         <div class="form-group"><label class="form-label">项目描述</label><input class="form-input" v-model="form.desc" placeholder="如: 云商汇项目"></div>
         <div class="section-title" style="margin-top:20px">环境信息</div>
         <div class="form-group"><label class="form-label">环境名称 *</label><input class="form-input" v-model="form.envName" placeholder="如: dev、test、uat"></div>
+        <div class="form-group">
+          <label class="form-label">YAML 模板</label>
+          <select class="form-input" v-model="yamlStyle" @change="onYamlStyleChange">
+            <option value="platform">平台默认模板</option>
+            <option value="repo">仓库 script/k8s 模板（41 服务）</option>
+          </select>
+          <div v-if="yamlStyle==='repo'" class="form-hint text-warning">使用 19 仓 script/k8s 映射，资源/探针自动带入；目标 namespace 需已有 harbor pull secret 和 java-option ConfigMap</div>
+        </div>
         <div class="bg2"><button class="btn btn-default" @click="resetForm">重置</button><button class="btn btn-primary" @click="next">下一步</button></div>
       </div>
 
       <!-- Step 2: 服务列表 -->
-      <div v-if="step===2" class="page-content">
+      <div v-if="step===2" class="page-content svc-page">
         <div class="section-title">服务列表</div>
-        <div class="svc-hd"><div>服务名称</div><div>xms</div><div>xmx</div><div>副本</div><div></div></div>
-        <div v-for="(s,i) in form.services" :key="i" class="svc-row">
-          <input v-model="s.name" placeholder="服务名称">
-          <input type="number" v-model.number="s.xms">
-          <input type="number" v-model.number="s.xmx">
-          <input type="number" v-model.number="s.replicas">
-          <button class="btn bg" @click="form.services.splice(i,1)">删除</button>
+        <div v-if="yamlStyle==='repo'" class="info-box">已按仓库 YAML 映射载入 [[ form.services.length ]] 个服务；xms/xmx/副本仅作占位，实际资源以映射为准。</div>
+        <div class="svc-list-box">
+          <div class="svc-hd"><div>服务名称</div><div>xms</div><div>xmx</div><div>副本</div><div></div></div>
+          <div v-for="(s,i) in form.services" :key="i" class="svc-row">
+            <input v-model="s.name" placeholder="服务名称" :disabled="yamlStyle==='repo'">
+            <input type="number" v-model.number="s.xms" :disabled="yamlStyle==='repo'">
+            <input type="number" v-model.number="s.xmx" :disabled="yamlStyle==='repo'">
+            <input type="number" v-model.number="s.replicas" :disabled="yamlStyle==='repo'">
+            <button v-if="yamlStyle!=='repo'" class="btn bg" @click="form.services.splice(i,1)">删除</button>
+          </div>
         </div>
-        <button class="btn bd" @click="addSvc" style="margin-top:8px">+ 添加服务</button>
+        <button v-if="yamlStyle!=='repo'" class="btn bd" @click="addSvc" style="margin-top:8px">+ 添加服务</button>
         <div class="bg2"><button class="btn btn-default" @click="step=1">上一步</button><button class="btn btn-primary" @click="step=3">下一步</button></div>
       </div>
 
       <!-- Step 3: 中间件 -->
       <div v-if="step===3" class="page-content">
         <div class="section-title">选择中间件</div>
+        <div v-if="yamlStyle==='repo'" class="form-hint text-warning" style="margin-bottom:10px">创建时会按依赖顺序 apply 中间件与 Service（中间件在 {项目}-{环境}-middleware）；Deployment 和 Nginx 不 apply，分别由构建后自动部署与 Higress 处理。选中 Apollo / Seata / XXL-Job 会自动带上 MySQL 与初始化 SQL Job（建库、导表、Portal Meta）；Seata 还会带上 Eureka。</div>
+        <div v-else class="form-hint" style="margin-bottom:10px">选中 Apollo / Seata / XXL-Job 会自动附带 MySQL 与初始化 SQL Job；Seata 自动附带 Eureka。</div>
         <div class="mw-grid">
           <div v-for="mw in allMw" :key="mw.id" :class="['mw-item',{selected:mwSelected.includes(mw.id)}]" @click="toggleMw(mw.id)">
-            <div class="mw-icon">[[ mw.icon ]]</div><div class="mw-name">[[ mw.name ]]</div>
+            <div class="mw-icon">[[ mw.icon ]]</div><div class="mw-name">[[ mw.name ]]</div><div class="mw-tag">[[ mw.tag ]]</div>
           </div>
         </div>
         <div class="bg2"><button class="btn btn-default" @click="step=2">上一步</button><button class="btn btn-success" @click="step=4">下一步</button></div>
@@ -65,9 +78,10 @@ const CreateProject = {
           <tr><td>项目名称</td><td>[[ form.name ]]</td></tr>
           <tr><td>项目描述</td><td>[[ form.desc || '-' ]]</td></tr>
           <tr><td>环境名称</td><td>[[ form.envName ]]</td></tr>
+          <tr><td>YAML 模板</td><td>[[ yamlStyle==='repo' ? '仓库 script/k8s' : '平台默认' ]]</td></tr>
           <tr><td>域名</td><td>[[ form.envName ]].[[ domainSuffix ]]</td></tr>
 
-          <tr><td>端口</td><td>D:[[ portStart ]] N:[[ portStart+30 ]] J:[[ portStart+60 ]] M:[[ portStart+90 ]]</td></tr>
+          <tr><td>端口</td><td v-if="yamlStyle==='repo'">ClusterIP 80 → 8080（Higress 入口）</td><td v-else>D:[[ portStart ]] N:[[ portStart+30 ]] M:[[ portStart+90 ]]</td></tr>
           <tr><td>中间件</td><td>[[ mwSelected.join(', ') ]]</td></tr>
           <tr><td>服务列表</td><td>[[ form.services.map(s=>s.name).join(', ') ]]</td></tr>
         </tbody></table>
@@ -101,17 +115,40 @@ const CreateProject = {
       </div>
     </div>
   `,
-  data(){return{step:1,steps:['基本信息','服务列表','中间件','确认提交'],form:{name:'',desc:'',envName:'',portStart:30000,services:[]},projectValid:null,envValid:null,settings:{},domainSuffix:'hzbxhd.com',allMw:[{id:'nacos',name:'Nacos',icon:'📡'},{id:'mysql-nfs',name:'MySQL-NFS',icon:'🗄️'},{id:'redis',name:'Redis',icon:'🔴'},{id:'mysql',name:'MySQL',icon:'🐬'},{id:'rabbitmq',name:'RabbitMQ',icon:'🐰'},{id:'kafka',name:'Kafka',icon:'📨'}],mwSelected:['nacos','mysql-nfs','redis','mysql','rabbitmq'],progressVisible:false,progressLogs:[],progressDone:false,progressSuccess:false,eventSource:null,dragX:0,dragY:0,dragging:false,dragOffX:0,dragOffY:0}},
+  data(){return{step:1,yamlStyle:'platform',repoServices:[],repoMissing:[],steps:['基本信息','服务列表','中间件','确认提交'],form:{name:'',desc:'',envName:'',portStart:30000,services:[]},projectValid:null,envValid:null,settings:{},domainSuffix:'hzbxhd.com',allMw:[{id:'mysql',name:'MySQL',icon:'🐬',tag:'数据库'},{id:'mysql-nfs',name:'MySQL-NFS',icon:'🗄️',tag:'数据库/NFS'},{id:'redis',name:'Redis',icon:'🔴',tag:'缓存'},{id:'rabbitmq',name:'RabbitMQ',icon:'🐰',tag:'消息'},{id:'kafka',name:'Kafka',icon:'📨',tag:'消息'},{id:'nacos',name:'Nacos',icon:'📡',tag:'配置/注册'},{id:'apollo',name:'Apollo',icon:'🔧',tag:'配置中心'},{id:'eureka',name:'Eureka',icon:'🧭',tag:'注册中心'},{id:'zookeeper',name:'Zookeeper',icon:'🦁',tag:'协调'},{id:'seata',name:'Seata',icon:'🔗',tag:'分布式事务'},{id:'xxl-job',name:'XXL-Job',icon:'⏱️',tag:'调度'},{id:'elasticsearch',name:'Elasticsearch',icon:'🔎',tag:'搜索'}],mwSelected:['nacos','mysql-nfs','redis','mysql','rabbitmq'],progressVisible:false,progressLogs:[],progressDone:false,progressSuccess:false,eventSource:null,dragX:0,dragY:0,dragging:false,dragOffX:0,dragOffY:0}},
   computed:{portStart(){return this.form.portStart}},
   methods:{
     addSvc(){this.form.services.push({name:'',xms:2,xmx:8,replicas:1})},
     toggleMw(id){var i=this.mwSelected.indexOf(id);if(i>=0)this.mwSelected.splice(i,1);else this.mwSelected.push(id)},
     validateProject(){if(!this.form.name){this.projectValid=null;return}ajax('GET',`/api/manage/validate/project?name=${this.form.name}`,null,r=>{this.projectValid=r.data.exists})},
-    next(){if(this.step===1&&!this.form.name){showWarning('请输入项目名称');return}this.step++},
-    resetForm(){this.step=1;this.form={name:'',desc:'',envName:'',portStart:this.form.portStart,services:[]};this.projectValid=null;this.mwSelected=['nacos','mysql-nfs','redis','mysql','rabbitmq']},
+    onYamlStyleChange(){
+      if(this.yamlStyle==='repo'){ this.loadRepoServices(); }
+      else { this.form.services=[]; this.repoServices=[]; this.repoMissing=[]; }
+    },
+    loadRepoServices(){
+      ajax('GET','/api/deploy/repo-k8s-services',null,r=>{
+        if(r.code===200){
+          this.repoServices=r.data.services||[];
+          this.repoMissing=r.data.missing||[];
+          this.form.services=this.repoServices.map(s=>({name:s.service,xms:2,xmx:8,replicas:s.replicas||1}));
+        }else{
+          showError(r.msg||'加载仓库服务失败');
+        }
+      });
+    },
+    next(){
+      if(this.step===1&&!this.form.name){showWarning('请输入项目名称');return}
+      if(this.step===1&&this.yamlStyle==='repo'&&!this.form.services.length){
+        this.loadRepoServices();
+        showWarning('正在加载仓库 YAML 服务，请稍后再点下一步');
+        return;
+      }
+      this.step++;
+    },
+    resetForm(){this.step=1;this.yamlStyle='platform';this.repoServices=[];this.repoMissing=[];this.form={name:'',desc:'',envName:'',portStart:this.form.portStart,services:[]};this.projectValid=null;this.mwSelected=['nacos','mysql-nfs','redis','mysql','rabbitmq']},
     submit(){
       if(!this.form.name||!this.form.envName){showWarning('请输入项目名称和环境名称');return}
-      var p={project_name:this.form.name,project_desc:this.form.desc,env_name:this.form.envName,domain:this.form.name+this.form.envName+'.'+this.domainSuffix,debug_port:this.form.portStart,node_port:this.form.portStart+30,jmx_port:this.form.portStart+60,middleware_port:this.form.portStart+90,middleware:this.mwSelected,services:this.form.services.filter(s=>s.name)};
+      var p={project_name:this.form.name,project_desc:this.form.desc,env_name:this.form.envName,yaml_style:this.yamlStyle,image_pull_secret:'harbor',domain:this.form.name+this.form.envName+'.'+this.domainSuffix,debug_port:this.form.portStart,node_port:this.form.portStart+30,middleware_port:this.form.portStart+90,middleware:this.mwSelected,services:this.form.services.filter(s=>s.name)};
       ajax('POST','/api/deploy/execute/project',p,r=>{
         if(r.code===200){this.openProgress();}
         else showError(r.msg||'提交失败');

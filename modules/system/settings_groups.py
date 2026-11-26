@@ -31,6 +31,9 @@ SETTING_GROUPS = {
         'redis_user', 'redis_pass',
         'rabbitmq_user', 'rabbitmq_pass',
         'nacos_user', 'nacos_pass',
+        'apollo_user', 'apollo_pass',
+        'es_user', 'es_pass',
+        'xxl_user', 'xxl_pass',
     ],
     'platform': [
         'token_expire_hours',

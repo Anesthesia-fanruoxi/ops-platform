@@ -381,6 +381,10 @@ def get_environment_detail():
     if os.path.exists(mw_dir):
         for f in sorted(os.listdir(mw_dir)):
             if f.endswith('.yaml') or f.endswith('.yml'):
+                mw_name = f.replace('.yaml', '').replace('.yml', '')
+                # 初始化 Job 不是中间件，不展示访问端口/账号
+                if mw_name == 'mysql-init':
+                    continue
                 try:
                     with open(os.path.join(mw_dir, f), 'r', encoding='utf-8') as fp:
                         content = fp.read()
@@ -419,6 +423,12 @@ def get_environment_detail():
         'redis': {'user': _setting_val('redis_user'), 'pass': _setting_val('redis_pass')},
         'rabbitmq': {'user': _setting_val('rabbitmq_user'), 'pass': _setting_val('rabbitmq_pass')},
         'nacos': {'user': _setting_val('nacos_user'), 'pass': _setting_val('nacos_pass')},
+        'apollo': {'user': _setting_val('apollo_user'), 'pass': _setting_val('apollo_pass')},
+        'elasticsearch': {
+            'user': _setting_val('es_user') or 'elastic',
+            'pass': _setting_val('es_pass') or _setting_val('default_es_pass'),
+        },
+        'xxl-job': {'user': _setting_val('xxl_user'), 'pass': _setting_val('xxl_pass')},
     }
 
     return success_response(result)

@@ -1,0 +1,514 @@
+{
+  "repos": [
+    {
+      "repo_name": "asset-distribution-platform",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/asset-distribution-platform.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "asset-distribution-platform",
+          "artifact_dir": "user-service",
+          "jar_name": "asset-distribution-platform.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "bank-comp-conn",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/bank-comp-conn.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "bank-company-conn",
+          "artifact_dir": ".",
+          "jar_name": "bank-company-connection.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "bill-config",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/bill-config.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "bill-config",
+          "artifact_dir": "bootstrap",
+          "jar_name": "bill-config.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "bill-customer-channel",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/bill-customer-channel.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "bill-customer-channel",
+          "artifact_dir": "channel-service",
+          "jar_name": "bill-customer-channel.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "bill-deduction",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/bill-deduction.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "bill-deduction",
+          "artifact_dir": "bootstrap",
+          "jar_name": "bill-deduction.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "bill-repayment",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/bill-repayment.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "bill-repayment",
+          "artifact_dir": "bootstrap",
+          "jar_name": "bill-repayment.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "bill-rights",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/bill-rights.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "bill-rights",
+          "artifact_dir": "bootstrap",
+          "jar_name": "bill-rights.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "bill-service",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/bill-service.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "bill-service",
+          "artifact_dir": "web-api/bill-entrance",
+          "jar_name": "bill-service.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "callcenter-service",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/callcenter-service.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "callcenter-service",
+          "artifact_dir": ".",
+          "jar_name": "callcenter-service.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "cash-gio",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/cash-gio.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "cash-gio",
+          "artifact_dir": ".",
+          "jar_name": "cash-gio.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "channel-manage",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/channel-manage.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "channel-manage",
+          "artifact_dir": "channel-manage-system",
+          "jar_name": "channel-manage.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "data-enrich",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/data-enrich.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "data-enrich",
+          "artifact_dir": "bootstrap",
+          "jar_name": "data-enrich.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "fin-service",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/fin-service.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "fin-batch",
+          "artifact_dir": "fin-batch",
+          "jar_name": "fin-batch.jar",
+          "jvm": "17"
+        },
+        {
+          "service_name": "fin-core-service",
+          "artifact_dir": "fin-core-service",
+          "jar_name": "fin-core-service.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "invoice-service",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/invoice-service.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "invoice-service",
+          "artifact_dir": ".",
+          "jar_name": "invoice-service.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "lite-rule-service",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/lite-rule-service.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "lite-rule-service",
+          "artifact_dir": "bootstrap",
+          "jar_name": "lite-rule-service.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "ocr-verify-service",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/ocr-verify-service.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "ocr-verify-service",
+          "artifact_dir": "bootstrap",
+          "jar_name": "ocr-verify-service.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "post-loan-app",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/post-loan-app.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "post-loan-app",
+          "artifact_dir": ".",
+          "jar_name": "post-loan-app.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "sign-service",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/sign-service.git",
+      "language": "java17",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 17",
+      "services": [
+        {
+          "service_name": "sign-service",
+          "artifact_dir": ".",
+          "jar_name": "sign-service.jar",
+          "jvm": "17"
+        }
+      ]
+    },
+    {
+      "repo_name": "backend-api",
+      "git_url": "git@codeup.aliyun.com:6a5f4fb14d690fc55a27fe67/thai/backend-api.git",
+      "language": "java8",
+      "build_command": "mvn -B -DskipTests clean package",
+      "build_dir": ".",
+      "artifact_path": "target/*.jar",
+      "git_credential_name": "goshop",
+      "dockerfile_template_name": "java 8",
+      "services": [
+        {
+          "service_name": "lq-config",
+          "artifact_dir": "ruoyi-modules/lq-config",
+          "jar_name": "lq-config.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-consumer",
+          "artifact_dir": "ruoyi-modules/lq-consumer",
+          "jar_name": "lq-consumer.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-enterprise",
+          "artifact_dir": "ruoyi-modules/lq-enterprise",
+          "jar_name": "lq-enterprise.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-items",
+          "artifact_dir": "ruoyi-modules/lq-items",
+          "jar_name": "lq-items.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-log",
+          "artifact_dir": "ruoyi-modules/lq-log",
+          "jar_name": "lq-log.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-logistics",
+          "artifact_dir": "ruoyi-modules/lq-logistics",
+          "jar_name": "lq-logistics.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-member-benefit",
+          "artifact_dir": "ruoyi-modules/lq-member-benefit",
+          "jar_name": "lq-member-benefit.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-openplatform",
+          "artifact_dir": "ruoyi-modules/lq-openplatform",
+          "jar_name": "lq-openplatform.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-operation",
+          "artifact_dir": "ruoyi-modules/lq-operation",
+          "jar_name": "lq-operation.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-promotion",
+          "artifact_dir": "ruoyi-modules/lq-promotion",
+          "jar_name": "lq-promotion.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-push",
+          "artifact_dir": "ruoyi-modules/lq-push",
+          "jar_name": "lq-push.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-seller",
+          "artifact_dir": "ruoyi-modules/lq-seller",
+          "jar_name": "lq-seller.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-settlement",
+          "artifact_dir": "ruoyi-modules/lq-settlement",
+          "jar_name": "lq-settlement.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-statistics",
+          "artifact_dir": "ruoyi-modules/lq-statistics",
+          "jar_name": "lq-statistics.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-store",
+          "artifact_dir": "ruoyi-modules/lq-store",
+          "jar_name": "lq-store.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-studio",
+          "artifact_dir": "ruoyi-modules/lq-studio",
+          "jar_name": "lq-studio.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-supplier",
+          "artifact_dir": "ruoyi-modules/lq-supplier",
+          "jar_name": "lq-supplier.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-thirdpart",
+          "artifact_dir": "ruoyi-modules/lq-thirdpart",
+          "jar_name": "lq-thirdpart.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-trade",
+          "artifact_dir": "ruoyi-modules/lq-trade",
+          "jar_name": "lq-trade.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "lq-user",
+          "artifact_dir": "ruoyi-modules/lq-user",
+          "jar_name": "lq-user.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "ruoyi-auth",
+          "artifact_dir": "ruoyi-auth",
+          "jar_name": "ruoyi-auth.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "ruoyi-file",
+          "artifact_dir": "ruoyi-modules/ruoyi-file",
+          "jar_name": "ruoyi-file.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "ruoyi-gateway",
+          "artifact_dir": "ruoyi-gateway",
+          "jar_name": "ruoyi-gateway.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "ruoyi-gen",
+          "artifact_dir": "ruoyi-modules/ruoyi-gen",
+          "jar_name": "ruoyi-gen.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "ruoyi-job",
+          "artifact_dir": "ruoyi-modules/ruoyi-job",
+          "jar_name": "ruoyi-job.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "ruoyi-system",
+          "artifact_dir": "ruoyi-modules/ruoyi-system",
+          "jar_name": "ruoyi-system.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "ruoyi-visual-monitor",
+          "artifact_dir": "ruoyi-visual/ruoyi-monitor",
+          "jar_name": "ruoyi-visual-monitor.jar",
+          "jvm": "8"
+        },
+        {
+          "service_name": "xxl-job-executor",
+          "artifact_dir": "ruoyi-modules/xxl-job-executor",
+          "jar_name": "xxl-job-executor.jar",
+          "jvm": "8"
+        }
+      ]
+    }
+  ]
+}

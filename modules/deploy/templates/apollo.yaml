@@ -1,0 +1,251 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: apollo-db-secret
+  namespace: ${project_name}-${env_name}-middleware
+type: Opaque
+stringData:
+  username: "${mysql_user}"
+  password: "${mysql_pass}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apollo-configservice
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: apollo-configservice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: apollo-configservice
+  template:
+    metadata:
+      labels:
+        app: apollo-configservice
+    spec:
+      imagePullSecrets:
+        - name: ${image_pull_secret}
+      containers:
+        - name: apollo-configservice
+          image: ${hub_server}/middleware/apollo-configservice:2.5.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:mysql://mysql:3306/ApolloConfigDB?characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: apollo-db-secret
+                  key: username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: apollo-db-secret
+                  key: password
+            - name: EUREKA_INSTANCE_IP_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: EUREKA_INSTANCE_HOME_PAGE_URL
+              value: "http://$(MY_POD_IP):8080"
+            - name: JAVA_OPTS
+              value: "-Xms1024m -Xmx1024m"
+          resources:
+            requests:
+              cpu: 300m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 12
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apollo-configservice
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: apollo-configservice
+spec:
+  type: ClusterIP
+  selector:
+    app: apollo-configservice
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apollo-adminservice
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: apollo-adminservice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: apollo-adminservice
+  template:
+    metadata:
+      labels:
+        app: apollo-adminservice
+    spec:
+      imagePullSecrets:
+        - name: ${image_pull_secret}
+      containers:
+        - name: apollo-adminservice
+          image: ${hub_server}/middleware/apollo-adminservice:2.5.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8090
+          env:
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:mysql://mysql:3306/ApolloConfigDB?characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: apollo-db-secret
+                  key: username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: apollo-db-secret
+                  key: password
+            - name: EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE
+              value: "http://apollo-configservice:8080/eureka/"
+            - name: EUREKA_INSTANCE_IP_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: EUREKA_INSTANCE_HOME_PAGE_URL
+              value: "http://$(MY_POD_IP):8090"
+            - name: JAVA_OPTS
+              value: "-Xms1024m -Xmx1024m"
+          resources:
+            requests:
+              cpu: 300m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          readinessProbe:
+            tcpSocket:
+              port: 8090
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 12
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apollo-adminservice
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: apollo-adminservice
+spec:
+  type: ClusterIP
+  selector:
+    app: apollo-adminservice
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apollo-portal
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: apollo-portal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: apollo-portal
+  template:
+    metadata:
+      labels:
+        app: apollo-portal
+    spec:
+      imagePullSecrets:
+        - name: ${image_pull_secret}
+      containers:
+        - name: apollo-portal
+          image: ${hub_server}/middleware/apollo-portal:2.5.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8070
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:mysql://mysql:3306/ApolloPortalDB?characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: apollo-db-secret
+                  key: username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: apollo-db-secret
+                  key: password
+            - name: APOLLO_PORTAL_ENVS
+              value: "${apollo_env}"
+            - name: "${apollo_env_upper}_META"
+              value: "http://apollo-configservice:8080"
+            - name: JAVA_OPTS
+              value: "-Xms1024m -Xmx1024m"
+          resources:
+            requests:
+              cpu: 300m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          readinessProbe:
+            tcpSocket:
+              port: 8070
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 12
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apollo-portal
+  namespace: ${project_name}-${env_name}-middleware
+  labels:
+    app: apollo-portal
+spec:
+  # NodePort 由集群自动分配，避免多环境固定端口冲突
+  type: NodePort
+  selector:
+    app: apollo-portal
+  ports:
+    - name: http
+      port: 8070
+      targetPort: 8070
+      nodePort: ${middleware_port}
