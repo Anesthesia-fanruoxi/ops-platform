@@ -73,6 +73,8 @@ DELETE {harbor}/api/v2.0/projects/middleware/repositories/ops-platform/artifacts
 | 1.40 | 2026-11-26 | 多仓批次按仓库展示、服务名推导仓库（同仓多服务只建一个构建）；保留策略按批次且跳过运行中目录；日志 SSE 提速（Agent 200ms 增量读+首帧只回放 200KB，Master 用 DB 状态兜底结束判定、轮询 0.2s，前端按帧渲染） | f2336d8 | sha256:e210b11b27e51d2251e9a5930365f7b29aa7273a28ea283fe7f5f04afa2de760 |
 | 1.41 | 2026-11-26 | 修复多仓并发构建互相删镜像（cash-gio 推送报「镜像本地不存在」）：Agent 构建前清理改为按本次产出的服务镜像逐个保留最新 1 个；Agent 重启自愈——新进程 running_count=0 时把遗留在途构建置失败、补跳步骤、释放环境锁并重新调度 | 82ea250 | sha256:b92b28d2a9ed67c89f77d23e0d201d3974b5fab193093a76235d2f20f3053f9d |
 | 1.42 | 2026-11-26 | 多仓库「仅制品」前置仓库（ruoyi-common 类库只发私仓不打镜像，批次自动带上并优先，其他仓库调度侧排队等它）；服务信息页接入 Apollo 配置（Portal 地址解析、namespace 切换与发布对比） | 30c6e7c | sha256:3d0e6147558c7eeaba6b8a2fc29186a06ff5706c73861627fb210d4e6c49a2fd |
+| 1.43 | 2026-11-26 | 工作区构建（未单独入库）：服务端口以各仓库真实监听的 service_port 生成容器端口/Service/探针；Apollo Portal NodePort 解析增加容器化环境查 K8s Service 的兜底与 30s 缓存 | a13bb8f（对应提交） | sha256:d7c0ad0f070836187d757d0a3bb5e5f67969ef5de404d4ef532e94006f05029e |
+| 1.44 | 2026-11-27 | Apollo 配置读取提速：会话按 Portal 地址复用、去掉每次 26KB 的 /apps 登录校验，envs/appId/namespace 列表进程级缓存；配置内容只取指定 namespace 的 items，namespace 下拉拆独立接口并行加载，切换 namespace 只发一次 items 请求（实测 2.05s → 57~283ms） | 1fe79fa | sha256:75e797288c971e86c23da6a1f989f9b7416e946eead1242e1282623df10d8c97 |
 
-> 下一版本：**1.43**（build 时自动递增并回填本表）
+> 下一版本：**1.45**（build 时自动递增并回填本表）
 > 历史行中 tag 已从仓库清理（仅保留最近 3 个），行本身保留作构建历史记录
