@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
       - name: redis
-        image: ${hub_server}/middleware/redis:latest
+        image: ${hub_server}/middleware/redis:8.0.4
         volumeMounts:
         - name: redis-config
           mountPath: "/usr/local/etc/redis"
