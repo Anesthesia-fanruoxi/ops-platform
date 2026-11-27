@@ -286,3 +286,38 @@ POST /api/cicd/multi-templates/<template_id>/build-batch
 只构建选中的服务；未选择服务的仓库不产生 Build。
 
 注意：当前数据库里的多仓模板 `id=2` 绑定在 `project_id=14`，而 goshop 项目是 `project_id=15`；环境页按项目查模板会查不到，需要把模板重新保存/导入到 goshop 项目后再验证。
+
+## 8. 2026-11-27 多仓支持前端
+
+多仓模板的仓库行新增「后端 / 前端」类型与前端「发布目录」，同一模板可同时管理前后端仓库。
+
+### 8.1 模型与配置
+
+- `cicd_multi_items` 新增：`project_type`（backend/frontend，默认 backend）、`publish_dir`（前端发布子目录）。
+- 启动迁移在 `core/bootstrap.py` 自动补列。
+- 前端行忽略 Dockerfile、仅制品、Maven Settings；编译镜像/命令单独配置（默认 `npm install && npm run build`）。
+- 发布目录相对项目/环境 Web 根：`{Agent frontend_mount_dir}/{项目}/{环境}/{publish_dir}`，默认仓库名；同模板内不允许重复，避免多个前端互相覆盖。
+
+### 8.2 构建与发布
+
+- `trigger_item_build` 按仓库类型生成 Build：前端 `project_type=frontend`、5 步（clone/build/collect/publish/notify），不产镜像、不做自动部署。
+- `dispatch_service` 组装任务时按快照里的 `publish_dir` 计算 `web_dir`；单仓前端仍为 `.../{项目}/{环境}/web`。
+- `auto_deploy` 对前端构建直接跳过 K8s 部署，只补发版通知。
+- 纯前端批次不会自动并入「仅制品」后端仓库；混合批次仍保留仅制品前置门禁。
+
+### 8.3 页面入口
+
+- CICD「多仓库模板」：仓库表格增加类型、发布目录列；导入/导出 JSON 支持 `project_type` / `publish_dir`。
+- 环境信息页、服务信息页的构建弹窗按当前类型筛选模板仓库：后端仍按服务选择，前端按前端仓库（应用）选择，统一使用第一个选中项的分支。
+
+### 8.4 Nginx 侧
+
+每个前端仓库对应一份 server block，`root` 指向自己的发布目录（nginx 节点把同一 NFS 共享挂到本地 Web 根，现有为 `/www`；Agent 侧挂载根以 `frontend_mount_dir` 为准）：
+
+```text
+{项目}/{环境}/platform                    -> /www/thai/uat/platform
+{项目}/{环境}/service-store-web           -> /www/thai/uat/service-store-web
+{项目}/{环境}/unify-repayment-manage-ui   -> /www/thai/uat/unify-repayment-manage-ui
+```
+
+`/prod-api/` 按各前端实际网关 NodePort 反代。

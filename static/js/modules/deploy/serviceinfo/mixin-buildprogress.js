@@ -155,7 +155,7 @@ const SvcMixinBuildProgress = {
       if (!row || !row.build_id) return;
       this.openProgressDrawer({
         id: row.build_id, build_no: row.build_no, status: row.status,
-        project_type: 'backend', branch: row.branch,
+        project_type: row.project_type || 'backend', branch: row.branch,
       });
     },
     // ═══════════ 构建进度抽屉（与环境信息页一致） ═══════════

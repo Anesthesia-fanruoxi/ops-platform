@@ -134,11 +134,7 @@ const SvcMixinQuickBuild = {
 
       this._initBuildDialog(row);
       this.buildDialogVisible = true;
-      if (this.buildType === 'backend') {
-        this._loadBuildContext(row);
-      } else {
-        this._loadSingleBuildContext(row);
-      }
+      this._loadBuildContext(row);
     },
     // 初始化构建弹窗状态（恢复上次偏好 + 最近使用分支）
     _initBuildDialog(row) {
@@ -180,15 +176,24 @@ const SvcMixinQuickBuild = {
           return;
         }
         const tpl = r.data;
+        const items = (tpl.items || []).filter(it => ((it.project_type || 'backend') === this.buildType));
         const options = [];
         const map = {};
-        (tpl.items || []).forEach(it => {
-          (it.services || []).forEach(svc => {
-            if (svc.enabled === false || !svc.service_name) return;
-            options.push(svc.service_name);
-            map[svc.service_name] = { item_id: it.id, repo_name: it.repo_name };
+        if (this.buildType === 'frontend') {
+          items.forEach(it => {
+            if (it.enabled === false || !it.repo_name) return;
+            options.push(it.repo_name);
+            map[it.repo_name] = { item_id: it.id, repo_name: it.repo_name };
           });
-        });
+        } else {
+          items.forEach(it => {
+            (it.services || []).forEach(svc => {
+              if (svc.enabled === false || !svc.service_name) return;
+              options.push(svc.service_name);
+              map[svc.service_name] = { item_id: it.id, repo_name: it.repo_name };
+            });
+          });
+        }
         if (!options.length) { this._loadSingleBuildContext(row); return; }
         this.multiBuildMode = true;
         this.multiTemplateId = tpl.id;
@@ -340,22 +345,23 @@ const SvcMixinQuickBuild = {
     executeBuild() {
       if (this.multiBuildMode) {
         const selected = this.serviceOptions.filter(s => this.serviceToggles[s]);
-        if (!selected.length) { ElementPlus.ElMessage.warning('请至少选择一个要构建的服务'); return; }
+        if (!selected.length) { ElementPlus.ElMessage.warning('请至少选择一个要构建的' + (this.buildType === 'frontend' ? '前端应用' : '服务')); return; }
         if (!this.buildBranch || !this.buildBranch.trim()) {
-          ElementPlus.ElMessage.warning('请等待第一个服务的分支加载完成并选择分支');
+          ElementPlus.ElMessage.warning('请等待第一个' + (this.buildType === 'frontend' ? '前端应用' : '服务') + '的分支加载完成并选择分支');
           return;
         }
         const itemIds = Array.from(new Set(selected.map(s => (this.multiServiceItemMap[s] || {}).item_id).filter(Boolean)));
-        if (!itemIds.length) { ElementPlus.ElMessage.warning('选中服务没有关联到仓库'); return; }
+        if (!itemIds.length) { ElementPlus.ElMessage.warning('选中' + (this.buildType === 'frontend' ? '前端应用' : '服务') + '没有关联到仓库'); return; }
         this.buildTriggering = true;
         const env = this.buildEnv;
-        ajax('POST', '/api/cicd/multi-templates/' + this.multiTemplateId + '/build-batch', {
+        const payload = {
           environment_id: env.id,
           item_ids: itemIds,
-          services: selected,
           branch: this.buildBranch.trim(),
           maven_settings_id: null,
-        }, (res) => {
+        };
+        if (this.buildType !== 'frontend') payload.services = selected;
+        ajax('POST', '/api/cicd/multi-templates/' + this.multiTemplateId + '/build-batch', payload, (res) => {
           this.buildTriggering = false;
           if (res.code === 200) {
             ElementPlus.ElMessage.success(res.msg || ('已触发 ' + ((res.data && res.data.count) || itemIds.length) + ' 个仓库构建'));

@@ -423,11 +423,11 @@ const CicdConfigPage = {
         <el-select v-model="multiForm.maven_settings_id" clearable placeholder="不指定（使用 Agent 默认 settings.xml）" style="width:100%">
           <el-option v-for="m in mavenSettings" :key="m.id" :label="m.name" :value="m.id" />
         </el-select>
-        <div style="font-size:12px;color:#909399;line-height:1.6;margin-top:4px">该模板下所有仓库的默认 Maven settings，构建时可再覆盖</div>
+        <div style="font-size:12px;color:#909399;line-height:1.6;margin-top:4px">后端仓库的默认 Maven settings（前端仓库忽略），构建时可再覆盖</div>
       </el-form-item>
       <el-form-item label="发布制品">
         <el-switch v-model="multiForm.publish_artifacts" />
-        <span style="font-size:12px;color:#909399;margin-left:8px">构建后自动 deploy 到所选 Settings 的 releases/snapshots；编译命令只写 package，不要再写 deploy</span>
+        <span style="font-size:12px;color:#909399;margin-left:8px">后端仓库构建后自动 deploy 到所选 Settings 的 releases/snapshots（前端仓库忽略）；编译命令只写 package，不要再写 deploy</span>
       </el-form-item>
     </el-form>
 
@@ -443,6 +443,14 @@ const CicdConfigPage = {
     </div>
     <el-table :data="multiForm.items" border size="small" style="width:100%" @selection-change="onMultiSelectionChange">
       <el-table-column type="selection" width="42" :selectable="row => !!row.id" />
+      <el-table-column label="类型" width="96">
+        <template #default="{ row }">
+          <el-select v-model="row.project_type" size="small" style="width:100%" @change="onMultiItemTypeChange(row)">
+            <el-option label="后端" value="backend" />
+            <el-option label="前端" value="frontend" />
+          </el-select>
+        </template>
+      </el-table-column>
       <el-table-column label="Git 地址" min-width="220">
         <template #default="{ row }"><el-input v-model="row.git_url" size="small" placeholder="git@codeup...:group/repo.git" /></template>
       </el-table-column>
@@ -457,27 +465,39 @@ const CicdConfigPage = {
         </template>
       </el-table-column>
       <el-table-column label="编译镜像" width="170">
-        <template #default="{ row }"><el-input v-model="row.build_docker_image" size="small" placeholder="hub.hzbxhd.com/library/java17-maven:1.0（留空用宿主机）" /></template>
+        <template #default="{ row }"><el-input v-model="row.build_docker_image" size="small" :placeholder="row.project_type === 'frontend' ? '如 node:18（留空用宿主机）' : 'hub.hzbxhd.com/library/java17-maven:1.0（留空用宿主机）'" /></template>
       </el-table-column>
       <el-table-column label="编译命令" min-width="200">
-        <template #default="{ row }"><el-input v-model="row.build_command" size="small" placeholder="mvn -B -DskipTests clean package" /></template>
+        <template #default="{ row }"><el-input v-model="row.build_command" size="small" :placeholder="row.project_type === 'frontend' ? 'npm install && npm run build' : 'mvn -B -DskipTests clean package'" /></template>
       </el-table-column>
       <el-table-column label="Dockerfile" width="150">
         <template #default="{ row }">
-          <el-select v-model="row.dockerfile_template_id" size="small" clearable :disabled="!!row.artifact_only" placeholder="选择" style="width:100%">
+          <el-select v-if="row.project_type !== 'frontend'" v-model="row.dockerfile_template_id" size="small" clearable :disabled="!!row.artifact_only" placeholder="选择" style="width:100%">
             <el-option v-for="d in dockerfiles" :key="d.id" :label="d.name" :value="d.id" />
           </el-select>
+          <span v-else style="color:#c0c4cc;font-size:12px">不适用</span>
         </template>
       </el-table-column>
       <el-table-column label="仅制品" width="130" align="center">
         <template #default="{ row }">
-          <el-checkbox v-model="row.artifact_only" />
-          <el-input v-if="row.artifact_only" v-model="row.git_branch" size="small" placeholder="分支 如 main" style="margin-top:2px" />
+          <template v-if="row.project_type !== 'frontend'">
+            <el-checkbox v-model="row.artifact_only" />
+            <el-input v-if="row.artifact_only" v-model="row.git_branch" size="small" placeholder="分支 如 main" style="margin-top:2px" />
+          </template>
+          <span v-else style="color:#c0c4cc;font-size:12px">不适用</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="发布目录" width="170">
+        <template #default="{ row }">
+          <el-input v-if="row.project_type === 'frontend'" v-model="row.publish_dir" size="small"
+                    :placeholder="row.repo_name || '默认仓库名'" />
+          <span v-else style="color:#c0c4cc;font-size:12px">—</span>
         </template>
       </el-table-column>
       <el-table-column label="服务" width="80" align="center">
         <template #default="{ row }">
-          <span v-if="row.artifact_only" style="color:#909399;font-size:12px">不产服务</span>
+          <span v-if="row.project_type === 'frontend'" style="color:#c0c4cc;font-size:12px">dist</span>
+          <span v-else-if="row.artifact_only" style="color:#909399;font-size:12px">不产服务</span>
           <el-button v-else link type="primary" size="small" @click="openMultiServices(row)">
             [[ (row.services || []).length ]] 个
           </el-button>
@@ -493,7 +513,8 @@ const CicdConfigPage = {
 
     <div style="font-size:12px;color:#909399;line-height:1.7;margin-top:8px">
       仓库名自动取 Git 地址最后一段（去掉 .git）。仓库默认在根目录编译；服务产物目录相对仓库根目录，精确包名由「服务」里的 jar 名决定，Agent 只收集该文件。服务可先不配：不配时按仓库名出一个镜像。服务名即镜像名与 YAML 文件名。<br>
-      勾选「仅制品」表示该仓库只编译并把 jar 发布到私仓（如 ruoyi-common），不打镜像、不部署：批次会自动带上它并排在最前，其他仓库等它发布完成后再开始构建；分支留空则跟随批次统一分支。
+      勾选「仅制品」表示该仓库只编译并把 jar 发布到私仓（如 ruoyi-common），不打镜像、不部署：批次会自动带上它并排在最前，其他仓库等它发布完成后再开始构建；分支留空则跟随批次统一分支。<br>
+      前端仓库固定收集 dist，发布到 <code>{Agent 前端挂载根}/{项目}/{环境}/{发布目录}</code>，发布目录留空默认仓库名；多个前端仓库请使用不同发布目录，避免互相覆盖。
     </div>
 
     <template #footer>
@@ -602,7 +623,7 @@ const CicdConfigPage = {
           <el-option v-for="b in multiBuildBranches" :key="b" :label="b" :value="b" />
         </el-select>
       </el-form-item>
-      <el-form-item label="Settings">
+      <el-form-item v-if="multiBuildHasBackend" label="Settings">
         <el-select v-model="multiBuildSettings" clearable placeholder="默认（模板配置）" style="width:100%">
           <el-option v-for="m in mavenSettings" :key="m.id" :label="m.name" :value="m.id" />
         </el-select>
@@ -612,7 +633,7 @@ const CicdConfigPage = {
       已选 [[ multiBuildItems.length ]] 个仓库，统一使用第一个仓库「[[ multiBuildFirstRepo ]]」的分支；修改分支会应用到全部选中仓库。
     </div>
     <div v-else style="font-size:12px;color:#909399;line-height:1.7">
-      单个仓库构建，选择该仓库自己的分支；构建目录、镜像命名空间与单仓项目一致（{项目}-{环境}），部署仍在环境侧统一处理。
+      单个仓库构建，选择该仓库自己的分支；前端仓库构建后发布到各自 Web 目录，后端构建目录、镜像命名空间与单仓项目一致（{项目}-{环境}）。
     </div>
     <div v-if="multiBuildPrereqHint" style="font-size:12px;color:#e6a23c;line-height:1.7">[[ multiBuildPrereqHint ]]</div>
     <template #footer>
@@ -646,7 +667,7 @@ const CicdConfigPage = {
       multiSvcVisible: false, multiSvcIndex: -1, multiSvcRepo: '', multiSvcText: '',
       multiBuildVisible: false, multiBuildItem: null, multiBuildItems: [], multiBuildRepo: '', multiBuildFirstRepo: '', multiBuildEnvs: [],
       multiBuildEnv: '', multiBuildBranches: [], multiBuildBranch: 'master', multiBuilding: false,
-      multiBuildSettings: null, multiSelection: [], multiBuildPrereqHint: '',
+      multiBuildSettings: null, multiSelection: [], multiBuildPrereqHint: '', multiBuildHasBackend: false,
       multiImportVisible: false, multiImportMode: 'json', multiImportText: '', multiImportCredential: null,
       multiImportDockerfile8: null, multiImportDockerfile17: null,
       multiDfBulkVisible: false, multiDfBulk8: null, multiDfBulk17: null,
@@ -960,14 +981,30 @@ const CicdConfigPage = {
       if (/java17|jdk17|jdk-17/.test(img)) return '17';
       return '';
     },
-    _blankMultiItem() {
+    _blankMultiItem(type) {
+      const isFe = type === 'frontend';
       return {
-        repo_name: '', git_url: '', git_credential_id: null,
-        git_docker_image: 'hub.hzbxhd.com/library/git-clone:1.0', build_docker_image: 'hub.hzbxhd.com/library/java17-maven:1.0',
-        build_command: 'mvn -B -DskipTests clean package',
+        repo_name: '', project_type: isFe ? 'frontend' : 'backend', publish_dir: '',
+        git_url: '', git_credential_id: null,
+        git_docker_image: 'hub.hzbxhd.com/library/git-clone:1.0',
+        build_docker_image: isFe ? '' : 'hub.hzbxhd.com/library/java17-maven:1.0',
+        build_command: isFe ? 'npm install && npm run build' : 'mvn -B -DskipTests clean package',
         dockerfile_template_id: null, description: '', enabled: true, services: [],
         artifact_only: false, git_branch: '',
       };
+    },
+    onMultiItemTypeChange(row) {
+      if (row.project_type === 'frontend') {
+        row.artifact_only = false;
+        row.dockerfile_template_id = null;
+        row.services = [];
+        if (!row.build_docker_image || /java(8|17)-maven/i.test(row.build_docker_image)) row.build_docker_image = '';
+        if (!row.build_command || /^mvn\b/.test((row.build_command || '').trim())) row.build_command = 'npm install && npm run build';
+        if (!row.publish_dir) row.publish_dir = row.repo_name || this._repoNameFromUrl(row.git_url);
+      } else {
+        if (!row.build_command || /^npm\b/.test((row.build_command || '').trim())) row.build_command = this._defaultBuildCommand('backend');
+        if (!row.build_docker_image) row.build_docker_image = 'hub.hzbxhd.com/library/java17-maven:1.0';
+      }
     },
     openMultiForm(t) {
       // 项目/凭据/Dockerfile/Settings 可能是刚在别的页面新增的，打开时统一刷新
@@ -988,6 +1025,8 @@ const CicdConfigPage = {
         d.items = (d.items || []).map(it => ({
           ...it,
           repo_name: it.repo_name || this._repoNameFromUrl(it.git_url),
+          project_type: it.project_type === 'frontend' ? 'frontend' : 'backend',
+          publish_dir: it.publish_dir || '',
           git_docker_image: it.git_docker_image || 'hub.hzbxhd.com/library/git-clone:1.0',
           build_docker_image: it.build_docker_image || '',
           services: it.services || [],
@@ -1024,7 +1063,8 @@ const CicdConfigPage = {
       const f = this.multiForm;
       if (!f.project_id) { ElementPlus.ElMessage.warning('请选择项目'); return; }
       if (!(f.items || []).length) { ElementPlus.ElMessage.warning('请至少配置一个仓库'); return; }
-      if (f.publish_artifacts) {
+      const hasBackend = (f.items || []).some(it => (it.project_type || 'backend') === 'backend');
+      if (f.publish_artifacts && hasBackend) {
         if (!f.maven_settings_id) { ElementPlus.ElMessage.warning('开启发布制品请选择 Maven Settings'); return; }
         const ms = this.mavenSettings.find(m => String(m.id) === String(f.maven_settings_id));
         if (ms && (!ms.release_url || !ms.snapshot_url)) {
@@ -1032,13 +1072,30 @@ const CicdConfigPage = {
           return;
         }
       }
+      const seenPublish = new Set();
       for (let i = 0; i < f.items.length; i++) {
         const it = f.items[i];
         if (!it.git_url) { ElementPlus.ElMessage.warning('第 ' + (i + 1) + ' 行缺 Git 地址'); return; }
         it.repo_name = this._repoNameFromUrl(it.git_url);
         if (!it.repo_name) { ElementPlus.ElMessage.warning('第 ' + (i + 1) + ' 行无法从 Git 地址识别仓库名'); return; }
         if (!it.git_docker_image) it.git_docker_image = 'hub.hzbxhd.com/library/git-clone:1.0';
-        if (!it.build_docker_image) it.build_docker_image = 'hub.hzbxhd.com/library/java17-maven:1.0';
+        if (it.project_type === 'frontend') {
+          it.artifact_only = false;
+          it.dockerfile_template_id = null;
+          it.services = [];
+          it.publish_dir = (it.publish_dir || it.repo_name).trim();
+          if (!it.publish_dir || it.publish_dir.startsWith('/') || it.publish_dir.includes('..')) {
+            ElementPlus.ElMessage.warning('仓库「' + it.repo_name + '」发布目录不合法（相对路径，不能以 / 开头或包含 ..）');
+            return;
+          }
+          if (seenPublish.has(it.publish_dir)) {
+            ElementPlus.ElMessage.warning('发布目录重复：' + it.publish_dir + '，多个前端请使用不同子目录');
+            return;
+          }
+          seenPublish.add(it.publish_dir);
+        } else {
+          if (!it.build_docker_image) it.build_docker_image = 'hub.hzbxhd.com/library/java17-maven:1.0';
+        }
         if (!it.build_command) { ElementPlus.ElMessage.warning('仓库「' + it.repo_name + '」缺编译命令'); return; }
       }
       this.multiSaving = true;
@@ -1111,31 +1168,35 @@ const CicdConfigPage = {
       const byName = list.find(x => x.name === s);
       return byName ? byName.id : null;
     },
-    _defaultBuildCommand() {
-      return 'mvn -B -DskipTests clean package';
+    _defaultBuildCommand(type) {
+      return type === 'frontend' ? 'npm install && npm run build' : 'mvn -B -DskipTests clean package';
     },
     _normImportedRepo(r) {
       const gitUrl = (r.git_url || '').trim();
+      const isFe = r.project_type === 'frontend';
       const repo = {
         id: r.id || undefined,
         repo_name: this._repoNameFromUrl(gitUrl) || (r.repo_name || r.name || '').trim(),
+        project_type: isFe ? 'frontend' : 'backend',
+        publish_dir: (r.publish_dir || '').trim(),
         git_url: gitUrl,
         git_credential_id: this._resolveId(this.credentials, r.git_credential_id || r.git_credential_name),
         git_docker_image: (r.git_docker_image || 'hub.hzbxhd.com/library/git-clone:1.0').trim(),
-        build_docker_image: (r.build_docker_image || 'hub.hzbxhd.com/library/java17-maven:1.0').trim(),
+        build_docker_image: (r.build_docker_image || (isFe ? '' : 'hub.hzbxhd.com/library/java17-maven:1.0')).trim(),
         build_command: (r.build_command || '').trim(),
-        dockerfile_template_id: this._resolveId(this.dockerfiles, r.dockerfile_template_id || r.dockerfile_template_name),
+        dockerfile_template_id: isFe ? null : this._resolveId(this.dockerfiles, r.dockerfile_template_id || r.dockerfile_template_name),
         enabled: r.enabled !== false,
-        artifact_only: !!r.artifact_only,
+        artifact_only: isFe ? false : !!r.artifact_only,
         git_branch: (r.git_branch || '').trim(),
-        services: (r.services || []).map(s => ({
+        services: isFe ? [] : (r.services || []).map(s => ({
           service_name: (s.service_name || s.name || '').trim(),
           artifact_dir: (s.artifact_dir || s.dir || '.').trim() || '.',
           jar_name: (s.jar_name || s.jar || '').trim(),
           jvm: String(s.jvm || '').trim(),
         })).filter(s => s.service_name),
       };
-      if (!repo.build_command) repo.build_command = this._defaultBuildCommand();
+      if (!repo.build_command) repo.build_command = this._defaultBuildCommand(repo.project_type);
+      if (isFe && !repo.publish_dir) repo.publish_dir = repo.repo_name;
       return repo;
     },
     _parseJsonImport(text) {
@@ -1226,6 +1287,8 @@ const CicdConfigPage = {
       const data = {
         repos: (this.multiForm.items || []).map(it => ({
           git_url: it.git_url,
+          project_type: it.project_type || 'backend',
+          publish_dir: it.publish_dir || '',
           git_docker_image: it.git_docker_image || 'hub.hzbxhd.com/library/git-clone:1.0',
           build_docker_image: it.build_docker_image || '',
           build_command: it.build_command,
@@ -1262,13 +1325,16 @@ const CicdConfigPage = {
       this.multiBuildItem = list[0];
       this.multiBuildFirstRepo = list[0].repo_name || '';
       this.multiBuildRepo = list.length > 1 ? (list.length + ' 个仓库') : this.multiBuildFirstRepo;
-      const prereq = (this.multiForm.items || []).filter(it => it.artifact_only && it.id && !list.some(r => r.id === it.id));
+      this.multiBuildHasBackend = list.some(r => (r.project_type || 'backend') === 'backend');
+      const prereq = this.multiBuildHasBackend
+        ? (this.multiForm.items || []).filter(it => it.artifact_only && it.id && !list.some(r => r.id === it.id))
+        : [];
       this.multiBuildPrereqHint = prereq.length
         ? '仅制品仓库会自动并入本批次并优先发布（其他仓库等它完成）：' + prereq.map(it => it.repo_name).join('、')
         : '';
       this.multiBuildEnv = '';
       this.multiBuildBranch = 'master';
-      this.multiBuildSettings = this.multiForm.maven_settings_id || null;
+      this.multiBuildSettings = this.multiBuildHasBackend ? (this.multiForm.maven_settings_id || null) : null;
       this.multiBuildEnvs = [];
       this.multiBuildBranches = [];
       this.loadMavenSettings();

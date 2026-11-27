@@ -236,7 +236,7 @@ const ManagePage = {
             </el-radio-group>
           </div>
           <div v-if="multiBuildMode && !multiBranchReady" class="svc-col-empty" style="padding:60px 8px;text-align:center;line-height:1.8">
-            先在左侧选择第一个服务<br>系统会按第一个服务的仓库查询分支
+            先在左侧选择第一个[[ buildType === 'frontend' ? '前端应用' : '服务' ]]<br>系统会按第一个[[ buildType === 'frontend' ? '前端应用' : '服务' ]]的仓库查询分支
           </div>
           <template v-else>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -283,24 +283,27 @@ const ManagePage = {
         <!-- 右栏：构建范围（多仓模式下视觉上在左侧） -->
         <div class="build-col">
           <div class="build-col-head">
-            <span class="build-col-title">[[ multiBuildMode ? '服务' : '构建范围' ]]</span>
-            <span v-if="buildType === 'backend'" style="color:#909399;font-size:12px">[[ multiBuildMode ? '第一个服务决定分支' : '全部勾选' ]]</span>
+            <span class="build-col-title">[[ multiBuildMode ? (buildType === 'frontend' ? '前端应用' : '服务') : '构建范围' ]]</span>
+            <span v-if="buildType === 'backend' || multiBuildMode" style="color:#909399;font-size:12px">[[ multiBuildMode ? (buildType === 'frontend' ? '第一个前端应用决定分支' : '第一个服务决定分支') : '全部勾选' ]]</span>
           </div>
-          <template v-if="buildType === 'backend'">
+          <template v-if="buildType === 'backend' || multiBuildMode">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-              <span style="color:#606266;font-size:13px">已选 [[ selectedServiceCount ]] / [[ serviceOptions.length ]] 个服务</span>
+              <span style="color:#606266;font-size:13px">已选 [[ selectedServiceCount ]] / [[ serviceOptions.length ]] 个[[ buildType === 'frontend' ? '前端应用' : '服务' ]]</span>
               <el-switch :model-value="allServicesChecked" @change="toggleAllServices" active-text="全部勾选" size="small" />
             </div>
             <div class="svc-service-list">
-              <div v-if="!serviceOptions.length" class="svc-col-loading">[[ servicesLoaded ? '暂未配置服务' : '加载服务中...' ]]</div>
+              <div v-if="!serviceOptions.length" class="svc-col-loading">[[ servicesLoaded ? (buildType === 'frontend' ? '暂未配置前端仓库' : '暂未配置服务') : '加载中...' ]]</div>
               <div v-for="s in serviceOptions" :key="s" class="svc-service-item">
                 <span style="font-family:monospace;font-size:13px">[[ s ]]</span>
                 <el-switch v-model="serviceToggles[s]" size="small" @change="onMultiServiceToggle(s)" />
               </div>
             </div>
             <div v-if="multiBuildMode" style="color:#409eff;font-size:11.5px;margin-top:8px;line-height:1.7">
-              多仓：只查询第一个选中服务的仓库分支，后续选中的服务沿用该分支；全部取消后重新选择会再次查询。
+              [[ buildType === 'frontend'
+                ? '多仓前端：只查询第一个选中前端仓库的分支，其余沿用该分支；全部取消后重新选择会再次查询。'
+                : '多仓：只查询第一个选中服务的仓库分支，后续选中的服务沿用该分支；全部取消后重新选择会再次查询。' ]]
             </div>
+            <div v-else-if="buildType === 'frontend'" style="color:#c0c4cc;font-size:11.5px;margin-top:8px">前端构建固定 dist 产物，无服务范围选择</div>
             <div v-else style="color:#c0c4cc;font-size:11.5px;margin-top:8px">仅对开启的服务执行产物收集 / Docker Build / Push，未开启的服务自动跳过</div>
           </template>
           <div v-else style="color:#909399;font-size:12px;padding:60px 0;text-align:center">
@@ -1196,11 +1199,7 @@ const ManagePage = {
       // 立即弹窗（git ls-remote 可能 1s+，分支异步加载不阻塞）
       this._initBuildDialog(row);
       this.buildDialogVisible = true;
-      if (this.buildType === 'backend') {
-        this._loadBuildContext(row);
-      } else {
-        this._loadSingleBuildContext(row);
-      }
+      this._loadBuildContext(row);
     },
 
     // 初始化构建弹窗状态（恢复上次偏好 + 最近使用分支）
@@ -1243,15 +1242,24 @@ const ManagePage = {
           return;
         }
         const tpl = r.data;
+        const items = (tpl.items || []).filter(it => ((it.project_type || 'backend') === this.buildType));
         const options = [];
         const map = {};
-        (tpl.items || []).forEach(it => {
-          (it.services || []).forEach(svc => {
-            if (svc.enabled === false || !svc.service_name) return;
-            options.push(svc.service_name);
-            map[svc.service_name] = { item_id: it.id, repo_name: it.repo_name };
+        if (this.buildType === 'frontend') {
+          items.forEach(it => {
+            if (it.enabled === false || !it.repo_name) return;
+            options.push(it.repo_name);
+            map[it.repo_name] = { item_id: it.id, repo_name: it.repo_name };
           });
-        });
+        } else {
+          items.forEach(it => {
+            (it.services || []).forEach(svc => {
+              if (svc.enabled === false || !svc.service_name) return;
+              options.push(svc.service_name);
+              map[svc.service_name] = { item_id: it.id, repo_name: it.repo_name };
+            });
+          });
+        }
         if (!options.length) { this._loadSingleBuildContext(row); return; }
         this.multiBuildMode = true;
         this.multiTemplateId = tpl.id;
@@ -1412,27 +1420,28 @@ const ManagePage = {
       if (this.multiBuildMode) {
         const selected = this.serviceOptions.filter(s => this.serviceToggles[s]);
         if (!selected.length) {
-          ElementPlus.ElMessage.warning('请至少选择一个要构建的服务');
+          ElementPlus.ElMessage.warning('请至少选择一个要构建的' + (this.buildType === 'frontend' ? '前端应用' : '服务'));
           return;
         }
         if (!this.buildBranch || !this.buildBranch.trim()) {
-          ElementPlus.ElMessage.warning('请等待第一个服务的分支加载完成并选择分支');
+          ElementPlus.ElMessage.warning('请等待第一个' + (this.buildType === 'frontend' ? '前端应用' : '服务') + '的分支加载完成并选择分支');
           return;
         }
         const itemIds = Array.from(new Set(selected.map(s => (this.multiServiceItemMap[s] || {}).item_id).filter(Boolean)));
         if (!itemIds.length) {
-          ElementPlus.ElMessage.warning('选中服务没有关联到仓库');
+          ElementPlus.ElMessage.warning('选中' + (this.buildType === 'frontend' ? '前端应用' : '服务') + '没有关联到仓库');
           return;
         }
         this.buildTriggering = true;
         const env = this.buildEnv;
-        ajax('POST', '/api/cicd/multi-templates/' + this.multiTemplateId + '/build-batch', {
+        const payload = {
           environment_id: env.id,
           item_ids: itemIds,
-          services: selected,
           branch: this.buildBranch.trim(),
           maven_settings_id: null,
-        }, (res) => {
+        };
+        if (this.buildType !== 'frontend') payload.services = selected;
+        ajax('POST', '/api/cicd/multi-templates/' + this.multiTemplateId + '/build-batch', payload, (res) => {
           this.buildTriggering = false;
           if (res.code === 200) {
             ElementPlus.ElMessage.success(res.msg || ('已触发 ' + ((res.data && res.data.count) || itemIds.length) + ' 个仓库构建'));

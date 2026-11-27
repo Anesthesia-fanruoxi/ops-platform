@@ -103,7 +103,7 @@ window.SvcTemplate = `
           </el-radio-group>
         </div>
         <div v-if="multiBuildMode && !multiBranchReady" class="svc-col-empty" style="padding:60px 8px;text-align:center;line-height:1.8">
-          先在左侧选择第一个服务<br>系统会按第一个服务的仓库查询分支
+          先在左侧选择第一个[[ buildType === 'frontend' ? '前端应用' : '服务' ]]<br>系统会按第一个[[ buildType === 'frontend' ? '前端应用' : '服务' ]]的仓库查询分支
         </div>
         <template v-else>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -151,28 +151,31 @@ window.SvcTemplate = `
       <!-- 右栏：构建范围（多仓模式下视觉上在左侧） -->
       <div class="build-col">
         <div class="build-col-head">
-          <span class="build-col-title">[[ multiBuildMode ? '服务' : '构建范围' ]]</span>
-          <span v-if="buildType === 'backend'" style="color:#909399;font-size:12px">[[ multiBuildMode ? '第一个服务决定分支' : '全部勾选' ]]</span>
+          <span class="build-col-title">[[ multiBuildMode ? (buildType === 'frontend' ? '前端应用' : '服务') : '构建范围' ]]</span>
+          <span v-if="buildType === 'backend' || multiBuildMode" style="color:#909399;font-size:12px">[[ multiBuildMode ? (buildType === 'frontend' ? '第一个前端应用决定分支' : '第一个服务决定分支') : '全部勾选' ]]</span>
         </div>
-        <template v-if="buildType === 'backend'">
+        <template v-if="buildType === 'backend' || multiBuildMode">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <span style="color:#606266;font-size:13px">已选 [[ selectedServiceCount ]] / [[ serviceOptions.length ]] 个服务</span>
+            <span style="color:#606266;font-size:13px">已选 [[ selectedServiceCount ]] / [[ serviceOptions.length ]] 个[[ buildType === 'frontend' ? '前端应用' : '服务' ]]</span>
             <el-switch :model-value="allServicesChecked" @change="toggleAllServices" active-text="全部勾选" size="small" />
           </div>
           <div class="svc-service-list">
-            <div v-if="!serviceOptions.length" class="svc-col-loading">[[ servicesLoaded ? '暂未配置服务' : '加载服务中...' ]]</div>
+            <div v-if="!serviceOptions.length" class="svc-col-loading">[[ servicesLoaded ? (buildType === 'frontend' ? '暂未配置前端仓库' : '暂未配置服务') : '加载中...' ]]</div>
             <div v-for="s in serviceOptions" :key="s" class="svc-service-item">
               <span style="font-family:monospace;font-size:13px">[[ s ]]</span>
               <el-switch v-model="serviceToggles[s]" size="small" @change="onMultiServiceToggle(s)" />
             </div>
           </div>
           <div v-if="multiBuildMode" style="color:#409eff;font-size:11.5px;margin-top:8px;line-height:1.7">
-            多仓：只查询第一个选中服务的仓库分支，后续选中的服务沿用该分支；全部取消后重新选择会再次查询。
+            [[ buildType === 'frontend'
+              ? '多仓前端：只查询第一个选中前端仓库的分支，其余沿用该分支；全部取消后重新选择会再次查询。'
+              : '多仓：只查询第一个选中服务的仓库分支，后续选中的服务沿用该分支；全部取消后重新选择会再次查询。' ]]
           </div>
+          <div v-else-if="buildType === 'frontend'" style="color:#c0c4cc;font-size:11.5px;margin-top:8px">前端构建固定 dist 产物，发布到 Web 目录</div>
           <div v-else style="color:#c0c4cc;font-size:11.5px;margin-top:8px">仅对开启的服务执行产物收集 / Docker Build / Push，未开启的服务自动跳过</div>
         </template>
         <div v-else style="color:#909399;font-size:12px;padding:60px 0;text-align:center">
-          前端构建固定 dist 产物，无服务范围选择
+          前端构建固定 dist 产物
         </div>
       </div>
     </div>
@@ -252,11 +255,11 @@ window.SvcTemplate = `
       <el-table :data="(batchData && batchData.repos) || []" size="small" border stripe max-height="68vh"
                 style="width:100%;margin-top:10px" highlight-current-row @row-click="openBatchRepo">
         <el-table-column label="仓库" min-width="170" show-overflow-tooltip>
-          <template #default="s">[[ s.row.repo_name ]]<el-tag v-if="s.row.artifact_only" type="info" size="small" effect="plain" style="margin-left:4px">仅制品</el-tag></template>
+          <template #default="s">[[ s.row.repo_name ]]<el-tag v-if="s.row.project_type === 'frontend'" type="success" size="small" effect="plain" style="margin-left:4px">前端</el-tag><el-tag v-if="s.row.artifact_only" type="info" size="small" effect="plain" style="margin-left:4px">仅制品</el-tag></template>
         </el-table-column>
         <el-table-column label="服务" width="70" align="center">
           <template #default="s">
-            <span v-if="s.row.artifact_only">-</span>
+            <span v-if="s.row.artifact_only || s.row.project_type === 'frontend'">-</span>
             <el-tooltip v-else :content="(s.row.services || []).join('、')" placement="top" :disabled="(s.row.service_count || 0) <= 1">
               <span>[[ s.row.service_count ]]</span>
             </el-tooltip>

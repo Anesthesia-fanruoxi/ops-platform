@@ -155,6 +155,12 @@ def auto_deploy_build(build):
 
     log('INFO', f'开始自动部署：环境={env_full} tag={new_tag} 范围={"全部" if is_full else "部分"} 服务={target}')
 
+    if build.project_type == 'frontend':
+        # 前端无 Deployment：dist 已由 Agent 发布到 Web 目录，这里只补发版通知
+        log('INFO', '前端构建：dist 已发布到 Web 目录，跳过 K8s 部署')
+        notify(None)
+        return
+
     if snapshot.get('artifact_only'):
         # 仅制品仓库：产物已发布到私仓供其他仓库编译，本身没有可部署服务，属正常跳过
         log('INFO', '仅制品仓库：jar 已发布到私仓，未执行部署')

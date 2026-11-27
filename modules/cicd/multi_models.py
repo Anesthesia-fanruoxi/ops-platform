@@ -66,9 +66,12 @@ class CicdMultiItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     template_id = db.Column(db.Integer, nullable=False, index=True)
     repo_name = db.Column(db.String(100), nullable=False)
+    project_type = db.Column(db.String(20), default='backend')  # backend | frontend
     git_url = db.Column(db.String(300), default='')
     git_credential_id = db.Column(db.Integer, nullable=True)
     language = db.Column(db.String(30), default='')
+    # 前端仓库发布子目录（相对项目/环境 web 根：/web/{project}/{env}/{publish_dir}）
+    publish_dir = db.Column(db.String(200), default='')
     git_docker_image = db.Column(db.String(200), default='hub.hzbxhd.com/library/git-clone:1.0')
     build_docker_image = db.Column(db.String(200), default='')
     build_command = db.Column(db.Text, default='')
@@ -99,6 +102,8 @@ class CicdMultiItem(db.Model):
             'id': self.id,
             'template_id': self.template_id,
             'repo_name': self.repo_name,
+            'project_type': self.project_type or 'backend',
+            'publish_dir': self.publish_dir or '',
             'git_url': self.git_url or '',
             'git_credential_id': self.git_credential_id,
             'language': self.language or '',

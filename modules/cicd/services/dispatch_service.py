@@ -53,8 +53,8 @@ def _harbor_config_from_agent(agent):
 
 
 def _frontend_web_dir(build, agent):
-    """前端发布目标：Agent 机 NFS web 挂载根 + 项目/环境/web 子路径。
-    例：frontend_mount_dir=/web, 项目 ysh, 环境 test → /web/ysh/test/web
+    """前端发布目标：Agent 机 NFS web 挂载根 + 项目/环境/发布子目录。
+    单仓前端沿用 web；多仓前端按仓库行配置的 publish_dir（默认仓库名），避免多个前端互相覆盖。
     后端或未配置挂载根返回空（Agent 跳过发布步骤）。
     """
     if build.project_type != 'frontend':
@@ -62,9 +62,16 @@ def _frontend_web_dir(build, agent):
     mount_root = (agent.frontend_mount_dir or '').strip().rstrip('/')
     if not mount_root:
         return ''
+    sub = ''
+    try:
+        sub = ((build.get_steps_snapshot() or {}).get('publish_dir') or '').strip().strip('/')
+    except Exception:
+        sub = ''
+    if not sub:
+        sub = 'web'
     proj = build.project.name if build.project else ''
     envn = build.environment.name if build.environment else ''
-    return f'{mount_root}/{proj}/{envn}/web'
+    return f'{mount_root}/{proj}/{envn}/{sub}'
 
 def _clean_artifact_dirs(value):
     """Normalize service directories so blank entries mean no configured services."""

@@ -120,6 +120,7 @@ def save_template(data, tpl_id=None):
         return None, '请至少配置一个仓库'
 
     seen_repo = set()
+    seen_publish = {}
     keep_ids = []
     for idx, raw in enumerate(items):
         if not isinstance(raw, dict):
@@ -147,7 +148,19 @@ def save_template(data, tpl_id=None):
             item = CicdMultiItem(template_id=tpl.id, repo_name=repo_name)
             db.session.add(item)
 
+        is_frontend = (raw.get('project_type') or 'backend') == 'frontend'
+        publish_dir = ''
+        if is_frontend:
+            publish_dir = _clean_rel_path(raw.get('publish_dir') or repo_name, allow_empty=False)
+            if publish_dir in (None, '', '.'):
+                return None, f'仓库「{repo_name}」发布目录不合法（相对项目/环境 web 根，不能为空或 .）'
+            if publish_dir in seen_publish:
+                return None, f'发布目录重复：{publish_dir}（{seen_publish[publish_dir]} 与 {repo_name}），多个前端请用不同子目录'
+            seen_publish[publish_dir] = repo_name
+
         item.repo_name = repo_name
+        item.project_type = 'frontend' if is_frontend else 'backend'
+        item.publish_dir = publish_dir
         item.git_url = git_url
         item.git_credential_id = raw.get('git_credential_id') or None
         if 'language' in raw:
@@ -155,8 +168,9 @@ def save_template(data, tpl_id=None):
         item.git_docker_image = (raw.get('git_docker_image') or 'hub.hzbxhd.com/library/git-clone:1.0').strip()[:200]
         item.build_docker_image = (raw.get('build_docker_image') or '').strip()[:200]
         item.build_command = build_command
-        item.dockerfile_template_id = raw.get('dockerfile_template_id') or None
-        item.artifact_only = bool(raw.get('artifact_only'))
+        # 前端仓库不产镜像：忽略 Dockerfile 与仅制品配置
+        item.dockerfile_template_id = None if is_frontend else (raw.get('dockerfile_template_id') or None)
+        item.artifact_only = False if is_frontend else bool(raw.get('artifact_only'))
         item.git_branch = (raw.get('git_branch') or '').strip()[:100]
         item.description = (raw.get('description') or '').strip()[:200]
         item.enabled = bool(raw.get('enabled', True))
@@ -164,10 +178,10 @@ def save_template(data, tpl_id=None):
         db.session.flush()
         keep_ids.append(item.id)
 
-        # 服务映射整体替换（构建快照会保存当时的映射，历史构建不受影响）
+        # 服务映射整体替换（构建快照会保存当时的映射，历史构建不受影响）；前端固定 dist，无服务映射
         CicdMultiService.query.filter_by(item_id=item.id).delete(synchronize_session=False)
         seen_svc = set()
-        for s_idx, s in enumerate(raw.get('services') or []):
+        for s_idx, s in enumerate([] if is_frontend else (raw.get('services') or [])):
             if not isinstance(s, dict):
                 continue
             sname = (s.get('service_name') or s.get('name') or '').strip()
@@ -250,11 +264,16 @@ def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_sett
             return None, 'Maven Settings 不存在'
 
     branch = (branch or 'master').strip()
-    artifact_only = bool(item.artifact_only)
+    project_type = 'frontend' if (item.project_type or 'backend') == 'frontend' else 'backend'
+    is_frontend = project_type == 'frontend'
+    artifact_only = bool(item.artifact_only) and not is_frontend
     if artifact_only and (item.git_branch or '').strip():
         # 仅制品仓库跟随自己的分支（如 ruoyi-common 只有 main），不受批次统一分支影响
         branch = item.git_branch.strip()
-    if artifact_only:
+    if is_frontend:
+        # 前端固定收集 dist，按 publish_dir 发布到 Web 目录，无服务映射/镜像
+        srv_map = []
+    elif artifact_only:
         srv_map = []
     else:
         services = item_services(item.id)
@@ -266,7 +285,9 @@ def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_sett
         srv_map = _service_map(item, services)
 
     build_command = item.build_command.strip()
-    if artifact_only:
+    if is_frontend:
+        pass
+    elif artifact_only:
         if not settings:
             return None, '仅制品仓库需要发布到私仓，请先选择 Maven Settings'
         if not settings.release_url or not settings.snapshot_url:
@@ -295,7 +316,7 @@ def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_sett
         )
 
     dockerfile_content = ''
-    if item.dockerfile_template_id and not artifact_only:
+    if item.dockerfile_template_id and not artifact_only and not is_frontend:
         dockerfile_content = render_for_build(item.dockerfile_template_id, {
             'image_name': item.repo_name,
             'project_type': item.language or '',
@@ -322,8 +343,9 @@ def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_sett
         'image_name': item.repo_name,
         'image_tag': image_tag,
         'batch_id': batch_id,
-        'project_type': 'backend',
+        'project_type': project_type,
         'language': item.language or '',
+        'publish_dir': (item.publish_dir or item.repo_name) if is_frontend else '',
     }
 
     from modules.cicd.services.build_service import (
@@ -336,7 +358,7 @@ def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_sett
         project_id=tpl.project_id,
         environment_id=env.id,
         branch=branch,
-        project_type='backend',
+        project_type=project_type,
         language=item.language or '',
         steps_snapshot=json.dumps(steps_config, ensure_ascii=False),
         image_name=item.repo_name,
@@ -349,7 +371,7 @@ def trigger_item_build(item_id, environment_id, branch, triggered_by, maven_sett
     db.session.add(build)
     db.session.commit()
 
-    init_build_steps(build_no, 'backend')
+    init_build_steps(build_no, project_type)
     if dispatch:
         from modules.cicd.services.dispatch_service import dispatch_pending
         dispatch_pending()
@@ -405,10 +427,15 @@ def trigger_items_build(template_id, item_ids, environment_id, branch, triggered
             return None, '包含不存在、已禁用或不属于该模板的仓库'
 
     # 仅制品仓库（如 ruoyi-common）是其他仓库的编译依赖，未勾选也自动并入批次，并排在最前，
-    # 调度侧再让普通仓库等它发布完成（见 dispatch_service 的 batch_prereq_pending 门禁）
-    prereq = CicdMultiItem.query.filter_by(template_id=tpl.id, enabled=True, artifact_only=True) \
-        .order_by(CicdMultiItem.sort_no.asc(), CicdMultiItem.id.asc()).all()
-    ordered = list(prereq) + [item for item in ordered if not item.artifact_only]
+    # 调度侧再让普通仓库等它发布完成（见 dispatch_service 的 batch_prereq_pending 门禁）。
+    # 纯前端批次不编译 Java，不自动并入仅制品仓库。
+    has_backend = any((item.project_type or 'backend') == 'backend' for item in ordered)
+    if has_backend:
+        prereq = CicdMultiItem.query.filter_by(template_id=tpl.id, enabled=True, artifact_only=True) \
+            .order_by(CicdMultiItem.sort_no.asc(), CicdMultiItem.id.asc()).all()
+        ordered = list(prereq) + [item for item in ordered if not item.artifact_only]
+    else:
+        ordered = [item for item in ordered if not item.artifact_only]
 
     # 先做统一校验，避免批量创建到一半才失败
     for item in ordered:
@@ -441,6 +468,9 @@ def trigger_items_build(template_id, item_ids, environment_id, branch, triggered
     for item in ordered:
         if item.artifact_only:
             continue  # 仅制品仓库不产出可部署服务
+        if (item.project_type or 'backend') == 'frontend':
+            selected_service_count += 1  # 一个前端仓库 = 一次 Web 发布
+            continue
         svcs = item.services()
         if wanted_services:
             svcs = [s for s in svcs if s.service_name in wanted_services]
@@ -463,7 +493,9 @@ def trigger_items_build(template_id, item_ids, environment_id, branch, triggered
 
     builds = []
     for item in ordered:
-        item_services_filter = [s.service_name for s in item.services() if s.service_name in wanted_services] if wanted_services else None
+        item_services_filter = None
+        if wanted_services and (item.project_type or 'backend') != 'frontend':
+            item_services_filter = [s.service_name for s in item.services() if s.service_name in wanted_services]
         build, err = trigger_item_build(
             item.id, env.id, branch, triggered_by,
             maven_settings_id=maven_settings_id,
@@ -545,7 +577,8 @@ def batch_detail(batch):
         services = snap.get('services') or []
         svc_names = [s.get('name') or '' for s in services if s.get('name')]
         repo_name = snap.get('repo_name') or b.image_name or ''
-        if not svc_names:
+        is_frontend = (b.project_type or 'backend') == 'frontend'
+        if not svc_names and not is_frontend:
             svc_names = [repo_name]
         progress = 0
         current_step = ''
@@ -570,6 +603,8 @@ def batch_detail(batch):
             'build_id': b.id,
             'build_no': b.build_no,
             'repo_name': repo_name,
+            'project_type': b.project_type or 'backend',
+            'publish_dir': snap.get('publish_dir') or '',
             'artifact_only': bool(snap.get('artifact_only')),
             'services': svc_names,
             'service_count': len(svc_names),

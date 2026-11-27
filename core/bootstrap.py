@@ -71,6 +71,12 @@ def init_db(app):
             if 'git_branch' not in icols:
                 cursor.execute(_add_col_sql('cicd_multi_items', 'git_branch', "VARCHAR(100) DEFAULT ''"))
                 conn.commit()
+            if 'project_type' not in icols:
+                cursor.execute(_add_col_sql('cicd_multi_items', 'project_type', "VARCHAR(20) DEFAULT 'backend'"))
+                conn.commit()
+            if 'publish_dir' not in icols:
+                cursor.execute(_add_col_sql('cicd_multi_items', 'publish_dir', "VARCHAR(200) DEFAULT ''"))
+                conn.commit()
             cursor.close()
             conn.close()
         except Exception as e:
