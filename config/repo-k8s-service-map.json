@@ -14,6 +14,7 @@
     {
       "repo": "asset-distribution-platform",
       "service": "asset-distribution-platform",
+      "service_port": 8000,
       "yaml": {
         "test": "asset-distribution-platform/script/k8s/test/deploy-test.yaml",
         "prod": "asset-distribution-platform/script/k8s/prod/deploy-prod.yaml"
@@ -71,6 +72,7 @@
     {
       "repo": "bill-config",
       "service": "bill-config",
+      "service_port": 8000,
       "yaml": {
         "test": "bill-config/script/k8s/test/bill-config-deploy-test.yaml",
         "prod": "bill-config/script/k8s/prod/bill-config-deploy-prod.yaml"
@@ -128,6 +130,7 @@
     {
       "repo": "bill-customer-channel",
       "service": "bill-customer-channel",
+      "service_port": 8000,
       "yaml": {
         "test": "bill-customer-channel/script/k8s/test/bill-customer-channel-deploy-test.yaml",
         "prod": "bill-customer-channel/script/k8s/prod/bill-customer-channel-deploy-prod.yaml"
@@ -185,6 +188,7 @@
     {
       "repo": "bill-deduction",
       "service": "bill-deduction",
+      "service_port": 8010,
       "yaml": {
         "test": "bill-deduction/script/k8s/test/bill-deduction-deploy-test.yaml",
         "prod": "bill-deduction/script/k8s/prod/bill-deduction-deploy-prod.yaml"
@@ -242,6 +246,7 @@
     {
       "repo": "bill-repayment",
       "service": "bill-repayment",
+      "service_port": 8000,
       "yaml": {
         "test": "bill-repayment/script/k8s/bill-repayment/test/bill-repayment-deploy-test.yaml",
         "prod": "bill-repayment/script/k8s/bill-repayment/prod/bill-repayment-deploy-prod.yaml"
@@ -299,6 +304,7 @@
     {
       "repo": "bill-rights",
       "service": "bill-rights",
+      "service_port": 8000,
       "yaml": {
         "test": "bill-rights/script/k8s/test/deploy-test.yaml",
         "prod": "bill-rights/script/k8s/prod/deploy-prod.yaml"
@@ -356,6 +362,7 @@
     {
       "repo": "bill-service",
       "service": "bill-service",
+      "service_port": 8000,
       "yaml": {
         "test": "bill-service/script/k8s/test/bill-service-deploy-test.yaml",
         "prod": "bill-service/script/k8s/prod/bill-service-deploy-prod.yaml"
@@ -413,6 +420,7 @@
     {
       "repo": "callcenter-service",
       "service": "callcenter-service",
+      "service_port": 8000,
       "yaml": {
         "test": "callcenter-service/script/k8s/test/callcenter-service-deploy-test.yaml",
         "prod": "callcenter-service/script/k8s/prod/callcenter-service-deploy-prod.yaml"
@@ -470,6 +478,7 @@
     {
       "repo": "cash-gio",
       "service": "cash-gio",
+      "service_port": 8000,
       "yaml": {
         "test": "cash-gio/script/k8s/test/deploy-test.yaml",
         "prod": "cash-gio/script/k8s/prod/deploy-prod.yaml"
@@ -527,6 +536,7 @@
     {
       "repo": "channel-manage",
       "service": "channel-manage",
+      "service_port": 8000,
       "yaml": {
         "test": "channel-manage/script/k8s/test/deploy-test.yaml",
         "prod": "channel-manage/script/k8s/prod/deploy-prod.yaml"
@@ -584,6 +594,7 @@
     {
       "repo": "data-enrich",
       "service": "data-enrich",
+      "service_port": 8000,
       "yaml": {
         "test": "data-enrich/script/k8s/test/deploy-test.yaml",
         "prod": "data-enrich/script/k8s/prod/deploy-prod.yaml"
@@ -641,6 +652,7 @@
     {
       "repo": "fin-service",
       "service": "fin-batch",
+      "service_port": 8100,
       "yaml": {
         "test": "fin-service/script/k8s/test/fin-batch/fin-batch-deploy.yaml",
         "prod": "fin-service/script/k8s/prod/fin-batch/fin-batch-deploy.yaml"
@@ -698,6 +710,7 @@
     {
       "repo": "fin-service",
       "service": "fin-core-service",
+      "service_port": 8000,
       "yaml": {
         "test": "fin-service/script/k8s/test/fin-core-service/fin-core-service-deploy.yaml",
         "prod": "fin-service/script/k8s/prod/fin-core-service/fin-core-service-deploy.yaml"
@@ -755,6 +768,7 @@
     {
       "repo": "invoice-service",
       "service": "invoice-service",
+      "service_port": 8000,
       "yaml": {
         "test": "invoice-service/script/k8s/test/invoice-service/invoice-service-deploy.yaml",
         "prod": "invoice-service/script/k8s/prod/invoice-service/invoice-service-deploy.yaml"
@@ -812,6 +826,7 @@
     {
       "repo": "lite-rule-service",
       "service": "lite-rule-service",
+      "service_port": 8000,
       "yaml": {
         "test": "lite-rule-service/script/k8s/test/lite-rule-service-deploy-test.yaml",
         "prod": "lite-rule-service/script/k8s/prod/lite-rule-service-deploy-prod.yaml"
@@ -869,6 +884,7 @@
     {
       "repo": "ocr-verify-service",
       "service": "ocr-verify-service",
+      "service_port": 8000,
       "yaml": {
         "test": "ocr-verify-service/script/k8s/test/ocr-verify-service-deploy-test.yaml",
         "prod": "ocr-verify-service/script/k8s/prod/ocr-verify-service-deploy-prod.yaml"
@@ -926,6 +942,7 @@
     {
       "repo": "post-loan-app",
       "service": "post-loan-app",
+      "service_port": 8000,
       "yaml": {
         "test": "post-loan-app/script/k8s/test/post-loan-app-deploy-test.yaml",
         "prod": "post-loan-app/script/k8s/prod/post-loan-app-deploy-prod.yaml"
@@ -983,6 +1000,7 @@
     {
       "repo": "backend-api",
       "service": "lq-config",
+      "service_port": 8080,
       "yaml": {
         "test": "backend-api/script/k8s/lq-config/test/lq-config-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-config/prod/lq-config-deploy-prod.yaml"
@@ -1040,6 +1058,7 @@
     {
       "repo": "backend-api",
       "service": "lq-consumer",
+      "service_port": 8080,
       "yaml": {
         "test": "backend-api/script/k8s/lq-consumer/test/lq-consumer-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-consumer/prod/lq-consumer-deploy-prod.yaml"
@@ -1097,6 +1116,7 @@
     {
       "repo": "backend-api",
       "service": "lq-enterprise",
+      "service_port": 8080,
       "yaml": {
         "test": "backend-api/script/k8s/lq-enterprise/test/lq-enterprise-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-enterprise/prod/lq-enterprise-deploy-prod.yaml"
@@ -1154,6 +1174,7 @@
     {
       "repo": "backend-api",
       "service": "lq-items",
+      "service_port": 8080,
       "yaml": {
         "test": "backend-api/script/k8s/lq-items/test/lq-items-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-items/prod/lq-items-deploy-prod.yaml"
@@ -1211,6 +1232,7 @@
     {
       "repo": "backend-api",
       "service": "lq-log",
+      "service_port": 8080,
       "yaml": {
         "test": "backend-api/script/k8s/lq-log/test/lq-log-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-log/prod/lq-log-deploy-prod.yaml"
@@ -1268,6 +1290,7 @@
     {
       "repo": "backend-api",
       "service": "lq-logistics",
+      "service_port": 8080,
       "yaml": {
         "test": "backend-api/script/k8s/lq-logistics/test/lq-logistics-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-logistics/prod/lq-logistics-deploy-prod.yaml"
@@ -1325,6 +1348,7 @@
     {
       "repo": "backend-api",
       "service": "lq-member-benefit",
+      "service_port": 8000,
       "yaml": {
         "test": "backend-api/script/k8s/lq-member-benefit/test/lq-member-benefit-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-member-benefit/prod/lq-member-benefit-deploy-prod.yaml"
@@ -1382,6 +1406,7 @@
     {
       "repo": "backend-api",
       "service": "lq-openplatform",
+      "service_port": 8000,
       "yaml": {
         "test": "backend-api/script/k8s/lq-openplatform/test/lq-openplatform-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-openplatform/prod/lq-openplatform-deploy-prod.yaml"
@@ -1439,6 +1464,7 @@
     {
       "repo": "backend-api",
       "service": "lq-operation",
+      "service_port": 8080,
       "yaml": {
         "test": "backend-api/script/k8s/lq-operation/test/lq-operation-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-operation/prod/lq-operation-deploy-prod.yaml"
@@ -1496,6 +1522,7 @@
     {
       "repo": "backend-api",
       "service": "lq-promotion",
+      "service_port": 8080,
       "yaml": {
         "test": "backend-api/script/k8s/lq-promotion/test/lq-promotion-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-promotion/prod/lq-promotion-deploy-prod.yaml"
@@ -1553,6 +1580,7 @@
     {
       "repo": "backend-api",
       "service": "lq-push",
+      "service_port": 8080,
       "yaml": {
         "test": "backend-api/script/k8s/lq-push/test/lq-push-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-push/prod/lq-push-deploy-prod.yaml"
@@ -1610,6 +1638,7 @@
     {
       "repo": "backend-api",
       "service": "lq-settlement",
+      "service_port": 8080,
       "yaml": {
         "test": "backend-api/script/k8s/lq-settlement/test/lq-settlement-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-settlement/prod/lq-settlement-deploy-prod.yaml"
@@ -1667,6 +1696,7 @@
     {
       "repo": "backend-api",
       "service": "lq-statistics",
+      "service_port": 8000,
       "yaml": {
         "test": "backend-api/script/k8s/lq-statistics/test/lq-statistics-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-statistics/prod/lq-statistics-deploy-prod.yaml"
@@ -1724,6 +1754,7 @@
     {
       "repo": "backend-api",
       "service": "lq-store",
+      "service_port": 8000,
       "yaml": {
         "test": "backend-api/script/k8s/lq-store/test/lq-store-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-store/prod/lq-store-deploy-prod.yaml"
@@ -1781,6 +1812,7 @@
     {
       "repo": "backend-api",
       "service": "lq-supplier",
+      "service_port": 8000,
       "yaml": {
         "test": "backend-api/script/k8s/lq-supplier/test/lq-supplier-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-supplier/prod/lq-supplier-deploy-prod.yaml"
@@ -1838,6 +1870,7 @@
     {
       "repo": "backend-api",
       "service": "lq-thirdpart",
+      "service_port": 8000,
       "yaml": {
         "test": "backend-api/script/k8s/lq-thirdpart/test/lq-thirdpart-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-thirdpart/prod/lq-thirdpart-deploy-prod.yaml"
@@ -1895,6 +1928,7 @@
     {
       "repo": "backend-api",
       "service": "lq-trade",
+      "service_port": 8000,
       "yaml": {
         "test": "backend-api/script/k8s/lq-trade/test/lq-trade-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-trade/prod/lq-trade-deploy-prod.yaml"
@@ -1952,6 +1986,7 @@
     {
       "repo": "backend-api",
       "service": "lq-user",
+      "service_port": 8080,
       "yaml": {
         "test": "backend-api/script/k8s/lq-user/test/lq-user-deploy-test.yaml",
         "prod": "backend-api/script/k8s/lq-user/prod/lq-user-deploy-prod.yaml"
@@ -2009,6 +2044,7 @@
     {
       "repo": "backend-api",
       "service": "ruoyi-auth",
+      "service_port": 8080,
       "yaml": {
         "test": "backend-api/script/k8s/ruoyi-auth/test/ruoyi-auth-deploy-test.yaml",
         "prod": "backend-api/script/k8s/ruoyi-auth/prod/ruoyi-auth-deploy-prod.yaml"
@@ -2066,6 +2102,7 @@
     {
       "repo": "backend-api",
       "service": "ruoyi-file",
+      "service_port": 8000,
       "yaml": {
         "test": "backend-api/script/k8s/ruoyi-file/test/ruoyi-file-deploy-test.yaml",
         "prod": "backend-api/script/k8s/ruoyi-file/prod/ruoyi-file-deploy-prod.yaml"
@@ -2123,6 +2160,7 @@
     {
       "repo": "backend-api",
       "service": "ruoyi-gateway",
+      "service_port": 8000,
       "yaml": {
         "test": "backend-api/script/k8s/ruoyi-gateway/test/ruoyi-gateway-deploy-test.yaml",
         "prod": "backend-api/script/k8s/ruoyi-gateway/prod/ruoyi-gateway-deploy-prod.yaml"
@@ -2180,6 +2218,7 @@
     {
       "repo": "backend-api",
       "service": "ruoyi-gen",
+      "service_port": 8000,
       "yaml": {
         "test": "backend-api/script/k8s/ruoyi-gen/test/ruoyi-gen-deploy-test.yaml",
         "prod": "backend-api/script/k8s/ruoyi-gen/prod/ruoyi-gen-deploy-prod.yaml"
@@ -2237,6 +2276,7 @@
     {
       "repo": "backend-api",
       "service": "ruoyi-system",
+      "service_port": 8000,
       "yaml": {
         "test": "backend-api/script/k8s/ruoyi-system/test/ruoyi-system-deploy-test.yaml",
         "prod": "backend-api/script/k8s/ruoyi-system/prod/ruoyi-system-deploy-prod.yaml"
@@ -2294,6 +2334,7 @@
     {
       "repo": "backend-api",
       "service": "xxl-job-executor",
+      "service_port": 8000,
       "yaml": {
         "test": "backend-api/script/k8s/xxl-job-executor/test/xxl-job-executor-deploy-test.yaml",
         "prod": "backend-api/script/k8s/xxl-job-executor/prod/xxl-job-executor-deploy-prod.yaml"

@@ -329,6 +329,15 @@ class YAMLGenerator:
         requests = resources.get('requests') or {}
         java_opts = svc.get('java_opts') or {}
         conv = repo_k8s_map.conventions()
+        # 端口以每个服务真实监听为准（map 中 service_port）：模板的容器端口、Service targetPort、
+        # 三个探针都用它，避免统一 8080 导致 8000/8010/8100 的服务一直 NotReady
+        service_port = str(
+            svc.get('service_port')
+            or (probes.get('startup') or {}).get('port')
+            or (probes.get('readiness') or {}).get('port')
+            or conv.get('service_port')
+            or 8080
+        )
         return {
             'app_name': f'{project}-{service}',
             'namespace': f'{project}-{env}-service',
@@ -336,7 +345,7 @@ class YAMLGenerator:
             'apollo_meta': f'http://apollo-configservice.{project}-{env}-middleware.svc.cluster.local:8080',
             'image': image,
             'image_pull_secret': project_config.get('image_pull_secret') or svc.get('pull_secret') or conv.get('pull_secret', 'harbor'),
-            'service_port': str(conv.get('service_port') or 8080),
+            'service_port': service_port,
             'service_expose_port': str(conv.get('service_expose_port') or 80),
             'tag': tag,
             'replicas': str(svc.get('replicas') or 1),
