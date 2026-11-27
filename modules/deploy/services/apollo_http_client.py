@@ -9,6 +9,7 @@ Apollo Portal 客户端（服务信息页 Apollo 配置查看/修改用）
 """
 import os
 import threading
+import time
 
 import yaml
 
@@ -16,6 +17,37 @@ from modules.system.settings_service import get_setting
 
 _HTTP_TIMEOUT = 15
 _SESSION_LOCK = threading.Lock()
+_SESSIONS = {}         # base_url -> 已登录 requests.Session（跨请求复用，避免每次重新 signin）
+_PORT_CACHE = {}       # (project, env) -> (node_port, expire_ts)，避免列表/SSE 每帧都查 K8s
+_PORT_CACHE_TTL = 30
+_ENVS_CACHE = {}       # base_url -> (envs, expire_ts)
+_ENVS_TTL = 300
+_APP_CACHE = {}        # (base_url, app_id) -> (app, expire_ts)；只缓存命中的结果
+_APP_TTL = 300
+_APPIDS_CACHE = {}     # base_url -> (appIds, expire_ts)，后缀匹配兜底用
+_APPIDS_TTL = 300
+_RESOLVED_CACHE = {}   # (base_url, project, service) -> (app_id, expire_ts)
+_RESOLVED_TTL = 300
+_NS_CACHE = {}         # (base_url, app_id, env) -> (namespaces, expire_ts)
+_NS_CACHE_TTL = 120
+
+
+def _cache_get(cache, key):
+    item = cache.get(key)
+    if not item:
+        return None
+    if item[1] <= time.time():
+        cache.pop(key, None)
+        return None
+    return item[0]
+
+
+def _cache_set(cache, key, value, ttl):
+    if len(cache) > 256:
+        now = time.time()
+        for k in [k for k, v in cache.items() if v[1] <= now]:
+            cache.pop(k, None)
+    cache[key] = (value, time.time() + ttl)
 
 
 def resolve_apollo_endpoint(project, env):
@@ -38,6 +70,19 @@ def env_has_apollo(project, env):
 
 
 def _find_apollo_portal_node_port(project, env):
+    """优先读本地生成目录；容器部署时 product 卷可能没有该环境产物，回退查 K8s Service"""
+    cache_key = (project, env)
+    cached = _PORT_CACHE.get(cache_key)
+    if cached and cached[1] > time.time():
+        return cached[0]
+    port = _find_portal_port_from_local(project, env)
+    if not port:
+        port = _find_portal_port_from_k8s(project, env)
+    _PORT_CACHE[cache_key] = (port, time.time() + _PORT_CACHE_TTL)
+    return port
+
+
+def _find_portal_port_from_local(project, env):
     from modules.deploy.api.shared import get_output_dir
 
     mw_dir = os.path.join(get_output_dir(), f'{project}-{env}', 'middleware')
@@ -66,41 +111,66 @@ def _find_apollo_portal_node_port(project, env):
     return ''
 
 
+def _find_portal_port_from_k8s(project, env):
+    try:
+        from modules.deploy.services.kube_client import list_k8s_services
+        for svc in list_k8s_services(f'{project}-{env}-middleware'):
+            if svc.get('name') != 'apollo-portal':
+                continue
+            for p in svc.get('ports') or []:
+                if p.get('node_port'):
+                    return str(p['node_port'])
+    except Exception:
+        pass
+    return ''
+
+
 class ApolloHttpClient:
-    """Apollo Portal 客户端（单环境单地址）"""
+    """Apollo Portal 客户端（单环境单地址；会话与查询结果按地址进程级缓存）"""
 
     def __init__(self, base_url):
         self.base_url = base_url.rstrip('/')
-        self.username = get_setting('apollo_user', '') or 'apollo'
-        self.password = get_setting('apollo_pass', '') or 'admin'
         self.session = None
         self._env_name = ''
-        self._env_cache = None
+
+    @property
+    def username(self):
+        return get_setting('apollo_user', '') or 'apollo'
 
     # ─── 会话 ─────────────────────────────────────────────
 
     def _ensure_session(self):
         if self.session is not None:
             return
-        import requests
-        s = requests.Session()
-        s.trust_env = False
-        try:
-            s.post(
-                f'{self.base_url}/signin',
-                data={'username': self.username, 'password': self.password},
-                allow_redirects=False,
-                timeout=_HTTP_TIMEOUT,
-            )
-            check = s.get(f'{self.base_url}/apps', allow_redirects=False, timeout=_HTTP_TIMEOUT)
-        except Exception as e:
-            raise ValueError(f'连接 Apollo Portal 失败：{e}')
-        if check.status_code in (301, 302):
-            raise ValueError('Apollo Portal 登录失败，请检查系统设置中的 apollo_user/apollo_pass')
         with _SESSION_LOCK:
-            self.session = s
+            shared = _SESSIONS.get(self.base_url)
+            if shared is None:
+                import requests
+                s = requests.Session()
+                s.trust_env = False
+                try:
+                    resp = s.post(
+                        f'{self.base_url}/signin',
+                        data={
+                            'username': self.username,
+                            'password': get_setting('apollo_pass', '') or 'admin',
+                        },
+                        allow_redirects=False,
+                        timeout=_HTTP_TIMEOUT,
+                    )
+                except Exception as e:
+                    raise ValueError(f'连接 Apollo Portal 失败：{e}')
+                # 登录成功 302 到 /；失败 302 到 /signin?#/error
+                location = resp.headers.get('Location') or ''
+                if resp.status_code in (301, 302) and ('error' in location or 'signin' in location):
+                    raise ValueError('Apollo Portal 登录失败，请检查系统设置中的 apollo_user/apollo_pass')
+                shared = s
+                _SESSIONS[self.base_url] = s
+            self.session = shared
 
     def reset_session(self):
+        with _SESSION_LOCK:
+            _SESSIONS.pop(self.base_url, None)
         self.session = None
 
     def _request(self, method, path, **kwargs):
@@ -131,12 +201,15 @@ class ApolloHttpClient:
         """把平台环境名映射为 Portal 环境名（TEST/DEV/...）"""
         if self._env_name:
             return self._env_name
-        resp = self._request('GET', '/envs')
-        if resp.status_code != 200:
-            raise ValueError(self._error(resp, '读取 Apollo 环境列表'))
-        envs = resp.json() or []
-        if not envs:
-            raise ValueError('Apollo Portal 未配置任何环境')
+        envs = _cache_get(_ENVS_CACHE, self.base_url)
+        if envs is None:
+            resp = self._request('GET', '/envs')
+            if resp.status_code != 200:
+                raise ValueError(self._error(resp, '读取 Apollo 环境列表'))
+            envs = resp.json() or []
+            if not envs:
+                raise ValueError('Apollo Portal 未配置任何环境')
+            _cache_set(_ENVS_CACHE, self.base_url, envs, _ENVS_TTL)
         want = (env_name or '').upper().replace('-', '_')
         for e in envs:
             if e == want or e.upper() == want:
@@ -150,11 +223,16 @@ class ApolloHttpClient:
         return self._env_name
 
     def find_app(self, app_id):
+        key = (self.base_url, app_id)
+        cached = _cache_get(_APP_CACHE, key)
+        if cached is not None:
+            return cached
         resp = self._request('GET', '/apps', params={'appIds': app_id})
         if resp.status_code != 200:
             raise ValueError(self._error(resp, '查询 Apollo 应用'))
         for app in resp.json() or []:
             if app.get('appId') == app_id and not app.get('isDeleted'):
+                _cache_set(_APP_CACHE, key, app, _APP_TTL)
                 return app
         return None
 
@@ -165,25 +243,47 @@ class ApolloHttpClient:
         仓库服务名（bill-config）：先按原样匹配，再尝试去掉 {project}- 前缀；
         仍未命中时按「appId 为服务名后缀」匹配（取最长，避免 bill-config/config 歧义）。
         """
+        key = (self.base_url, project, service)
+        cached = _cache_get(_RESOLVED_CACHE, key)
+        if cached is not None:
+            return cached
         candidates = [service]
         prefix = f'{project}-'
         if service.startswith(prefix) and len(service) > len(prefix):
             candidates.append(service[len(prefix):])
         for app_id in candidates:
             if self.find_app(app_id):
+                _cache_set(_RESOLVED_CACHE, key, app_id, _RESOLVED_TTL)
                 return app_id
+        matches = [
+            a for a in self._all_app_ids()
+            if a == service or service.endswith('-' + a)
+        ]
+        picked = max(matches, key=len) if matches else ''
+        if picked:
+            _cache_set(_RESOLVED_CACHE, key, picked, _RESOLVED_TTL)
+        return picked
+
+    def _all_app_ids(self):
+        cached = _cache_get(_APPIDS_CACHE, self.base_url)
+        if cached is not None:
+            return cached
         resp = self._request('GET', '/apps')
         if resp.status_code != 200:
-            return ''
-        matches = [
+            return []
+        app_ids = [
             a.get('appId', '') for a in resp.json() or []
             if a.get('appId') and not a.get('isDeleted')
-            and (a['appId'] == service or service.endswith('-' + a['appId']))
         ]
-        return max(matches, key=len) if matches else ''
+        _cache_set(_APPIDS_CACHE, self.base_url, app_ids, _APPIDS_TTL)
+        return app_ids
 
     def list_namespaces(self, app_id, env):
-        """返回 [{name, namespaceId}]，按 Portal 返回顺序"""
+        """返回 [{name, namespaceId}]，按 Portal 返回顺序（Portal 会带回全部 items，只缓存不频繁刷新）"""
+        key = (self.base_url, app_id, env)
+        cached = _cache_get(_NS_CACHE, key)
+        if cached is not None:
+            return cached
         resp = self._request('GET', f'/apps/{app_id}/envs/{env}/clusters/default/namespaces')
         if resp.status_code != 200:
             # 应用存在但没有任何 namespace 时 Portal 返回 400 namespace not exist
@@ -199,7 +299,13 @@ class ApolloHttpClient:
                     'namespaceId': base.get('id', 0),
                     'isPublic': bool(bo.get('isPublic')),
                 })
+        if result:
+            _cache_set(_NS_CACHE, key, result, _NS_CACHE_TTL)
         return result
+
+    def cached_namespaces(self, app_id, env):
+        """已缓存的 namespace 列表；未缓存返回 None（用于不触发远程请求的校验）"""
+        return _cache_get(_NS_CACHE, (self.base_url, app_id, env))
 
     # ─── 配置项 ───────────────────────────────────────────
 

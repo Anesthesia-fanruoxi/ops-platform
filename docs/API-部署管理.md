@@ -61,6 +61,9 @@
 | GET | `/api/deploy/service-info/yaml` | 部署 YAML |
 | GET | `/api/deploy/service-info/nacos/config` | Nacos 配置查看 |
 | POST | `/api/deploy/service-info/nacos/config` | Nacos 配置发布 |
+| GET | `/api/deploy/service-info/apollo/config` | Apollo 配置查看（只取指定 namespace 的 items） |
+| GET | `/api/deploy/service-info/apollo/namespaces` | Apollo 应用 namespace 列表（弹窗下拉） |
+| POST | `/api/deploy/service-info/apollo/config` | Apollo 配置发布（diff 后发布 release） |
 
 ## 6. Harbor `/api/harbor`
 

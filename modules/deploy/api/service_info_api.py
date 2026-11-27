@@ -469,7 +469,11 @@ def _build_apollo_client(project, env):
 
 @require_permission('page:service_info')
 def apollo_config_detail():
-    """读取服务（appId 由服务名解析，兼容项目前缀）在 Apollo 指定 namespace 的全部 key/value"""
+    """读取服务（appId 由服务名解析，兼容项目前缀）在指定 namespace 的配置文本
+
+    只拉该 namespace 的 items，不再顺带拉全量 namespace 列表（Portal 会带回每个
+    namespace 的全部 items，几百 KB）；namespace 下拉走 /apollo/namespaces。
+    """
     project = request.args.get('project', '')
     env = request.args.get('env', '')
     service = request.args.get('service', '')
@@ -484,24 +488,18 @@ def apollo_config_detail():
         app_id = client.resolve_app_id(project, service)
         if not app_id:
             return error_response(f'Apollo 环境 {portal_env} 中不存在应用 {service}', 404)
-        namespaces = client.list_namespaces(app_id, portal_env)
-        if not namespaces:
-            return error_response(f'Apollo 应用 {app_id} 在环境 {portal_env} 下没有 namespace', 404)
-        names = [n['name'] for n in namespaces]
-        if not namespace:
-            namespace = 'application' if 'application' in names else names[0]
-        elif namespace not in names:
+        # 仅在列表已缓存时校验，避免为了校验再把全量 namespace 拉一遍
+        cached_ns = client.cached_namespaces(app_id, portal_env)
+        if namespace and cached_ns and namespace not in [n['name'] for n in cached_ns]:
             return error_response(f'Apollo 应用 {app_id} 不存在 namespace {namespace}', 404)
+        namespace = namespace or 'application'
         items = client.get_items(app_id, portal_env, namespace)
         from modules.deploy.services.apollo_http_client import items_to_text
         content = items_to_text(items)
-        current_ns = next((n for n in namespaces if n['name'] == namespace), {})
         return success_response({
             'appId': app_id,
             'env': portal_env,
             'namespace': namespace,
-            'isPublic': bool(current_ns.get('isPublic')),
-            'namespaces': namespaces,
             'itemCount': len(items),
             'content': content,
         })
@@ -509,6 +507,36 @@ def apollo_config_detail():
         return error_response(str(e), 502)
     except Exception as e:
         return error_response(str(e), 500)
+
+
+@require_permission('page:service_info')
+def apollo_namespaces():
+    """Apollo 应用的 namespace 列表（弹窗下拉用，独立接口；结果在客户端侧缓存）"""
+    project = request.args.get('project', '')
+    env = request.args.get('env', '')
+    service = request.args.get('service', '')
+    if not project or not env or not service:
+        return error_response('缺少参数 project / env / service', 400)
+
+    client, portal_env, err = _build_apollo_client(project, env)
+    if err:
+        return err
+    try:
+        app_id = client.resolve_app_id(project, service)
+        if not app_id:
+            return error_response(f'Apollo 环境 {portal_env} 中不存在应用 {service}', 404)
+        namespaces = client.list_namespaces(app_id, portal_env)
+    except ValueError as e:
+        return error_response(str(e), 502)
+    except Exception as e:
+        return error_response(str(e), 500)
+    names = [n['name'] for n in namespaces]
+    return success_response({
+        'appId': app_id,
+        'env': portal_env,
+        'namespaces': namespaces,
+        'default': 'application' if 'application' in names else (names[0] if names else ''),
+    })
 
 
 @require_permission('op:apollo_config_update')
